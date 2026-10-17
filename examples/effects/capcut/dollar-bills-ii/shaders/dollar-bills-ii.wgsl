@@ -4,7 +4,7 @@
 const FRAMES: f32 = 52.0;
 // Frame at which the picture underneath switches from the first clip to the second.
 const CUT_FRAME: f32 = 30.0;
-// Height / width of a note.
+// Height / width of a note (the $100 bill images are 512x216).
 const NOTE_ASPECT: f32 = 0.421875;
 const BURST_COUNT: i32 = 56;
 const RAIN_COUNT: i32 = 22;
@@ -29,10 +29,17 @@ fn paint_note(under: vec3f, s: vec2f, center: vec2f, width: f32, angle: f32, tum
     let cover = clamp(min(rim.x, rim.y) + 0.5, 0.0, 1.0) * opacity;
     if (cover <= 0.0) { return under; }
     var uv = local / half_size * 0.5 + 0.5;
-    if (tumble < 0.0) { uv.x = 1.0 - uv.x; }
+    // Both note images are 512 px wide.
     let lod = max(log2(512.0 / max(width * squeeze * side, 1.0)), 0.0) + blur;
     let shade = 0.72 + 0.28 * squeeze;
-    let note = textureSampleLevel(bill, smp, uv, lod).rgb * shade;
+    // Turned past edge-on, the note shows its back, seen from behind (mirrored).
+    var face: vec3f;
+    if (tumble < 0.0) {
+        face = textureSampleLevel(bill_back, smp, vec2f(1.0 - uv.x, uv.y), lod).rgb;
+    } else {
+        face = textureSampleLevel(bill_front, smp, uv, lod).rgb;
+    }
+    let note = face * shade;
     return mix(under, note, cover);
 }
 

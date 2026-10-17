@@ -1,4 +1,9 @@
-bill.png - generic banknote drawn procedurally by make-bill.py in this folder (shapes, sine
-patterns and noise; no photo, scan or real currency artwork). Author: FFmpegGpuFilter
-contributors. License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
-The digits and lettering are rendered with Pillow's built-in default font (Aileron, CC0).
+bill-front.png, bill-back.png - front and back of the US $100 Federal Reserve Note, scaled
+down to 512x216.
+Author: Bureau of Engraving and Printing (United States government work).
+License: Public domain (PD-USGov).
+Sources:
+  https://commons.wikimedia.org/wiki/File:Obverse_of_the_series_2009_$100_Federal_Reserve_Note.jpg
+  https://commons.wikimedia.org/wiki/File:Reverse_of_the_series_2013_$100_Federal_Reserve_Note.jpg
+US law (31 CFR 411) only limits printed reproductions of currency; use in film and video
+is allowed.

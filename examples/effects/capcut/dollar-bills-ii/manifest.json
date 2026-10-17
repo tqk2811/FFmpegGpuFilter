@@ -27,8 +27,13 @@
   ],
   "textures": [
     {
-      "name": "bill",
-      "path": "textures/bill.png",
+      "name": "bill_front",
+      "path": "textures/bill-front.png",
+      "mipmaps": true
+    },
+    {
+      "name": "bill_back",
+      "path": "textures/bill-back.png",
       "mipmaps": true
     }
   ],
