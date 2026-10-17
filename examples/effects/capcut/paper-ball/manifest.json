@@ -1,0 +1,39 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.paper-ball",
+  "name": "Paper Ball",
+  "version": "1.0.0",
+  "description": "A crumpled paper ball lands on the first clip, unfolds into a sheet and tears open onto the second clip. Recreation of the CapCut \"Paper Ball\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "textures": [
+    {
+      "name": "crease",
+      "path": "textures/crumple.png"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/paper-ball.wgsl"
+    }
+  ]
+}

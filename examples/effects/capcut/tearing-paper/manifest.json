@@ -1,0 +1,39 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.tearing-paper",
+  "name": "Tearing Paper",
+  "version": "1.0.0",
+  "description": "A ragged tear runs across the middle of the first clip, then the paper shreds apart from the tear outward to reveal the second clip. Recreation of the CapCut \"Tearing Paper\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    },
+    {
+      "name": "overlap",
+      "type": "bool",
+      "default": false,
+      "description": "false (default) = like CapCut: the first clip plays both roles for the first half, the second clip for the second half (the picture jumps at the midpoint). true = the second clip shows through the tear in the first one all the way through"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/tearing-paper.wgsl"
+    }
+  ]
+}

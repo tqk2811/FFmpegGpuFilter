@@ -1,0 +1,4 @@
+bill.png - generic banknote drawn procedurally by make-bill.py in this folder (shapes, sine
+patterns and noise; no photo, scan or real currency artwork). Author: FFmpegGpuFilter
+contributors. License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+The digits and lettering are rendered with Pillow's built-in default font (Aileron, CC0).

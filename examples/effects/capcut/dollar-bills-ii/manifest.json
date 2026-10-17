@@ -1,0 +1,40 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.capcut.dollar-bills-ii",
+  "name": "Dollar Bills II",
+  "version": "1.0.0",
+  "description": "A burst of banknotes explodes from the centre of the first clip, one note flies into the camera to hide the cut, and notes rain down over the second clip. Recreation of the CapCut \"Dollar Bills II\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "textures": [
+    {
+      "name": "bill",
+      "path": "textures/bill.png",
+      "mipmaps": true
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/dollar-bills-ii.wgsl"
+    }
+  ]
+}

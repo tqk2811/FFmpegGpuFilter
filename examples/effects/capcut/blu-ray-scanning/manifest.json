@@ -1,0 +1,74 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.blu-ray-scanning",
+  "name": "Blu-ray Scanning",
+  "version": "1.0.0",
+  "description": "A glowing blue scan line sweeps from the foreground to the background of the first clip, rippling the picture as it passes and leaving the second clip behind it. Recreation of the CapCut \"Blu-ray Scanning\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/depth.wgsl",
+      "inputs": ["first"],
+      "output": "depth"
+    },
+    {
+      "shader": "shaders/glow-h.wgsl",
+      "inputs": ["depth"],
+      "output": "glow_a"
+    },
+    {
+      "shader": "shaders/glow-v.wgsl",
+      "inputs": ["glow_a"],
+      "output": "glow_b"
+    },
+    {
+      "shader": "shaders/glow-h2.wgsl",
+      "inputs": ["glow_b"],
+      "output": "glow_c"
+    },
+    {
+      "shader": "shaders/glow-v2.wgsl",
+      "inputs": ["glow_c"],
+      "output": "glow"
+    },
+    {
+      "shader": "shaders/blend.wgsl",
+      "inputs": ["first", "second", "depth", "glow"],
+      "output": "blended"
+    },
+    {
+      "shader": "shaders/displace.wgsl",
+      "inputs": ["blended", "depth"],
+      "output": "displaced"
+    },
+    {
+      "shader": "shaders/soften-x.wgsl",
+      "inputs": ["displaced"],
+      "output": "soft_x"
+    },
+    {
+      "shader": "shaders/finish.wgsl",
+      "inputs": ["first", "second", "soft_x"]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+textures/crumple.png
+
+Shading baked from the normal map of "Paper 003" by ambientCG (Lennart Demes),
+https://ambientcg.com/view?id=Paper003
+License: CC0 1.0 Universal (public domain), https://docs.ambientcg.com/license/
+
+Changes: normal map resized to 512x512 and lit from the top left into a grey shading image.
