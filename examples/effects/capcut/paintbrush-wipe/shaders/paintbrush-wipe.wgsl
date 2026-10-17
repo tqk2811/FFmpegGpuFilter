@@ -19,7 +19,7 @@ fn mix_bits(v: u32) -> u32 {
 
 fn lattice(c: vec2f, layer: u32) -> f32 {
     let i = vec2i(c);
-    let key = mix_bits(u32(i.x + 4096) * 73856093u ^ u32(i.y + 4096) * 19349663u ^ layer * 83492791u);
+    let key = mix_bits((u32(i.x + 4096) * 73856093u) ^ (u32(i.y + 4096) * 19349663u) ^ (layer * 83492791u));
     return f32(key >> 8u) / 8388608.0 - 1.0;
 }
 

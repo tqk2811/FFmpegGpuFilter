@@ -1,0 +1,58 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.dispersion-trail",
+  "name": "Dispersion Trail",
+  "version": "1.0.0",
+  "description": "The first clip blooms into a white glow, a curtain of blurred rainbow light streaks drifts diagonally across the frame, then the second clip appears through a fading glow. Recreation of the CapCut \"Dispersion Trail\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/glow-h.wgsl",
+      "entry": "blur_rg",
+      "inputs": ["first", "second"],
+      "output": "glow_h_rg"
+    },
+    {
+      "shader": "shaders/glow-h.wgsl",
+      "entry": "blur_b",
+      "inputs": ["first", "second"],
+      "output": "glow_h_b"
+    },
+    {
+      "shader": "shaders/glow-v.wgsl",
+      "entry": "blur_rg",
+      "inputs": ["glow_h_rg", "glow_h_b"],
+      "output": "glow_rg"
+    },
+    {
+      "shader": "shaders/glow-v.wgsl",
+      "entry": "blur_b",
+      "inputs": ["glow_h_rg", "glow_h_b"],
+      "output": "glow_b"
+    },
+    {
+      "shader": "shaders/finish.wgsl",
+      "inputs": ["first", "second", "glow_rg", "glow_b"]
+    }
+  ]
+}

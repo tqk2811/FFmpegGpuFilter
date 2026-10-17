@@ -30,7 +30,7 @@ fn mix_bits(v: u32) -> u32 {
 
 // Random 0..1 value for one square cell of one layer in one map frame.
 fn cell_value(cell: vec2i, layer: u32, frame: u32) -> f32 {
-    let key = mix_bits(u32(cell.x) * 73856093u ^ u32(cell.y) * 19349663u ^ (frame * 4u + layer) * 83492791u);
+    let key = mix_bits((u32(cell.x) * 73856093u) ^ (u32(cell.y) * 19349663u) ^ ((frame * 4u + layer) * 83492791u));
     return f32(key >> 8u) / 16777216.0;
 }
 
