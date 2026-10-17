@@ -1,0 +1,39 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.geometry",
+  "name": "Geometry",
+  "version": "1.0.0",
+  "description": "Flat geometric shapes - blocks, a circle that breaks into a spinning pinwheel and corner wedges - slide, shrink and break apart to reveal the second clip, while a hand-drawn chalk trigonometry sketch writes itself over the frame. Recreation of the CapCut \"Geometry\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "textures": [
+    {
+      "name": "chalk",
+      "path": "textures/chalk.png"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/geometry.wgsl"
+    }
+  ]
+}

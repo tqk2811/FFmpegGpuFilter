@@ -1,0 +1,11 @@
+textures/chalk.png
+
+Original artwork generated for this effect by a script (circle, axes, lines and labels
+drawn programmatically); it is not taken from CapCut. Channels: R = chalk coverage,
+G = first frame a stroke is visible (x 8), B = frame it is rubbed out (x 8).
+
+Labels are rendered with the Caveat font:
+  Source:  https://github.com/google/fonts/tree/main/ofl/caveat
+  Author:  The Caveat Project Authors (https://github.com/googlefonts/caveat)
+  License: SIL Open Font License 1.1 (https://openfontlicense.org)
+The image itself is released under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).

@@ -1,0 +1,5 @@
+bubble.png - "Happy New Year!!!" chat bubble, drawn for this effect by a script (Pillow).
+Author: tqk2811 (FFmpegGpuFilter contributors).
+License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+Font: Aileron Regular, the default font bundled with Pillow, CC0 1.0
+  (https://github.com/python-pillow/Pillow, https://www.fontsquirrel.com/fonts/aileron).
