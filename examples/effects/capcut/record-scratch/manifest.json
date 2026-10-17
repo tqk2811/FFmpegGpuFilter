@@ -1,0 +1,74 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.record-scratch",
+  "name": "Record Scratch",
+  "version": "1.0.0",
+  "description": "The first clip is shoved sideways with a bounce while the second slides in, smeared into bright light trails under a pincushion lens and a centre pinch, with twinkling dust specks. Recreation of the CapCut \"Record Scratch\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/dust-first.wgsl",
+      "inputs": [
+        "first"
+      ],
+      "output": "dust_first"
+    },
+    {
+      "shader": "shaders/dust-second.wgsl",
+      "inputs": [
+        "second"
+      ],
+      "output": "dust_second"
+    },
+    {
+      "shader": "shaders/slide.wgsl",
+      "inputs": [
+        "dust_first",
+        "dust_second"
+      ],
+      "output": "slid"
+    },
+    {
+      "shader": "shaders/lens.wgsl",
+      "inputs": [
+        "slid"
+      ],
+      "output": "lensed"
+    },
+    {
+      "shader": "shaders/smooth.wgsl",
+      "inputs": [
+        "lensed"
+      ],
+      "output": "smoothed"
+    },
+    {
+      "shader": "shaders/pinch.wgsl",
+      "inputs": [
+        "smoothed",
+        "first",
+        "second"
+      ]
+    }
+  ]
+}
