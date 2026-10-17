@@ -284,3 +284,9 @@ Vấn đề: với `passthrough=off` (hoặc khi không gắn nhãn được), g
 ### [Thấp] Frame YUV không có tag màu: gpufx đoán matrix/range khác FFmpeg
 
 Vấn đề: đưa file yuv thô không gắn `colorspace`/`range` qua `gpufx_upload` → `gpufx_download` chỉ đạt khoảng 25 dB so với nguồn; gắn `setparams=range=tv:colorspace=bt709` thì lên khoảng 42 dB (bài đo "Filter nặng hơn" trong `docs/BENCHMARK-vi.md`). Vị trí: chỗ chọn matrix/range khi frame có `AVCOL_SPC_UNSPECIFIED`/`AVCOL_RANGE_UNSPECIFIED` trong `ffmpeg/vf_gpufx.c` và phần chuyển YUV của gpufx-core. Nên làm: khi thiếu tag thì mặc định giống swscale (BT.601 cho SD, BT.709 cho HD, limited range), và thêm test. Ghi ngày 2026-10-15.
+
+### [Thấp] Shader CapCut gọi `smoothstep` với hai cận đảo ngược
+
+- **Vấn đề**: nhiều shader dưới `examples/effects/capcut/` gọi `smoothstep(hi, lo, x)` (edge0 > edge1) để lấy đường dốc xuống, vd `neon-graffiti/shaders/neon-graffiti.wgsl:137`, `glowing-graffiti/shaders/glowing-graffiti.wgsl:51,70,101,106,111,118` và khoảng 8 shader cũ hơn. MSL/GLSL coi kết quả là undefined khi edge0 >= edge1; driver phổ biến vẫn chạy đúng nhưng không bảo đảm trên Metal.
+- **Vì sao nên làm**: đổi sang `1.0 - smoothstep(lo, hi, x)` cho chắc chắn trên mọi backend; kết quả số học không đổi.
+- **Ngày ghi**: 2026-10-18.

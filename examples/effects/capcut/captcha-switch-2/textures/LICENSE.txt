@@ -1,0 +1,6 @@
+text.png - captcha card title and slider hint text; hand.png - pixel-art pointing-hand cursor.
+Both drawn for this effect by a script (Pillow); the hand is an original pixel design.
+Author: tqk2811 (FFmpegGpuFilter contributors).
+License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+Font: Aileron Regular, the default font bundled with Pillow, CC0 1.0
+  (https://github.com/python-pillow/Pillow, https://www.fontsquirrel.com/fonts/aileron).
