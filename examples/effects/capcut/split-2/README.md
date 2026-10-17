@@ -4,11 +4,9 @@ The top and bottom halves slide sideways in opposite directions with motion blur
 
 Recreates the CapCut "Split II" transition (each half follows its own bezier curve; the blur length follows the speed of the half, so set `duration` to the real transition length). Recommended duration: 0.8 s (the CapCut default), e.g. `progress=clip((t-1)/0.8\,0\,1)`.
 
+CapCut feeds this transition one clip at a time (the first clip in both roles for the first half, the second for the rest), so its output jumps at the midpoint. This effect always uses the first clip as the outgoing picture and the second as the incoming one, so it runs smoothly from one to the other.
+
 **Set `duration` to the real transition length in seconds** (the same length the `progress` expression spans). The motion blur is computed per second, so a wrong `duration` gives too much or too little blur.
-
-## Overlap mode
-
-CapCut does not blend the two clips for this transition: it feeds the effect the first clip in both roles while `progress` is below 0.5, and the second clip in both roles from 0.5 on. `overlap=false` (the default) reproduces that, so the output matches CapCut frame for frame, with a jump at the midpoint where the source switches. `overlap=true` uses the first clip as the outgoing picture and the second as the incoming one all the way through, so the halves slide away to uncover the second clip.
 
 ## Inputs
 
@@ -26,7 +24,6 @@ Written inline after the package name: `split-2.zip=name=value`. Several options
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
 | `progress` | float | `0.5` | 0 to 1 | 0 = first clip, 1 = second clip |
-| `overlap` | bool | `false` | | false = like CapCut: one clip in both roles per half (first, then second); true = blend the first clip into the second |
 | `duration` | float | `0.8` | 0.01 to 10 | Real transition length in seconds; must match the `progress` span. Scales the motion blur |
 
 ## Example

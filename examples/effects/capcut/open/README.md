@@ -4,9 +4,7 @@ The first clip splits down the middle and both halves swing open in perspective 
 
 Recreates the CapCut "Open" transition (a doorway: reflection 0.4, perspective 0.4, depth 3). Recommended duration: 0.8 s (the CapCut default), e.g. `progress=clip((t-1)/0.8\,0\,1)`.
 
-## Overlap mode
-
-CapCut does not blend the two clips for this transition: it feeds the effect the first clip in both roles while `progress` is below 0.5, and the second clip in both roles from 0.5 on. `overlap=false` (the default) reproduces that, so the output matches CapCut frame for frame, with a jump at the midpoint where the source switches. `overlap=true` uses the first clip as the outgoing picture and the second as the incoming one all the way through, so the doors open onto the second clip.
+CapCut feeds this transition one clip at a time (the first clip in both roles for the first half, the second for the rest), so its output jumps at the midpoint. This effect always uses the first clip as the outgoing picture and the second as the incoming one, so it runs smoothly from one to the other.
 
 ## Inputs
 
@@ -24,7 +22,6 @@ Written inline after the package name: `open.zip=name=value`. Several options ar
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
 | `progress` | float | `0.5` | 0 to 1 | 0 = first clip, 1 = second clip |
-| `overlap` | bool | `false` | | false = like CapCut: one clip in both roles per half (first, then second); true = blend the first clip into the second |
 
 ## Example
 

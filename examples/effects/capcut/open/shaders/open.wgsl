@@ -7,16 +7,6 @@ const DOOR_TILT: f32 = 0.4;
 // Starting distance of the incoming clip: it begins at 1/3 of its final size.
 const START_DISTANCE: f32 = 3.0;
 
-// With `overlap` off, only one clip feeds the transition at a time: the first clip for
-// the first half of `progress`, the second clip for the rest, in both roles.
-fn outgoing_tex_is_second() -> bool {
-    return params.overlap == 0u && params.progress >= 0.5;
-}
-
-fn incoming_tex_is_first() -> bool {
-    return params.overlap == 0u && params.progress < 0.5;
-}
-
 fn inside_frame(q: vec2f) -> bool {
     return all(q > vec2f(0.0)) && all(q < vec2f(1.0));
 }
@@ -24,13 +14,11 @@ fn inside_frame(q: vec2f) -> bool {
 // Coordinates below run with y pointing up; flip back before sampling.
 fn read_first(q: vec2f) -> vec4f {
     let p = vec2f(q.x, 1.0 - q.y);
-    if (outgoing_tex_is_second()) { return textureSampleLevel(second, smp, p, 0.0); }
     return textureSampleLevel(first, smp, p, 0.0);
 }
 
 fn read_second(q: vec2f) -> vec4f {
     let p = vec2f(q.x, 1.0 - q.y);
-    if (incoming_tex_is_first()) { return textureSampleLevel(first, smp, p, 0.0); }
     return textureSampleLevel(second, smp, p, 0.0);
 }
 

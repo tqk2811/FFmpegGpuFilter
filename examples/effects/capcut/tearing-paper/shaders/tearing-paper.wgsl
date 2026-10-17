@@ -86,13 +86,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     if (params.progress <= 0.0) { gpufx_write(id, vec4f(textureSampleLevel(first, smp, uv, 0.0).rgb, 1.0)); return; }
     if (params.progress >= 1.0) { gpufx_write(id, vec4f(textureSampleLevel(second, smp, uv, 0.0).rgb, 1.0)); return; }
 
-    // With `overlap` off, one clip feeds both sides: the first clip before the midpoint,
-    // the second one after it, so the tear shows the same picture on both sides.
-    var under = textureSampleLevel(second, smp, uv, 0.0).rgb;
-    var over = textureSampleLevel(first, smp, uv, 0.0).rgb;
-    if (params.overlap == 0u) {
-        if (params.progress < 0.5) { under = over; } else { over = under; }
-    }
+    // The first clip is the paper, the second shows through the tear.
+    let under = textureSampleLevel(second, smp, uv, 0.0).rgb;
+    let over = textureSampleLevel(first, smp, uv, 0.0).rgb;
 
     // Cover-fit the sheet onto the frame.
     let fit = max(globals.size.x / SHEET.x, globals.size.y / SHEET.y);

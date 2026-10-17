@@ -4,16 +4,6 @@
 const CURVE_BOTTOM: vec4f = vec4f(0.79, 0.0, 0.17, 0.96);
 const CURVE_TOP: vec4f = vec4f(0.77, 0.06, 0.07, 0.99);
 
-// With `overlap` off, only one clip feeds the transition at a time: the first clip for
-// the first half of `progress`, the second clip for the rest, in both roles.
-fn outgoing_tex_is_second() -> bool {
-    return params.overlap == 0u && params.progress >= 0.5;
-}
-
-fn incoming_tex_is_first() -> bool {
-    return params.overlap == 0u && params.progress < 0.5;
-}
-
 // x coordinate of a cubic bezier from (0,0) to (1,1) at curve parameter s.
 fn curve_x(k: vec4f, s: f32) -> f32 {
     let r = 1.0 - s;
@@ -48,10 +38,8 @@ fn split_frame(q: vec2f, amount: f32) -> vec3f {
     var q_in = q;
     q_out.x += -edge * is_top + (1.0 - edge) * is_bottom;
     q_in.x += (1.0 - edge) * is_top - edge * is_bottom;
-    var outgoing = rgb_of(first, q_out);
-    if (outgoing_tex_is_second()) { outgoing = rgb_of(second, q_out); }
-    var incoming = rgb_of(second, q_in);
-    if (incoming_tex_is_first()) { incoming = rgb_of(first, q_in); }
+    let outgoing = rgb_of(first, q_out);
+    let incoming = rgb_of(second, q_in);
     let left_of_edge = step(q.x, edge);
     return mix(outgoing, incoming, left_of_edge) * is_top
          + mix(incoming, outgoing, left_of_edge) * is_bottom;

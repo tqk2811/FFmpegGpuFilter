@@ -25,12 +25,6 @@
       "description": "0 = first clip, 1 = second clip"
     },
     {
-      "name": "overlap",
-      "type": "bool",
-      "default": false,
-      "description": "false (default) = like CapCut: the first clip plays both roles for the first half, the second clip for the second half. true = the first clip slides away over the second one all the way through"
-    },
-    {
       "name": "duration",
       "type": "float",
       "default": 0.8,

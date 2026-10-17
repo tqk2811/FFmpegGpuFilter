@@ -23,12 +23,6 @@
       "min": 0,
       "max": 1,
       "description": "0 = first clip, 1 = second clip"
-    },
-    {
-      "name": "overlap",
-      "type": "bool",
-      "default": false,
-      "description": "false (default) = like CapCut: the first clip plays both roles for the first half, the second clip for the second half (the picture jumps at the midpoint). true = the first clip opens onto the second one all the way through"
     }
   ],
   "passes": [
