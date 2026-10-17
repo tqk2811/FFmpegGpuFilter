@@ -1,0 +1,33 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.left-transition",
+  "name": "Left Transition",
+  "version": "1.0.0",
+  "description": "Both clips slide left with a strong motion blur, the second clip entering from the right, under a warm light leak and black letterbox bars that close and reopen. Recreation of the CapCut \"Left Transition\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/left-transition.wgsl"
+    }
+  ]
+}

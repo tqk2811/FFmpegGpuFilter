@@ -1,0 +1,39 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.tv-shift",
+  "name": "TV Shift",
+  "version": "1.0.0",
+  "description": "The first clip loses colour under flickering dark TV scanlines, then a vertical smear hides a quick fade to the second clip. Recreation of the CapCut \"TV Shift\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/fade.wgsl",
+      "inputs": ["first", "second"],
+      "output": "mixed"
+    },
+    {
+      "shader": "shaders/tv.wgsl",
+      "inputs": ["mixed", "first", "second"]
+    }
+  ]
+}
