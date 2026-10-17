@@ -188,3 +188,8 @@ Recreations of CapCut transitions, written from scratch in WGSL (no CapCut asset
 - [whiteout-pixel](capcut/whiteout-pixel/README.md)
 - [doodle-scratch](capcut/doodle-scratch/README.md)
 - [love-shockwave](capcut/love-shockwave/README.md)
+- [turning-heart](capcut/turning-heart/README.md)
+- [3d-heart-balloon](capcut/3d-heart-balloon/README.md)
+- [paper-unfold](capcut/paper-unfold/README.md)
+- [love-theme](capcut/love-theme/README.md)
+- [crop-switch](capcut/crop-switch/README.md)
