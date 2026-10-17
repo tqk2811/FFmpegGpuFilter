@@ -1,0 +1,112 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.hexa-mosaic",
+  "name": "Hexa Mosaic",
+  "version": "1.0.0",
+  "description": "Hard cut at the midpoint hidden by a sideways block-noise scramble, a red/green/blue scale split, a bright glow and sharpening that peak in the middle. Recreation of the CapCut \"Hexa Mosaic\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/warp.wgsl",
+      "inputs": [
+        "first",
+        "second"
+      ],
+      "output": "warped"
+    },
+    {
+      "shader": "shaders/glow-first.wgsl",
+      "entry": "step_1",
+      "inputs": [
+        "warped"
+      ],
+      "output": "glow_a"
+    },
+    {
+      "shader": "shaders/glow-a.wgsl",
+      "entry": "step_2",
+      "inputs": [
+        "glow_a"
+      ],
+      "output": "glow_b"
+    },
+    {
+      "shader": "shaders/glow-b.wgsl",
+      "entry": "step_3",
+      "inputs": [
+        "glow_b"
+      ],
+      "output": "glow_a"
+    },
+    {
+      "shader": "shaders/glow-a.wgsl",
+      "entry": "step_4",
+      "inputs": [
+        "glow_a"
+      ],
+      "output": "glow_b"
+    },
+    {
+      "shader": "shaders/glow-b.wgsl",
+      "entry": "step_5",
+      "inputs": [
+        "glow_b"
+      ],
+      "output": "glow_a"
+    },
+    {
+      "shader": "shaders/glow-a.wgsl",
+      "entry": "step_6",
+      "inputs": [
+        "glow_a"
+      ],
+      "output": "glow_b"
+    },
+    {
+      "shader": "shaders/glow-b.wgsl",
+      "entry": "step_7",
+      "inputs": [
+        "glow_b"
+      ],
+      "output": "glow_a"
+    },
+    {
+      "shader": "shaders/sharpen-x.wgsl",
+      "inputs": [
+        "warped",
+        "glow_a"
+      ],
+      "output": "blur_x"
+    },
+    {
+      "shader": "shaders/sharpen-y.wgsl",
+      "inputs": [
+        "first",
+        "second",
+        "warped",
+        "glow_a",
+        "blur_x"
+      ]
+    }
+  ]
+}
