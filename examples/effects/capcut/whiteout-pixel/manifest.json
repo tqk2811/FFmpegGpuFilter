@@ -1,0 +1,47 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.whiteout-pixel",
+  "name": "Whiteout Pixel",
+  "version": "1.0.0",
+  "description": "The picture turns into a zooming RGB dot screen, cuts to the second clip under a white light sweep, then a magenta sweep as the dots fade. Recreation of the CapCut \"Whiteout Pixel\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/halftone.wgsl",
+      "inputs": [
+        "first",
+        "second"
+      ],
+      "output": "dots"
+    },
+    {
+      "shader": "shaders/composite.wgsl",
+      "inputs": [
+        "first",
+        "second",
+        "dots"
+      ],
+      "output": "out"
+    }
+  ]
+}

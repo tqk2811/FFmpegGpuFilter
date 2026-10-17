@@ -1,0 +1,5 @@
+heart-sdf.png - signed distance field of a heart curve (x = 16 sin^2.5 t, y = 13 cos t - 5 cos 2t - 2 cos 3t - cos 4t, lower half widened
+by up to 16%, height 0.914 of the width),
+generated for this effect by a script (NumPy + Pillow). Grey 0.5 is the outline, darker is inside.
+Author: tqk2811 (FFmpegGpuFilter contributors).
+License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).

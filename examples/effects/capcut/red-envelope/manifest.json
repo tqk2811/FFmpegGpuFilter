@@ -1,0 +1,49 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.red-envelope",
+  "name": "Red Envelope",
+  "version": "1.0.0",
+  "description": "A red envelope tumbles in over the first clip, is tapped and tears open, and the second clip bursts out of it with a zoom overshoot and two glow pulses. Recreation of the CapCut \"Red Envelope\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/highlight.wgsl",
+      "inputs": ["second"],
+      "output": "lit"
+    },
+    {
+      "shader": "shaders/glow-h.wgsl",
+      "inputs": ["lit"],
+      "output": "glow_h"
+    },
+    {
+      "shader": "shaders/glow-v.wgsl",
+      "inputs": ["glow_h"],
+      "output": "glow_v"
+    },
+    {
+      "shader": "shaders/final.wgsl",
+      "inputs": ["first", "second", "glow_v"]
+    }
+  ]
+}
