@@ -27,8 +27,8 @@
     {
       "name": "overlap",
       "type": "bool",
-      "default": false,
-      "description": "false (default) = like CapCut: the first clip plays both roles for the first half, the second clip for the second half (the picture jumps at the midpoint). true = the second clip shows through the tear in the first one all the way through"
+      "default": true,
+      "description": "false = like CapCut: the first clip plays both roles for the first half, the second clip for the second half (the picture jumps at the midpoint). true (default) = the second clip shows through the tear in the first one all the way through"
     }
   ],
   "passes": [

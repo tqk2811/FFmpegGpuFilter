@@ -6,7 +6,7 @@ Recreates the CapCut "Tearing Paper" transition (the tear is drawn procedurally 
 
 ## Overlap mode
 
-CapCut does not blend the two clips for this transition: it feeds the effect the first clip in both roles while `progress` is below 0.5, and the second clip in both roles from 0.5 on, so in CapCut the tear is invisible and the result is a plain cut at the midpoint. `overlap=false` (the default) reproduces that frame for frame. `overlap=true` keeps the first clip as the paper and the second clip behind it all the way through, so the tear actually reveals the second clip.
+CapCut does not blend the two clips for this transition: it feeds the effect the first clip in both roles while `progress` is below 0.5, and the second clip in both roles from 0.5 on, so in CapCut the tear is invisible and the result is a plain cut at the midpoint. `overlap=false` reproduces that frame for frame. `overlap=true` (the default, since a plain cut hides the whole effect) keeps the first clip as the paper and the second clip behind it all the way through, so the tear actually reveals the second clip.
 
 ## Inputs
 
@@ -24,7 +24,7 @@ Written inline after the package name: `tearing-paper.zip=name=value`. Several o
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
 | `progress` | float | `0.5` | 0 to 1 | 0 = first clip, 1 = second clip |
-| `overlap` | bool | `false` | | false = like CapCut: one clip in both roles per half (a cut at the midpoint); true = the tear reveals the second clip |
+| `overlap` | bool | `true` | | false = like CapCut: one clip in both roles per half (a cut at the midpoint); true = the tear reveals the second clip |
 
 ## Example
 
