@@ -1,0 +1,196 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.spotlight",
+  "name": "Spotlight",
+  "version": "1.0.0",
+  "description": "A glowing light beam grows down from the top showing the second clip mirrored inside it, floods the darkened, desaturated frame as both clips slide down, then shrinks back to a thin line over the second clip. Recreation of the CapCut \"Spotlight\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/soften-x.wgsl",
+      "inputs": [
+        "first",
+        "second"
+      ],
+      "output": "soft_x"
+    },
+    {
+      "shader": "shaders/soften-y.wgsl",
+      "inputs": [
+        "soft_x"
+      ],
+      "output": "soft"
+    },
+    {
+      "shader": "shaders/beam.wgsl",
+      "inputs": [
+        "soft"
+      ],
+      "output": "beam"
+    },
+    {
+      "shader": "shaders/glow-gather.wgsl",
+      "inputs": [
+        "beam"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_1",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_1",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_2",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_2",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_3",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_3",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_4",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_4",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_5",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_5",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_6",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_6",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_7",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_7",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_8",
+      "inputs": [
+        "g_y"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_8",
+      "inputs": [
+        "g_x"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/final.wgsl",
+      "inputs": [
+        "first",
+        "second",
+        "beam",
+        "g_y"
+      ]
+    }
+  ]
+}

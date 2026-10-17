@@ -1,0 +1,313 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.layers",
+  "name": "Layers",
+  "version": "1.0.0",
+  "description": "A glowing hole opens in the bulging, spinning first clip and stacked rings cut from both clips spin out of it towards the viewer, then a burst of light rays hands over to the glowing second clip. Recreation of the CapCut \"Layers\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "textures": [
+    {
+      "name": "curves",
+      "path": "textures/curves.png"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/glow-gather.wgsl",
+      "inputs": [
+        "second",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_1",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_1",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_2",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_2",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_3",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_3",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_4",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_4",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_5",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_5",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_6",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_6",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_7",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_7",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glow-x.wgsl",
+      "entry": "round_x_8",
+      "inputs": [
+        "g_y",
+        "curves"
+      ],
+      "output": "g_x"
+    },
+    {
+      "shader": "shaders/glow-y.wgsl",
+      "entry": "round_y_8",
+      "inputs": [
+        "g_x",
+        "curves"
+      ],
+      "output": "g_y"
+    },
+    {
+      "shader": "shaders/glowed.wgsl",
+      "inputs": [
+        "second",
+        "g_y",
+        "curves"
+      ],
+      "output": "bglow"
+    },
+    {
+      "shader": "shaders/motion.wgsl",
+      "inputs": [
+        "first",
+        "bglow",
+        "curves"
+      ],
+      "output": "moved"
+    },
+    {
+      "shader": "shaders/zoom.wgsl",
+      "inputs": [
+        "moved",
+        "curves"
+      ],
+      "output": "back"
+    },
+    {
+      "shader": "shaders/edge-first.wgsl",
+      "inputs": [
+        "first"
+      ],
+      "output": "e_raw"
+    },
+    {
+      "shader": "shaders/edge-soft-x.wgsl",
+      "inputs": [
+        "e_raw"
+      ],
+      "output": "e_x"
+    },
+    {
+      "shader": "shaders/edge-soft-y.wgsl",
+      "inputs": [
+        "e_x"
+      ],
+      "output": "e_soft"
+    },
+    {
+      "shader": "shaders/clip-soft-x-first.wgsl",
+      "inputs": [
+        "first"
+      ],
+      "output": "c_x"
+    },
+    {
+      "shader": "shaders/clip-soft-y.wgsl",
+      "inputs": [
+        "c_x"
+      ],
+      "output": "c_soft"
+    },
+    {
+      "shader": "shaders/sharp-first.wgsl",
+      "inputs": [
+        "first",
+        "c_soft",
+        "e_soft"
+      ],
+      "output": "crisp_a"
+    },
+    {
+      "shader": "shaders/edge-second.wgsl",
+      "inputs": [
+        "second"
+      ],
+      "output": "e_raw"
+    },
+    {
+      "shader": "shaders/edge-soft-x.wgsl",
+      "inputs": [
+        "e_raw"
+      ],
+      "output": "e_x"
+    },
+    {
+      "shader": "shaders/edge-soft-y.wgsl",
+      "inputs": [
+        "e_x"
+      ],
+      "output": "e_soft"
+    },
+    {
+      "shader": "shaders/clip-soft-x-second.wgsl",
+      "inputs": [
+        "second"
+      ],
+      "output": "c_x"
+    },
+    {
+      "shader": "shaders/clip-soft-y.wgsl",
+      "inputs": [
+        "c_x"
+      ],
+      "output": "c_soft"
+    },
+    {
+      "shader": "shaders/sharp-second.wgsl",
+      "inputs": [
+        "second",
+        "c_soft",
+        "e_soft"
+      ],
+      "output": "crisp_b"
+    },
+    {
+      "shader": "shaders/final.wgsl",
+      "inputs": [
+        "first",
+        "second",
+        "back",
+        "crisp_a",
+        "crisp_b",
+        "curves"
+      ]
+    }
+  ]
+}

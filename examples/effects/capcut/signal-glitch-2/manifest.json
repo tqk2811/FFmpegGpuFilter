@@ -1,0 +1,111 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.signal-glitch-2",
+  "name": "Signal Glitch 2",
+  "version": "1.0.0",
+  "description": "Glitch into the second clip: the colour channels drift apart, the picture jolts sideways with a motion smear, blooms with an over-exposed glow, streaks, tears along spinning noise under glowing interference bands and flickers to grey. Recreation of the CapCut \"Signal Glitch 2\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/source.wgsl",
+      "inputs": [
+        "first",
+        "second"
+      ],
+      "output": "split"
+    },
+    {
+      "shader": "shaders/wipe.wgsl",
+      "inputs": [
+        "split"
+      ],
+      "output": "wiped"
+    },
+    {
+      "shader": "shaders/smear.wgsl",
+      "inputs": [
+        "wiped"
+      ],
+      "output": "smeared"
+    },
+    {
+      "shader": "shaders/layers.wgsl",
+      "inputs": [
+        "split",
+        "smeared"
+      ],
+      "output": "layered"
+    },
+    {
+      "shader": "shaders/soften.wgsl",
+      "inputs": [
+        "layered"
+      ],
+      "output": "softened"
+    },
+    {
+      "shader": "shaders/glow-h.wgsl",
+      "inputs": [
+        "softened"
+      ],
+      "output": "glow_h"
+    },
+    {
+      "shader": "shaders/glow-v.wgsl",
+      "inputs": [
+        "glow_h"
+      ],
+      "output": "glow"
+    },
+    {
+      "shader": "shaders/bloom.wgsl",
+      "inputs": [
+        "softened",
+        "glow"
+      ],
+      "output": "bloomed"
+    },
+    {
+      "shader": "shaders/streak.wgsl",
+      "inputs": [
+        "bloomed"
+      ],
+      "output": "streaked"
+    },
+    {
+      "shader": "shaders/warp.wgsl",
+      "inputs": [
+        "streaked"
+      ],
+      "output": "warped"
+    },
+    {
+      "shader": "shaders/finish.wgsl",
+      "inputs": [
+        "warped",
+        "first",
+        "second"
+      ]
+    }
+  ]
+}
