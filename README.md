@@ -97,6 +97,15 @@ filters therefore uploads each frame once and reads it back once. Fastest first:
 Vulkan keeps alpha with `out_format=rgba`. On D3D, split the result and send one copy through [alpha-extract](examples/effects/ffmpeg/alpha-extract/README.md) to get the alpha as a gray picture, then
 join both on the CPU with `alphamerge`.
 
+FFmpeg built from the submodule through `ffmpeg/integrate.sh` gets the patches in `ffmpeg/patches/`: D3D11/D3D12
+frames take every format both DXGI and FFmpeg's software formats have (rgba, bgra, gray, float, 4:2:2/4:4:4
+YUV...). The prebuilt bundle uses BtbN's libavutil and does not have them yet. Limitations of the patches:
+- A format the GPU/driver has no texture support for is left out and FFmpeg converts to another one (e.g. no
+  `p016le`/`p012le` on an RTX 4060). `nv16` (DXGI P208) has not run on any GPU tried.
+- D3D12/D3D11 filters built on the video processor (`scale_d3d12`, `deinterlace_d3d12`...) can now be offered
+  formats the video processor does not handle; that fails when the filter runs, not during format
+  negotiation. Convert to `nv12` before those filters.
+
 Intel GPUs on Windows with FFmpeg 9: `hwupload` (and `hwdownload` of `hwupload` frames) fails to allocate or
 corrupts the picture through the driver's host image copy; use `gpufx_upload` / `gpufx_download`, or open the
 device with `disable_multiplane=1,linear_images=1`. `gpufx` refuses such frames. See [docs/INTEL_VULKAN.md](docs/INTEL_VULKAN.md).
