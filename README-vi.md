@@ -95,6 +95,15 @@ Vulkan giữ alpha với `out_format=rgba`. Trên D3D, tách kết quả làm ha
 [alpha-extract](examples/effects/ffmpeg/alpha-extract/README.md) để lấy alpha thành ảnh xám, rồi ghép hai bản
 trên CPU bằng `alphamerge`.
 
+FFmpeg build từ submodule qua `ffmpeg/integrate.sh` có thêm bản vá `ffmpeg/patches/`: frame D3D11/D3D12 nhận
+mọi định dạng có ở cả DXGI lẫn FFmpeg CPU (rgba, bgra, gray, float, YUV 4:2:2/4:4:4...). Bundle prebuilt dùng
+libavutil của BtbN nên chưa có. Giới hạn của bản vá:
+- Định dạng nào GPU/driver không hỗ trợ texture thì bị loại khỏi danh sách và FFmpeg tự chuyển sang định dạng
+  khác (vd RTX 4060 không có `p016le`/`p012le`). `nv16` (DXGI P208) chưa chạy được trên GPU nào đã thử.
+- Các filter D3D12/D3D11 dùng video processor (`scale_d3d12`, `deinterlace_d3d12`...) giờ có thể nhận định dạng
+  mà video processor không xử lý được; lỗi chỉ lộ lúc chạy, không lộ lúc chọn định dạng. Chuyển về `nv12`
+  trước các filter đó.
+
 GPU Intel trên Windows với FFmpeg 9: `hwupload` (và `hwdownload` frame của `hwupload`) báo lỗi cấp phát hoặc
 làm hỏng ảnh do host image copy của driver; dùng `gpufx_upload` / `gpufx_download`, hoặc mở device với
 `disable_multiplane=1,linear_images=1`. `gpufx` từ chối các frame đó. Xem [docs/INTEL_VULKAN-vi.md](docs/INTEL_VULKAN-vi.md).
