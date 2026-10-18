@@ -1,8 +1,9 @@
 #!/bin/sh
-# Fast build: takes a prebuilt shared FFmpeg from tqk2811/FFmpegBuild, rebuilds only
-# libavfilter (with gpufx and every filter it can build) from
-# the external/FFmpeg submodule, and swaps it into the bundle. Every other library and
-# the ffmpeg/ffprobe executables stay the prebuilt ones. Takes a few minutes.
+# Fast build: takes a prebuilt shared FFmpeg from tqk2811/FFmpegBuild, rebuilds
+# libavfilter (with gpufx and every filter it can build) and libavutil (with ffmpeg/patches,
+# in docker) from the external/FFmpeg submodule, and swaps them into the bundle. Every
+# other library and the ffmpeg/ffprobe executables stay the prebuilt ones. Takes a few
+# minutes (plus pulling the libavutil image once).
 #
 #   scripts/build-prebuilt.sh [linux64|win64]        default linux64
 #
@@ -20,12 +21,17 @@
 #                    and D3D11 frames when the prebuilt libavutil has d3d12va / d3d11va.
 #   FFMPEG_FILTERS   all (default): every filter libavfilter builds without avcodec, avformat
 #                    and external libraries; keep: only gpufx and docker/keep-filters.txt.
+#   AVUTIL_IMAGE     image libavutil is rebuilt in with ffmpeg/patches (scripts/build-avutil.sh);
+#                    default BtbN's ghcr.io/btbn/ffmpeg-builds/<target>-lgpl-9.0 pinned by digest
+#                    (lgpl, n9.0-2-g03d9533176 only). Empty: the prebuilt libavutil is kept.
+#   AVUTIL_LIB       a libavutil built elsewhere by scripts/build-avutil.sh, used instead.
 #   REQUIRE_D3D      win64: 1 makes building without D3D12/D3D11 frames an error (CI).
 #   REQUIRE_LICENSES 1 makes a missing cargo-about an error (CI); without it the bundle
 #                    has no THIRD-PARTY-LICENSES-gpufx.txt (the Rust crate licenses).
 # Output: dist/<target>/ (bin, lib on Linux, effects/<group>/<name>.zip, include/gpufx.h)
 # Needs: cargo (cargo-about for the crate licenses), a C compiler, make, pkg-config, curl, patchelf (linux64), nasm (optional,
-# for SIMD); win64 also mingw-w64, binutils (strings), the x86_64-pc-windows-gnu Rust target and unzip.
+# for SIMD); win64 also mingw-w64, binutils (strings), the x86_64-pc-windows-gnu Rust target and unzip;
+# docker for libavutil (see AVUTIL_IMAGE).
 set -eu
 TARGET=${1:-linux64}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -84,6 +90,43 @@ case $EXT in
     zip) unzip -q -o "$WORK/$NAME.$EXT" -d "$WORK" ;;
 esac
 cp -R "$WORK/$NAME/." "$OUT/"
+
+# libavutil with ffmpeg/patches (D3D11/D3D12 frames of every DXGI format), rebuilt in
+# BtbN's FFmpeg-Builds image of the target: it has the toolchain and the libraries the
+# prebuilt libavutil links (scripts/build-avutil.sh).
+if [ "$TARGET" = win64 ]; then
+    AV_OLD=$(ls "$OUT"/bin/avutil-*.dll | head -n1)
+    AV_DIGEST=sha256:fcead969d7dbda9252d0502af2db571106a3b9a247ae61d1c072dd56473219e7
+else
+    AV_OLD=$(ls "$OUT"/lib/libavutil.so.*.*.* | head -n1)
+    AV_DIGEST=sha256:1881806695b6ecdbd256bb057bb0ec80d55e5b649d5c5c048fa439fda18d6609
+fi
+AV_DEFAULT=
+[ "$LICENSE" = lgpl ] && [ "$VERSION" = n9.0-2-g03d9533176 ] &&
+    AV_DEFAULT=ghcr.io/btbn/ffmpeg-builds/$TARGET-lgpl-9.0@$AV_DIGEST
+AVUTIL_IMAGE=${AVUTIL_IMAGE-$AV_DEFAULT}
+[ -f "$AV_OLD" ] || { echo "no libavutil in the prebuilt $OUT" >&2; exit 1; }
+if [ -n "${AVUTIL_LIB:-}" ]; then
+    echo "==> libavutil: $AVUTIL_LIB"
+    cp "$AVUTIL_LIB" "$AV_OLD"
+elif [ -n "$AVUTIL_IMAGE" ]; then
+    echo "==> libavutil with ffmpeg/patches ($AVUTIL_IMAGE)"
+    command -v docker > /dev/null || { echo "docker is needed to rebuild libavutil (AVUTIL_IMAGE= keeps the prebuilt one)" >&2; exit 1; }
+    rm -rf "$WORK/avutil"
+    mkdir -p "$WORK/avutil/src"
+    tar -C "$SRC" --exclude=.git -cf - . | tar -C "$WORK/avutil/src" -xf -
+    cp "$AV_OLD" "$WORK/avutil/"
+    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORK/avutil:/av" -v "$ROOT:/gpufx:ro" "$AVUTIL_IMAGE" \
+        sh /gpufx/scripts/build-avutil.sh /av/src "/av/$(basename "$AV_OLD")" /av/out "$VERSION" \
+        > "$WORK/avutil.log" 2>&1 || { tail -40 "$WORK/avutil.log"; exit 1; }
+    cp "$WORK/avutil/out/$(basename "$AV_OLD")" "$AV_OLD"
+else
+    # Without it D3D frames lack the DXGI formats of ffmpeg/patches.
+    if [ "${REQUIRE_D3D:-0}" = 1 ] && [ "$TARGET" = win64 ]; then
+        echo "REQUIRE_D3D=1: no libavutil image for $TARGET-$LICENSE $VERSION (set AVUTIL_IMAGE or AVUTIL_LIB)" >&2; exit 1
+    fi
+    echo "    no libavutil image for $TARGET-$LICENSE $VERSION: prebuilt libavutil kept (without ffmpeg/patches)"
+fi
 
 # Vulkan frames need Vulkan in the prebuilt libavutil (hwcontext_vulkan) and the headers
 # here: FFmpeg wants vulkan.h >= 1.3.277, newer than Ubuntu noble's libvulkan-dev.

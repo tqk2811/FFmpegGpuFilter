@@ -866,6 +866,24 @@ for api in d3d12va d3d11va; do
             -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')" \
         "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=nv12,hwupload[a];[1]format=nv12,hwupload[b];[a][b]gpufx=effect='$FX/ffmpeg/crossfade.zip=progress=0.4',hwdownload,format=nv12" \
             -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
+    # DXGI formats of ffmpeg/patches: hwupload then hwdownload gives the frame back bit for
+    # bit. A format the GPU has no texture for is left out by FFmpeg (no error to check).
+    for f in rgba bgra gray gray16le rgba64le yuyv422; do
+        DXF=$(gpu_ff -i "$A" -frames:v 2 -an -vf "format=$f,hwupload,hwdownload,format=$f" -f framemd5 - 2> "$CLIPS/last.log" |
+            grep -v '^#' | awk -F, '{print $NF}')
+        if [ -z "$DXF" ] && grep -q "Invalid output format $f for hwframe download" "$CLIPS/last.log" && [ $f != rgba ]; then
+            echo "  skip  $API $f: not a texture format of this GPU"; continue
+        fi
+        same "$API $f: hwupload and hwdownload give the frame back" "$DXF" \
+            "$(gpu_ff -i "$A" -frames:v 2 -an -vf "format=$f" -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
+    done
+    # A still picture with alpha made into video: uploaded once, looped on the GPU, alpha kept
+    # through gpufx (out_format=rgba) like software frames gpufx uploads itself.
+    DXA=$(gpu_ff -i "$P" -an -vf "format=rgba,hwupload,loop=loop=-1:size=1,setpts=N/25/TB,gpufx=effect=$FX/ffmpeg/invert.zip:out_format=rgba,hwdownload,format=rgba" \
+        -frames:v 5 -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}' | sort -u)
+    same "$API: rgba still picture looped after hwupload keeps alpha" "$DXA" \
+        "$(gpu_ff -i "$P" -frames:v 1 -an -vf "format=rgba,gpufx=effect=$FX/ffmpeg/invert.zip:out_format=rgba,hwdownload,format=rgba" \
+            -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
     # -filter_hw_device against the device of decoded D3D11 frames (MPEG-2 clip made by
     # this ffmpeg, decoded with -hwaccel d3d11va on a second device instance).
     if [ "$API" = D3D11 ]; then

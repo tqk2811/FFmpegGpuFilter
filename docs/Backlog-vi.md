@@ -1,11 +1,5 @@
 # Việc còn treo
 
-### [Vừa] Bundle prebuilt (BtbN) chưa có bản vá định dạng DXGI của libavutil
-- **Vấn đề**: `ffmpeg/patches/hwcontext_d3d1{1,2}va-formats.patch` cho D3D11/D3D12 có rgba, bgra, gray, float... (đã kiểm bit-exact upload/download trên RTX 4060 và Intel UHD bằng FFmpeg tự build), nhưng `scripts/build-prebuilt.sh` chỉ build libavfilter và dùng `avutil-61.dll` của BtbN, nên bundle vẫn chỉ có nv12/p010 (D3D12) và không có rgba (D3D11). Thay `avutil-61.dll` tự build vào bundle không chạy (thiếu export `av_amf_*` vì BtbN bật AMF, và khác CRT msvcrt/ucrt: lỗi C0000139). Bản build Docker (`build.sh`, `docker/build-in-container.sh`) áp được vá nhưng không có D3D12 vì mingw của Ubuntu thiếu `d3d12video.h`.
-- **Vị trí**: [scripts/build-prebuilt.sh:186](../scripts/build-prebuilt.sh#L186), [docker/build-in-container.sh:44](../docker/build-in-container.sh#L44); thông báo `sw_format_list` ở [vf_gpufx.c:1166](../ffmpeg/vf_gpufx.c#L1166) vẫn liệt kê `rgba` trên D3D dù bundle hiện tại không làm được.
-- **Vì sao**: ảnh/video có alpha trên D3D (vd `rgba,hwupload,loop,gpufx`) chỉ chạy khi bundle có avutil đã vá. Hướng: (1) build Docker tải mingw-w64 headers như build-prebuilt để có D3D12 rồi dùng cho bản Windows, hoặc (2) build-prebuilt tự build avutil khớp BtbN (AMF headers, mingw ucrt) và thay vào bundle. Chưa chốt.
-- **Ngày ghi**: 2026-10-19
-
 ### [Thấp] Hiệu ứng CapCut đợt 4: các finding review để sau
 - **Vấn đề**:
   - heat-flash lấy mẫu glow trên lưới cố định 240 texel nhưng đọc thẳng texture `bright` full-res, nên ở 1080p/4K các tap cách nhau 9–18 px, highlight nhỏ có thể nhấp nháy.
