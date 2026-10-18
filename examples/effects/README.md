@@ -165,7 +165,7 @@ Recreations of CapCut transitions, written from scratch in WGSL (no CapCut asset
 - [reveal-brush](capcut/reveal-brush/README.md)
 - [spinning-box](capcut/spinning-box/README.md)
 - [color-wipe](capcut/color-wipe/README.md)
-- [zoom-negative](capcut/zoom-negative/README.md)
+- [negative-flash](capcut/negative-flash/README.md)
 - [torn-wipe](capcut/torn-wipe/README.md)
 - [geometry](capcut/geometry/README.md)
 - [2024-recap](capcut/2024-recap/README.md)
