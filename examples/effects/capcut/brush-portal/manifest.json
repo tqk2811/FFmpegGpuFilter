@@ -1,0 +1,67 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.capcut.brush-portal",
+  "name": "Brush Portal",
+  "version": "1.0.0",
+  "description": "The second clip is painted in through a swirling brush stroke that grows from the centre, with a glowing negative rim and a light-leak wash. Recreation of the CapCut \"Brush Portal\" transition. Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip"
+    }
+  ],
+  "passes": [
+    {
+      "shader": "shaders/masks.wgsl",
+      "inputs": [],
+      "output": "masks"
+    },
+    {
+      "shader": "shaders/highlight.wgsl",
+      "inputs": [
+        "first",
+        "second",
+        "masks"
+      ],
+      "output": "lit"
+    },
+    {
+      "shader": "shaders/blur-h.wgsl",
+      "inputs": [
+        "lit"
+      ],
+      "output": "blur_h"
+    },
+    {
+      "shader": "shaders/blur-v.wgsl",
+      "inputs": [
+        "blur_h"
+      ],
+      "output": "glow_v"
+    },
+    {
+      "shader": "shaders/composite.wgsl",
+      "inputs": [
+        "first",
+        "second",
+        "masks",
+        "glow_v"
+      ]
+    }
+  ]
+}
