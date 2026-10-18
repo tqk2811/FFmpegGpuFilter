@@ -1,0 +1,299 @@
+--- a/libavutil/hwcontext_d3d12va.c
++++ b/libavutil/hwcontext_d3d12va.c
+@@ -48,7 +48,7 @@
+     ID3D12CommandAllocator    *command_allocator;
+     ID3D12GraphicsCommandList *command_list;
+     AVD3D12VASyncContext       sync_ctx;
+-    UINT                       luma_component_size;
++    UINT64                     staging_size;
+     int                        nb_surfaces_used;
+ } D3D12VAFramesContext;
+ 
+@@ -70,8 +70,71 @@
+ } supported_formats[] = {
+     { DXGI_FORMAT_NV12, AV_PIX_FMT_NV12 },
+     { DXGI_FORMAT_P010, AV_PIX_FMT_P010 },
++    { DXGI_FORMAT_P016, AV_PIX_FMT_P016 },
++    // There is no 12bit pixel format defined in DXGI_FORMAT*, use 16bit to compatible
++    // with 12 bit AV_PIX_FMT* formats.
++    { DXGI_FORMAT_P016, AV_PIX_FMT_P012 },
++    { DXGI_FORMAT_P208, AV_PIX_FMT_NV16 },
++    { DXGI_FORMAT_YUY2, AV_PIX_FMT_YUYV422 },
++    { DXGI_FORMAT_Y210, AV_PIX_FMT_Y210 },
++    { DXGI_FORMAT_Y216, AV_PIX_FMT_Y216 },
++    { DXGI_FORMAT_Y216, AV_PIX_FMT_Y212 },
++    { DXGI_FORMAT_AYUV, AV_PIX_FMT_VUYX },
++    { DXGI_FORMAT_AYUV, AV_PIX_FMT_VUYA },
++    { DXGI_FORMAT_Y410, AV_PIX_FMT_XV30 },
++    { DXGI_FORMAT_Y416, AV_PIX_FMT_XV48 },
++    { DXGI_FORMAT_Y416, AV_PIX_FMT_XV36 },
++    { DXGI_FORMAT_B8G8R8A8_UNORM,     AV_PIX_FMT_BGRA },
++    { DXGI_FORMAT_B8G8R8X8_UNORM,     AV_PIX_FMT_BGR0 },
++    { DXGI_FORMAT_R8G8B8A8_UNORM,     AV_PIX_FMT_RGBA },
++    { DXGI_FORMAT_R10G10B10A2_UNORM,  AV_PIX_FMT_X2BGR10 },
++    { DXGI_FORMAT_R16G16B16A16_UNORM, AV_PIX_FMT_RGBA64LE },
++    { DXGI_FORMAT_R16G16B16A16_FLOAT, AV_PIX_FMT_RGBAF16LE },
++    { DXGI_FORMAT_R32G32B32A32_FLOAT, AV_PIX_FMT_RGBAF32LE },
++    { DXGI_FORMAT_R32G32B32_FLOAT,    AV_PIX_FMT_RGBF32LE },
++    { DXGI_FORMAT_B5G6R5_UNORM,       AV_PIX_FMT_RGB565LE },
++    { DXGI_FORMAT_R8_UNORM,           AV_PIX_FMT_GRAY8 },
++    { DXGI_FORMAT_R16_UNORM,          AV_PIX_FMT_GRAY16LE },
++    { DXGI_FORMAT_R16_FLOAT,          AV_PIX_FMT_GRAYF16LE },
++    { DXGI_FORMAT_R32_FLOAT,          AV_PIX_FMT_GRAYF32LE },
+ };
+ 
++/*
++ * The layout of one frame in a staging buffer: one placed footprint per plane, as the
++ * device lays out a texture of this format and size. Returns the number of planes.
++ */
++static int d3d12va_get_footprints(AVHWFramesContext *ctx,
++                                  D3D12_PLACED_SUBRESOURCE_FOOTPRINT layouts[4],
++                                  UINT64 *total_size)
++{
++    AVD3D12VADeviceContext *device_hwctx = ctx->device_ctx->hwctx;
++    AVD3D12VAFramesContext *frames_hwctx = ctx->hwctx;
++    int nb_planes = av_pix_fmt_count_planes(ctx->sw_format);
++    D3D12_RESOURCE_DESC desc = {
++        .Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
++        .Alignment        = 0,
++        .Width            = ctx->width,
++        .Height           = ctx->height,
++        .DepthOrArraySize = 1,
++        .MipLevels        = 1,
++        .Format           = frames_hwctx->format,
++        .SampleDesc       = { .Count = 1, .Quality = 0 },
++        .Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN,
++        .Flags            = D3D12_RESOURCE_FLAG_NONE,
++    };
++
++    if (nb_planes < 1 || nb_planes > 4)
++        return AVERROR(EINVAL);
++
++    *total_size = 0;
++    ID3D12Device_GetCopyableFootprints(device_hwctx->device, &desc, 0, nb_planes, 0,
++                                       layouts, NULL, NULL, total_size);
++    if (!*total_size || *total_size == UINT64_MAX)
++        return AVERROR(EINVAL);
++
++    return nb_planes;
++}
++
+ static void d3d12va_default_lock(void *ctx)
+ {
+     WaitForSingleObjectEx(ctx, INFINITE, FALSE);
+@@ -113,7 +176,7 @@
+     D3D12_RESOURCE_DESC desc = {
+         .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
+         .Alignment          = 0,
+-        .Width              = s->luma_component_size + (s->luma_component_size >> 1),
++        .Width              = s->staging_size,
+         .Height             = 1,
+         .DepthOrArraySize   = 1,
+         .MipLevels          = 1,
+@@ -136,7 +199,7 @@
+ {
+     AVD3D12VADeviceContext *device_hwctx = ctx->device_ctx->hwctx;
+     D3D12VAFramesContext   *s            = ctx->hwctx;
+-    AVD3D12VAFramesContext *frames_hwctx = &s->p;
++    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layouts[4];
+ 
+     D3D12_COMMAND_QUEUE_DESC queue_desc = {
+         .Type     = D3D12_COMMAND_LIST_TYPE_COPY,
+@@ -144,8 +207,10 @@
+         .NodeMask = 0,
+     };
+ 
+-    s->luma_component_size = FFALIGN(ctx->width * (frames_hwctx->format == DXGI_FORMAT_P010 ? 2 : 1),
+-                                     D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) * ctx->height;
++    if (d3d12va_get_footprints(ctx, layouts, &s->staging_size) < 0) {
++        av_log(ctx, AV_LOG_ERROR, "Could not get the copyable footprints of the texture\n");
++        goto fail;
++    }
+ 
+     DX_CHECK(ID3D12Device_CreateFence(device_hwctx->device, 0, D3D12_FENCE_FLAG_NONE,
+                                       &IID_ID3D12Fence, (void **)&s->sync_ctx.fence));
+@@ -440,32 +505,29 @@
+     D3D12VAFramesContext   *s            = ctx->hwctx;
+     AVD3D12VAFramesContext *frames_hwctx = &s->p;
+ 
+-    int ret;
++    int ret, nb_planes;
+     int download = src->format == AV_PIX_FMT_D3D12;
+     const AVFrame *frame = download ? src : dst;
+     const AVFrame *other = download ? dst : src;
+ 
+     AVD3D12VAFrame *f = (AVD3D12VAFrame *)frame->data[0];
+     ID3D12Resource *texture = (ID3D12Resource *)f->texture;
++    ID3D12Resource *staging;
+ 
+     uint8_t *mapped_data;
+-    uint8_t *data[4];
+-    int linesizes[4];
+-
+-    D3D12_TEXTURE_COPY_LOCATION staging_y_location  = { 0 };
+-    D3D12_TEXTURE_COPY_LOCATION staging_uv_location = { 0 };
+-
+-    D3D12_TEXTURE_COPY_LOCATION texture_y_location = {
+-        .pResource        = texture,
+-        .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+-        .SubresourceIndex = 0,
+-    };
+-
+-    D3D12_TEXTURE_COPY_LOCATION texture_uv_location = {
+-        .pResource        = texture,
+-        .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+-        .SubresourceIndex = 1,
+-    };
++    uint8_t *data[4] = { NULL };
++    int linesizes[4] = { 0 };
++    UINT64 total_size;
++
++    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layouts[4];
++    D3D12_TEXTURE_COPY_LOCATION staging_locations[4];
++    D3D12_TEXTURE_COPY_LOCATION texture_locations[4];
++
++    /* The planes of slice i of a texture array are subresources i + plane * array size
++     * (one mip level). Frames of this context only come from its own pool, whose texture
++     * array has initial_pool_size slices (d3d12va_texture_array_init). */
++    UINT slice      = (frames_hwctx->flags & AV_D3D12VA_FRAME_FLAG_TEXTURE_ARRAY) ? f->subresource_index : 0;
++    UINT array_size = (frames_hwctx->flags & AV_D3D12VA_FRAME_FLAG_TEXTURE_ARRAY) ? ctx->initial_pool_size : 1;
+ 
+     D3D12_RESOURCE_BARRIER barrier = {
+         .Type  = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+@@ -489,39 +551,22 @@
+             goto fail;
+     }
+ 
+-    for (int i = 0; i < 4; i++)
+-        linesizes[i] = FFALIGN(frame->width * (frames_hwctx->format == DXGI_FORMAT_P010 ? 2 : 1),
+-                               D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+-
+-    staging_y_location = (D3D12_TEXTURE_COPY_LOCATION) {
+-        .Type      = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+-        .PlacedFootprint = {
+-            .Offset = 0,
+-            .Footprint = {
+-                .Format   = frames_hwctx->format == DXGI_FORMAT_P010 ?
+-                                                    DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R8_UNORM,
+-                .Width    = ctx->width,
+-                .Height   = ctx->height,
+-                .Depth    = 1,
+-                .RowPitch = linesizes[0],
+-            },
+-        },
+-    };
++    nb_planes = d3d12va_get_footprints(ctx, layouts, &total_size);
++    if (nb_planes < 0 || total_size > s->staging_size)
++        goto fail;
+ 
+-    staging_uv_location = (D3D12_TEXTURE_COPY_LOCATION) {
+-        .Type      = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+-        .PlacedFootprint = {
+-            .Offset = s->luma_component_size,
+-            .Footprint = {
+-                .Format   = frames_hwctx->format == DXGI_FORMAT_P010 ?
+-                                                    DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R8G8_UNORM,
+-                .Width    = ctx->width  >> 1,
+-                .Height   = ctx->height >> 1,
+-                .Depth    = 1,
+-                .RowPitch = linesizes[0],
+-            },
+-        },
+-    };
++    for (int i = 0; i < nb_planes; i++) {
++        linesizes[i] = layouts[i].Footprint.RowPitch;
++        texture_locations[i] = (D3D12_TEXTURE_COPY_LOCATION) {
++            .pResource        = texture,
++            .Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
++            .SubresourceIndex = slice + i * array_size,
++        };
++        staging_locations[i] = (D3D12_TEXTURE_COPY_LOCATION) {
++            .Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
++            .PlacedFootprint = layouts[i],
++        };
++    }
+ 
+     DX_CHECK(ID3D12CommandAllocator_Reset(s->command_allocator));
+ 
+@@ -535,18 +580,16 @@
+                 goto fail;
+             }
+         }
+-
+-        staging_y_location.pResource = staging_uv_location.pResource = s->staging_download_buffer;
++        staging = s->staging_download_buffer;
+ 
+         ID3D12GraphicsCommandList_ResourceBarrier(s->command_list, 1, &barrier);
+ 
+-        ID3D12GraphicsCommandList_CopyTextureRegion(s->command_list,
+-                                                    &staging_y_location, 0, 0, 0,
+-                                                    &texture_y_location, NULL);
+-
+-        ID3D12GraphicsCommandList_CopyTextureRegion(s->command_list,
+-                                                    &staging_uv_location, 0, 0, 0,
+-                                                    &texture_uv_location, NULL);
++        for (int i = 0; i < nb_planes; i++) {
++            staging_locations[i].pResource = staging;
++            ID3D12GraphicsCommandList_CopyTextureRegion(s->command_list,
++                                                        &staging_locations[i], 0, 0, 0,
++                                                        &texture_locations[i], NULL);
++        }
+ 
+         barrier.Transition.StateBefore = barrier.Transition.StateAfter;
+         barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COMMON;
+@@ -562,13 +605,14 @@
+         if (ret < 0)
+             goto fail;
+ 
+-        DX_CHECK(ID3D12Resource_Map(s->staging_download_buffer, 0, NULL, (void **)&mapped_data));
+-        av_image_fill_pointers(data, ctx->sw_format, ctx->height, mapped_data, linesizes);
++        DX_CHECK(ID3D12Resource_Map(staging, 0, NULL, (void **)&mapped_data));
++        for (int i = 0; i < nb_planes; i++)
++            data[i] = mapped_data + layouts[i].Offset;
+ 
+         av_image_copy2(dst->data, dst->linesize, data, linesizes,
+                        ctx->sw_format, ctx->width, ctx->height);
+ 
+-        ID3D12Resource_Unmap(s->staging_download_buffer, 0, NULL);
++        ID3D12Resource_Unmap(staging, 0, NULL);
+     } else {
+         if (!s->staging_upload_buffer) {
+             ret = d3d12va_create_staging_buffer_resource(ctx, D3D12_RESOURCE_STATE_GENERIC_READ,
+@@ -577,26 +621,25 @@
+                 goto fail;
+             }
+         }
++        staging = s->staging_upload_buffer;
+ 
+-        staging_y_location.pResource = staging_uv_location.pResource = s->staging_upload_buffer;
+-
+-        DX_CHECK(ID3D12Resource_Map(s->staging_upload_buffer, 0, NULL, (void **)&mapped_data));
+-        av_image_fill_pointers(data, ctx->sw_format, ctx->height, mapped_data, linesizes);
++        DX_CHECK(ID3D12Resource_Map(staging, 0, NULL, (void **)&mapped_data));
++        for (int i = 0; i < nb_planes; i++)
++            data[i] = mapped_data + layouts[i].Offset;
+ 
+         av_image_copy2(data, linesizes, src->data, src->linesize,
+                        ctx->sw_format, ctx->width, ctx->height);
+ 
+-        ID3D12Resource_Unmap(s->staging_upload_buffer, 0, NULL);
++        ID3D12Resource_Unmap(staging, 0, NULL);
+ 
+         ID3D12GraphicsCommandList_ResourceBarrier(s->command_list, 1, &barrier);
+ 
+-        ID3D12GraphicsCommandList_CopyTextureRegion(s->command_list,
+-                                                    &texture_y_location, 0, 0, 0,
+-                                                    &staging_y_location, NULL);
+-
+-        ID3D12GraphicsCommandList_CopyTextureRegion(s->command_list,
+-                                                    &texture_uv_location, 0, 0, 0,
+-                                                    &staging_uv_location, NULL);
++        for (int i = 0; i < nb_planes; i++) {
++            staging_locations[i].pResource = staging;
++            ID3D12GraphicsCommandList_CopyTextureRegion(s->command_list,
++                                                        &texture_locations[i], 0, 0, 0,
++                                                        &staging_locations[i], NULL);
++        }
+ 
+         barrier.Transition.StateBefore = barrier.Transition.StateAfter;
+         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;

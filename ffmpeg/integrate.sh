@@ -17,6 +17,20 @@ cp "$HERE/vf_gpufx.c" libavfilter/vf_gpufx.c
 cp "$HERE/vf_gpufx_transfer.c" libavfilter/vf_gpufx_transfer.c
 cp "$HERE/vf_gpufx_vk.h" libavfilter/vf_gpufx_vk.h
 
+# Patches to FFmpeg itself (patches/*.patch, made with diff -u from the tree root):
+# D3D11/D3D12 frames of every DXGI format that has a software pixel format (rgba, bgra,
+# gray, float...), not only the YUV ones FFmpeg uses for decoding. Skipped when already
+# applied; a patch that no longer applies (FFmpeg changed there) stops the build.
+for p in "$HERE"/patches/*.patch; do
+    [ -f "$p" ] || continue
+    if patch -p1 -R -s -f --dry-run < "$p" >/dev/null 2>&1; then
+        continue
+    fi
+    patch -p1 -s -f --dry-run < "$p" >/dev/null 2>&1 ||
+        { echo "patch $(basename "$p") does not apply to this FFmpeg" >&2; exit 1; }
+    patch -p1 -s -f --no-backup-if-mismatch < "$p"
+done
+
 # Anchor every edit on the matching libplacebo line, which exists in all recent FFmpeg.
 if ! grep -q libgpufx configure; then
     sed -i.bak \
