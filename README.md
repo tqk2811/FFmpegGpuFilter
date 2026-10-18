@@ -20,6 +20,12 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
   picture-in-picture, fitting a picture over a blurred background, falling maple / ginkgo leaves (texture arrays with mipmaps, custom paths from expressions), transitions (crossfade, slide, wipe, circle, clock, collapse, expand,
   dip to black, dissolve, pixelize, zoom, blinds, checkerboard, push box, film strip, photo collection, sliding bars, spin...)
 
+> ⚠️ **Read [Limitations and untested parts](docs/LIMITATIONS.md) before using it.** The ones met most often:
+> - It has run for real only on Windows with an NVIDIA RTX 4060 and Intel UHD. **Untested** on AMD GPUs, real GPUs
+>   on Linux and Macs.
+> - HDR is processed as SDR (no tonemap); Intel on Windows needs `gpufx_upload`/`gpufx_download` instead of
+>   `hwupload`/`hwdownload`.
+
 - **Vulkan frames without copies**: `hwupload` frames (`AV_PIX_FMT_VULKAN`, one image per plane) are processed
   in place on FFmpeg's own Vulkan device, synchronised with its timeline semaphores; frames never go back
   to RAM between filters. Frames of the Vulkan decoders (`-hwaccel vulkan`) are multiplane images and are refused
@@ -90,21 +96,6 @@ filters therefore uploads each frame once and reads it back once. Fastest first:
 1. one `gpufx=graph=...` with every effect;
 2. separate filters between `gpufx_upload` and `gpufx_download`, `out_format=rgba` on all but the last;
 3. separate filters behind one upload (by the first `gpufx` or `hwupload`), then `hwdownload`.
-
-**Limitation: no alpha with D3D12 and D3D11 frames.** FFmpeg makes D3D12 frames of `nv12` and `p010le` only
-(D3D11: no `rgba` either), so `hwdownload` gives one of those, an output with alpha loses it there, and
-`out_format=rgba`, `yuva420p` or `yuva444p` fails (`Unsupported pixel format: rgba`).
-Vulkan keeps alpha with `out_format=rgba`. On D3D, split the result and send one copy through [alpha-extract](examples/effects/ffmpeg/alpha-extract/README.md) to get the alpha as a gray picture, then
-join both on the CPU with `alphamerge`.
-
-FFmpeg built from the submodule through `ffmpeg/integrate.sh` gets the patches in `ffmpeg/patches/`: D3D11/D3D12
-frames take every format both DXGI and FFmpeg's software formats have (rgba, bgra, gray, float, 4:2:2/4:4:4
-YUV...). The prebuilt bundle uses BtbN's libavutil and does not have them yet. Limitations of the patches:
-- A format the GPU/driver has no texture support for is left out and FFmpeg converts to another one (e.g. no
-  `p016le`/`p012le` on an RTX 4060). `nv16` (DXGI P208) has not run on any GPU tried.
-- D3D12/D3D11 filters built on the video processor (`scale_d3d12`, `deinterlace_d3d12`...) can now be offered
-  formats the video processor does not handle; that fails when the filter runs, not during format
-  negotiation. Convert to `nv12` before those filters.
 
 Intel GPUs on Windows with FFmpeg 9: `hwupload` (and `hwdownload` of `hwupload` frames) fails to allocate or
 corrupts the picture through the driver's host image copy; use `gpufx_upload` / `gpufx_download`, or open the

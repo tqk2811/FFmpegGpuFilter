@@ -18,6 +18,12 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
   picture-in-picture, đặt ảnh vào khung trên nền mờ, lá phong / lá rẻ quạt rơi (texture mảng có mipmap, quỹ đạo tùy chỉnh bằng biểu thức), chuyển cảnh (crossfade, slide, wipe, circle, clock, collapse, expand,
   dip to black, dissolve, pixelize, zoom, blinds, bàn cờ, đẩy hộp, cuộn phim, xếp ảnh...)
 
+> ⚠️ **Đọc [Hạn chế và phần chưa kiểm thử](docs/LIMITATIONS-vi.md) trước khi dùng.** Những điểm hay gặp nhất:
+> - Mới chạy thật trên Windows với NVIDIA RTX 4060 và Intel UHD. **Chưa test** trên GPU AMD, GPU thật trên Linux và
+>   máy Mac.
+> - HDR được xử lý như SDR (không tonemap); Intel trên Windows phải dùng `gpufx_upload`/`gpufx_download` thay cho
+>   `hwupload`/`hwdownload`.
+
 - **Frame Vulkan không copy**: frame của `hwupload` (`AV_PIX_FMT_VULKAN`, mỗi plane một image) được xử lý tại chỗ
   trên chính device Vulkan của FFmpeg, đồng bộ bằng timeline semaphore của nó; giữa các filter frame không quay
   về RAM. Frame của decoder Vulkan (`-hwaccel vulkan`) là image multiplane nên hiện bị từ chối.
@@ -87,22 +93,6 @@ ra format đó). Vì vậy một chuỗi `gpufx` chỉ upload mỗi frame một 
 1. một `gpufx=graph=...` chứa mọi hiệu ứng;
 2. các filter riêng kẹp giữa `gpufx_upload` và `gpufx_download`, `out_format=rgba` trên mọi filter trừ cái cuối;
 3. các filter riêng sau một lần upload (do `gpufx` đầu tiên hoặc `hwupload`), rồi `hwdownload`.
-
-**Hạn chế: frame D3D12 và D3D11 không có alpha.** FFmpeg chỉ làm frame D3D12 dạng `nv12` và `p010le`
-(D3D11 cũng không có `rgba`), nên `hwdownload` ra một trong hai dạng đó, output có alpha mất alpha ở đây, và
-`out_format=rgba`, `yuva420p` hay `yuva444p` báo lỗi (`Unsupported pixel format: rgba`).
-Vulkan giữ alpha với `out_format=rgba`. Trên D3D, tách kết quả làm hai và cho một bản đi qua
-[alpha-extract](examples/effects/ffmpeg/alpha-extract/README.md) để lấy alpha thành ảnh xám, rồi ghép hai bản
-trên CPU bằng `alphamerge`.
-
-FFmpeg build từ submodule qua `ffmpeg/integrate.sh` có thêm bản vá `ffmpeg/patches/`: frame D3D11/D3D12 nhận
-mọi định dạng có ở cả DXGI lẫn FFmpeg CPU (rgba, bgra, gray, float, YUV 4:2:2/4:4:4...). Bundle prebuilt dùng
-libavutil của BtbN nên chưa có. Giới hạn của bản vá:
-- Định dạng nào GPU/driver không hỗ trợ texture thì bị loại khỏi danh sách và FFmpeg tự chuyển sang định dạng
-  khác (vd RTX 4060 không có `p016le`/`p012le`). `nv16` (DXGI P208) chưa chạy được trên GPU nào đã thử.
-- Các filter D3D12/D3D11 dùng video processor (`scale_d3d12`, `deinterlace_d3d12`...) giờ có thể nhận định dạng
-  mà video processor không xử lý được; lỗi chỉ lộ lúc chạy, không lộ lúc chọn định dạng. Chuyển về `nv12`
-  trước các filter đó.
 
 GPU Intel trên Windows với FFmpeg 9: `hwupload` (và `hwdownload` frame của `hwupload`) báo lỗi cấp phát hoặc
 làm hỏng ảnh do host image copy của driver; dùng `gpufx_upload` / `gpufx_download`, hoặc mở device với
