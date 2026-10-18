@@ -1,5 +1,11 @@
 # Việc còn treo
 
+### [Vừa] Bundle prebuilt (BtbN) chưa có bản vá định dạng DXGI của libavutil
+- **Vấn đề**: `ffmpeg/patches/hwcontext_d3d1{1,2}va-formats.patch` cho D3D11/D3D12 có rgba, bgra, gray, float... (đã kiểm bit-exact upload/download trên RTX 4060 và Intel UHD bằng FFmpeg tự build), nhưng `scripts/build-prebuilt.sh` chỉ build libavfilter và dùng `avutil-61.dll` của BtbN, nên bundle vẫn chỉ có nv12/p010 (D3D12) và không có rgba (D3D11). Thay `avutil-61.dll` tự build vào bundle không chạy (thiếu export `av_amf_*` vì BtbN bật AMF, và khác CRT msvcrt/ucrt: lỗi C0000139). Bản build Docker (`build.sh`, `docker/build-in-container.sh`) áp được vá nhưng không có D3D12 vì mingw của Ubuntu thiếu `d3d12video.h`.
+- **Vị trí**: [scripts/build-prebuilt.sh:186](../scripts/build-prebuilt.sh#L186), [docker/build-in-container.sh:44](../docker/build-in-container.sh#L44); thông báo `sw_format_list` ở [vf_gpufx.c:1166](../ffmpeg/vf_gpufx.c#L1166) vẫn liệt kê `rgba` trên D3D dù bundle hiện tại không làm được.
+- **Vì sao**: ảnh/video có alpha trên D3D (vd `rgba,hwupload,loop,gpufx`) chỉ chạy khi bundle có avutil đã vá. Hướng: (1) build Docker tải mingw-w64 headers như build-prebuilt để có D3D12 rồi dùng cho bản Windows, hoặc (2) build-prebuilt tự build avutil khớp BtbN (AMF headers, mingw ucrt) và thay vào bundle. Chưa chốt.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] Hiệu ứng CapCut đợt 4: các finding review để sau
 - **Vấn đề**:
   - heat-flash lấy mẫu glow trên lưới cố định 240 texel nhưng đọc thẳng texture `bright` full-res, nên ở 1080p/4K các tap cách nhau 9–18 px, highlight nhỏ có thể nhấp nháy.
@@ -40,12 +46,6 @@
 - **Vị trí**: [smear.wgsl](../examples/effects/capcut/negative-glitch/shaders/smear.wgsl), [signal.wgsl](../examples/effects/capcut/negative-glitch/shaders/signal.wgsl), [halftone.wgsl](../examples/effects/capcut/pixel-vibe/shaders/halftone.wgsl), [zoom.wgsl](../examples/effects/capcut/pixel-vibe/shaders/zoom.wgsl), [silky-switch.wgsl](../examples/effects/capcut/silky-switch/shaders/silky-switch.wgsl), [finish.wgsl](../examples/effects/capcut/red-swipe/shaders/finish.wgsl), [square-out.wgsl](../examples/effects/capcut/square-out/shaders/square-out.wgsl).
 - **Vì sao**: giống demo hơn và tránh giật ở chỗ nối. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
-
-### [Thấp] Lỗi `out_format` trên D3D liệt kê `rgba` dù FFmpeg không làm được frame đó
-- **Vấn đề**: `out_format=rgba` trên D3D12/D3D11 hỏng với `Unsupported pixel format: rgba` từ FFmpeg, nhưng thông báo của gpufx vẫn liệt kê `nv12, p010le, rgba, rgba64le` là ghi được. Bộ frame D3D12 của FFmpeg chỉ có `nv12`/`p010` ([hwcontext_d3d12va.c:71](../external/FFmpeg/libavutil/hwcontext_d3d12va.c#L71)); D3D11 có `bgra` chứ không có `rgba`.
-- **Vị trí**: `sw_format_list` ở [vf_gpufx.c:1166](../ffmpeg/vf_gpufx.c#L1166), dùng ở các thông báo dòng 1216, 1356, 1361.
-- **Vì sao**: người dùng thử `rgba` theo gợi ý rồi gặp lỗi khó hiểu; nên nói rõ định dạng nào FFmpeg làm được trên API đó, và gợi ý `alpha-extract` khi cần alpha. Cần build lại FFmpeg để kiểm.
-- **Ngày ghi**: 2026-10-16
 
 ### [Thấp] Test box-in chưa phủ direction 1 và 3
 - **Vấn đề**: test chỉ thử `direction` 0 và 2; đảo dấu riêng ở nhánh 1/3 không bị bắt.
