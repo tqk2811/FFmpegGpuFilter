@@ -80,8 +80,8 @@ pub unsafe extern "C" fn gpufx_ai_interp_set_scene(ai: *mut GpufxAiInterp, thres
         let threshold = threshold as f32;
         if let Some(run) = ai.run.as_mut() {
             run.set_scene_threshold(threshold).map_err(|e| e.to_string())?;
-        } else if !(0.0..=100.0).contains(&threshold) {
-            return Err(format!("scene threshold {threshold} is not in [0, 100]"));
+        } else if !(0.0..=1.0).contains(&threshold) {
+            return Err(format!("scene threshold {threshold} is not in [0, 1]"));
         }
         ai.threshold = threshold;
         Ok(0)

@@ -20,8 +20,8 @@
 
 ### [Thấp] `gpufx_ai_framerate`: cặp chuyển cảnh vẫn chạy RIFE
 - **Vấn đề**: cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
-- **Vị trí**: [frames.rs:306](../crates/gpufx-core/src/nn/frames.rs#L306) (`self.interp.encode`), [frames.rs:335](../crates/gpufx-core/src/nn/frames.rs#L335) (`encode_scene`), [scene_decide.wgsl](../crates/gpufx-core/src/nn/scene_decide.wgsl)
-- **Vì sao**: video nhiều chuyển cảnh; bỏ RIFE ở các cặp này tiết kiệm ~45 ms/frame 1080p. Hướng: chạy pass scene trước RIFE và dispatch RIFE bằng indirect dispatch (số workgroup 0 khi `cut != 0`), cần plan nn hỗ trợ dispatch indirect.
+- **Vị trí**: [frames.rs:300](../crates/gpufx-core/src/nn/frames.rs#L300) (`self.interp.encode`), [frames.rs:325](../crates/gpufx-core/src/nn/frames.rs#L325) (`encode_scene`), [scene_ssim.wgsl](../crates/gpufx-core/src/nn/scene_ssim.wgsl)
+- **Vì sao**: video nhiều chuyển cảnh; bỏ RIFE ở các cặp này tiết kiệm ~45 ms/frame 1080p. Hướng: chạy pass scene trước RIFE và dispatch RIFE bằng indirect dispatch (số workgroup 0 khi `cut != 0`), cần plan nn hỗ trợ dispatch indirect. Cùng đường này có thể làm thêm nhánh bỏ cặp gần như trùng của RIFE gốc (`inference_video.py`: SSIM > 0.996 thì không nội suy), hiện cố ý không làm vì RIFE vẫn chạy nên không lợi gì.
 - **Ngày ghi**: 2026-10-19
 
 ### [Thấp] `gpufx_ai_framerate`: mất một frame ở chỗ nối khi đổi kích thước (graph reinit)

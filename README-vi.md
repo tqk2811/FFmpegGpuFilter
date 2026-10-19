@@ -125,7 +125,7 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
 |---|---|---|
 | `model` | (bắt buộc) | đường dẫn gói `frame_interp`, vd `models/rife-v4.6.zip` |
 | `fps` | gấp đôi input | frame rate đầu ra; số hoặc phân số (`30`, `24000/1001`; không nhận tên như `ntsc`); tỉ lệ bất kỳ, không chỉ bội số |
-| `scene` | 20 | ngưỡng chuyển cảnh (0-100, chấm điểm như filter `framerate` của FFmpeg); cặp frame đạt ngưỡng thì không nội suy (lặp frame gần hơn); 0 thì không bao giờ phát hiện chuyển cảnh (mọi cặp đều được nội suy) |
+| `scene` | 0.2 | ngưỡng chuyển cảnh (0-1): SSIM của cặp frame ở 32x32, tính như `inference_video.py` của RIFE gốc; cặp thấp hơn ngưỡng là chuyển cảnh, không nội suy (lặp frame gần hơn); 0 thì không bao giờ phát hiện chuyển cảnh (mọi cặp đều được nội suy) |
 | `max_gap` | 2 | cặp frame cách nhau quá số lần thời lượng frame input này (khoảng hở của luồng VFR) thì không nội suy |
 
 Đầu ra là lưới frame rate cố định: điểm lưới nằm giữa hai frame nguồn được nội suy đúng thời điểm, điểm trùng

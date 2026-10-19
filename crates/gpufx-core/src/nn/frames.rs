@@ -16,8 +16,8 @@ use crate::runtime::{FrameInfo, GpuContext};
 use crate::stage::{GpuStage, Interop};
 use crate::Error;
 
-/// Samples of the scene check: about this many per frame.
-const SCENE_SAMPLES: u64 = 1 << 20;
+/// Bytes of the scene check state: the flags, then both 32x32x3 frames and the five 32x32x3 moments.
+const SCENE_STATE: u64 = 16 + 4 * (2 + 5) * 3 * 32 * 32;
 
 const RGBA_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::STORAGE_BINDING.union(wgpu::TextureUsages::TEXTURE_BINDING);
 
@@ -36,16 +36,13 @@ struct Between {
 
 struct Scene {
     layout: wgpu::BindGroupLayout,
-    sad: wgpu::ComputePipeline,
-    decide: wgpu::ComputePipeline,
+    down: wgpu::ComputePipeline,
+    blur: wgpu::ComputePipeline,
+    ssim: wgpu::ComputePipeline,
     select: wgpu::ComputePipeline,
     state: wgpu::Buffer,
     /// One parameter slot per frame in between.
     params: Option<wgpu::Buffer>,
-    /// Bound as the destination when there is no frame in between to write (the scoring runs without them).
-    dummy: wgpu::TextureView,
-    /// The next scene check is the first pair after a discontinuity: its previous difference starts from zero.
-    fresh: bool,
 }
 
 /// Frame interpolation as a stage of the GPU frame APIs: input 0 is the next source frame, the outputs are the
@@ -121,20 +118,18 @@ impl Scene {
         let common = include_str!("scene.wgsl");
         let pipeline = |label: &str, main: &str| compute_pipeline(device, cache, label, &pl, &entries, format!("{common}{main}"));
         Scene {
-            sad: pipeline("gpufx nn scene sad", include_str!("scene_sad.wgsl")),
-            decide: pipeline("gpufx nn scene decide", include_str!("scene_decide.wgsl")),
+            down: pipeline("gpufx nn scene down", include_str!("scene_down.wgsl")),
+            blur: pipeline("gpufx nn scene blur", include_str!("scene_blur.wgsl")),
+            ssim: pipeline("gpufx nn scene ssim", include_str!("scene_ssim.wgsl")),
             select: pipeline("gpufx nn scene select", include_str!("scene_select.wgsl")),
             layout,
             state: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("gpufx nn scene state"),
-                size: 16,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                size: SCENE_STATE,
+                usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
             }),
             params: None,
-            dummy: texture_with(device, 1, 1, "gpufx nn scene dummy", wgpu::TextureUsages::STORAGE_BINDING)
-                .create_view(&Default::default()),
-            fresh: true,
         }
     }
 }
@@ -185,10 +180,12 @@ impl InterpFrames {
         Ok(())
     }
 
-    /// Scene change threshold in percent (0 to 100) of the frame difference; 0 interpolates every pair.
+    /// Scene change threshold, an SSIM in [0, 1] as the official RIFE inference_video.py checks a pair (both
+    /// frames at 32x32): a pair whose SSIM is below it is a cut and is not interpolated. 0 interpolates every
+    /// pair; RIFE uses 0.2.
     pub fn set_scene_threshold(&mut self, threshold: f32) -> Result<(), Error> {
-        if !(0.0..=100.0).contains(&threshold) {
-            return Err(Error::Param(format!("scene threshold {threshold} is not in [0, 100]")));
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(Error::Param(format!("scene threshold {threshold} is not in [0, 1]")));
         }
         self.threshold = threshold;
         Ok(())
@@ -197,7 +194,6 @@ impl InterpFrames {
     /// Forgets the previous source frame: the next call takes a frame and makes none.
     pub fn reset(&mut self) {
         self.have_prev = false;
-        self.scene.fresh = true;
     }
 
     /// Whether a previous source frame is held (the next call may make frames).
@@ -282,7 +278,6 @@ impl InterpFrames {
             self.between.clear();
             self.key = Some(key);
             self.have_prev = false;
-            self.scene.fresh = true;
         }
         if !self.have_prev && self.times.iter().any(|&t| t < 1.0) {
             return Err(Error::Frame("frames in between need a previous source frame".into()));
@@ -304,7 +299,7 @@ impl InterpFrames {
             for (k, &t) in self.times.iter().enumerate().filter(|(_, t)| **t < 1.0) {
                 self.interp.encode(enc, prev_view, cur_view, &self.between[k].view, w, h, t)?;
             }
-            if self.have_prev && self.threshold > 0.0 {
+            if self.have_prev && self.threshold > 0.0 && self.times.iter().any(|&t| t < 1.0) {
                 self.encode_scene(w, h, prev, next, enc);
             }
             for ((b, out), &t) in self.between.iter_mut().zip(outs).zip(&self.times) {
@@ -319,24 +314,17 @@ impl InterpFrames {
             for b in &self.between[..outs.len()] {
                 b.slot.encode(conv, &mut cpass)?;
             }
-        } else if self.have_prev && self.threshold > 0.0 {
-            // Every pair with a previous frame is scored, with or without frames in between, so the previous
-            // difference tracks consecutive pairs.
-            self.encode_scene(w, h, prev, next, enc);
         }
         self.cur = next;
         self.have_prev = true;
         Ok(())
     }
 
-    /// The scene check of the pair and, on a cut, the nearer source frame over every frame in between.
+    /// The scene check of the pair and, on a cut, the nearer source frame over every frame in between. Only
+    /// called with a frame in between (t < 1) to write.
     fn encode_scene(&mut self, w: u32, h: u32, prev: usize, next: usize, enc: &mut wgpu::CommandEncoder) {
         let device = &self.ctx.device;
-        let n = self.times.len();
-        // One slot at least: the scoring runs without frames in between too.
-        let slots = n.max(1);
-        let step = ((w as u64 * h as u64).div_ceil(SCENE_SAMPLES) as f64).sqrt().ceil().max(1.0) as u32;
-        let (nx, ny) = (w.div_ceil(step), h.div_ceil(step));
+        let slots = self.times.len();
         let (prev, cur) = (&self.sources[prev].view, &self.sources[next].view);
         let s = &mut self.scene;
         let size = PARAM_SLOT * slots as u64;
@@ -350,8 +338,7 @@ impl InterpFrames {
         }
         let params = s.params.as_ref().expect("made");
         for k in 0..slots {
-            let t = self.times.get(k).copied().unwrap_or(0.5);
-            let words = [w, h, step, nx * ny, self.threshold.to_bits(), t.to_bits()];
+            let words = [w, h, self.threshold.to_bits(), self.times[k].to_bits()];
             let bytes: Vec<u8> = words.iter().flat_map(|v| v.to_le_bytes()).collect();
             self.ctx.queue.write_buffer(params, k as u64 * PARAM_SLOT, &bytes);
         }
@@ -372,22 +359,19 @@ impl InterpFrames {
                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(prev) },
                         wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(cur) },
                         wgpu::BindGroupEntry { binding: 3, resource: s.state.as_entire_binding() },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: wgpu::BindingResource::TextureView(if k < n { &self.between[k].view } else { &s.dummy }),
-                        },
+                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&self.between[k].view) },
                     ],
                 })
             })
             .collect();
-        // The sum restarts for every pair; the previous difference only after a discontinuity.
-        enc.clear_buffer(&s.state, 0, if s.fresh { None } else { Some(4) });
-        s.fresh = false;
+        // The pair is checked once (any slot's bindings do), then every frame in between is selected.
         let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("gpufx nn scene"), timestamp_writes: None });
         cpass.set_bind_group(0, &groups[0], &[]);
-        cpass.set_pipeline(&s.sad);
-        cpass.dispatch_workgroups(nx.div_ceil(16), ny.div_ceil(16), 1);
-        cpass.set_pipeline(&s.decide);
+        cpass.set_pipeline(&s.down);
+        cpass.dispatch_workgroups(4, 4, 1);
+        cpass.set_pipeline(&s.blur);
+        cpass.dispatch_workgroups(12, 1, 1);
+        cpass.set_pipeline(&s.ssim);
         cpass.dispatch_workgroups(1, 1, 1);
         cpass.set_pipeline(&s.select);
         // A t = 1 output is the source frame itself: never replaced.
