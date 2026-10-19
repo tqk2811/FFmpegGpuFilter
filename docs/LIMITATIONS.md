@@ -56,6 +56,14 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
   (fails on non-Apple GPUs). No fence: each frame waits on the CPU.
 - **Limitation:** Metal has no on-disk shader cache.
 
+## Frame interpolation (`gpufx_ai_framerate`)
+
+- **Untested:** the VideoToolbox (macOS) path of `gpufx_ai_framerate` (`gpufx_ai_interp_*_videotoolbox`); it has
+  never run on a Mac.
+- **Untested:** the linux64 bundle's `gpufx_ai_framerate` and `models/rife-v4.6.zip`; only Windows has run the filter.
+- **Limitation:** D3D12 and D3D11 are about 1.7x slower than Vulkan on the same GPU (RTX 4060 Laptop, 1080p: Vulkan
+  about 45 ms per frame, 4K about 174 ms); prefer Vulkan.
+
 ## Formats, color, alpha, HDR
 
 - **Limitation:** the GPU converts `nv12`, `p010le`, `yuv420p`/`422p`/`444p` (and their `10le` forms),

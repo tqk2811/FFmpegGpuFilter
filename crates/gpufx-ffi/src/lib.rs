@@ -22,8 +22,8 @@ use gpufx_core::{
     Package, PixelFormat, Program, Range, StreamInfo,
 };
 
-/// Bumped when the C ABI changes incompatibly. Must match `GPUFX_API_VERSION` in gpufx.h.
-const API_VERSION: u32 = 13;
+/// Stays 1 until the first release (pre-release: no bumps). Must match `GPUFX_API_VERSION` in gpufx.h.
+const API_VERSION: u32 = 1;
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
@@ -847,7 +847,7 @@ pub unsafe extern "C" fn gpufx_effect_convert_graph(
     })
 }
 
-// ---- Vulkan frames (since version 6) ----
+// ---- Vulkan frames ----
 
 #[repr(C)]
 pub struct GpufxVulkanDevice {
@@ -1042,7 +1042,7 @@ pub unsafe extern "C" fn gpufx_effect_process_vulkan(
     })
 }
 
-// ---- D3D12 and D3D11 frames (since version 7, Windows) ----
+// ---- D3D12 and D3D11 frames (Windows) ----
 
 #[repr(C)]
 pub struct GpufxD3D12Device {
@@ -1279,7 +1279,7 @@ pub unsafe extern "C" fn gpufx_effect_process_d3d11(
     })
 }
 
-// ---- VideoToolbox frames (since version 9, macOS) ----
+// ---- VideoToolbox frames (macOS) ----
 
 #[repr(C)]
 pub struct GpufxVtFrame {

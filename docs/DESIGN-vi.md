@@ -227,7 +227,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
   `auto` dựa trên lịch sử các
   frame đã xử lý: cửa sổ `enable` ngắn hơn một khoảng frame, hoặc luồng mà frame đầu đã nằm sau cửa
   sổ (trim, seek), thì không bao giờ được đặt và ở lại input 0; không reset khi seek; sau cửa sổ đầu
-  tiên luôn là input cuối. FFI (API 11, thêm `gpufx_effect_node_effects`): `gpufx_effect_set_node_bypass`, `gpufx_effect_set_bypass`,
+  tiên luôn là input cuối. FFI (thêm `gpufx_effect_node_effects`): `gpufx_effect_set_node_bypass`, `gpufx_effect_set_bypass`,
   `gpufx_effect_bypass_pad`.
 - **sendcmd / zmq**: `params` là lệnh lúc chạy (không phải option của filter), đổi giá trị trong khi stream
   chạy, ví dụ `sendcmd=c='2.0 gpufx@fx params strength=0.2'`. Lệnh nhận các cặp `node.name=value` cách nhau
@@ -441,7 +441,7 @@ Chi phí chính là upload/readback và chuyển màu trên CPU. Lộ trình b�
 Ở mọi giai đoạn, **định dạng gói và shader không đổi**: tác giả không cần biết frame đến từ
 CPU hay CUDA.
 
-### Đồ thị GPU trong một filter (xong, C API v5)
+### Đồ thị GPU trong một filter (xong)
 
 Một `gpufx` chạy cả đồ thị hiệu ứng, nên nhánh phức tạp ở lại trên GPU với mọi backend
 (Vulkan, D3D12, Metal), không cần hw frame:
@@ -493,10 +493,10 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
 C API (v5, chỉ thêm): `gpufx_effect_open_graph` (hàm open duy nhất), `gpufx_effect_output_count`, `gpufx_effect_output_name`,
 `gpufx_effect_output_source`, `gpufx_effect_output_pad_format[_count]`, `gpufx_effect_process_graph`,
 `gpufx_effect_convert_graph`; xem `gpufx.h`.
-Tham số inline (API 12, `GPUFX_API_VERSION` 12): `gpufx_effect_open_graph` nhận chúng ở mọi nút, còn `gpufx_effect_option_count` /
+Tham số inline: `gpufx_effect_open_graph` nhận chúng ở mọi nút, còn `gpufx_effect_option_count` /
 `gpufx_effect_option` đọc lại chúng (hằng số đã được áp; biểu thức, `enable` và `bypass` do bên gọi tự tính).
 
-### Frame Vulkan (xong, C API v6)
+### Frame Vulkan (xong)
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
@@ -637,7 +637,7 @@ FFmpeg 9 bị lỗi; các frames context do gpufx tạo bỏ cờ usage host-tra
 
 Số đo trên clip 90 s (RTX 4060 Laptop, GPU rảnh): xem [BENCHMARK-vi.md](BENCHMARK-vi.md).
 
-### Frame D3D12 và D3D11 (C API v7; đã build và cross-compile, chỉ job CI Windows chạy thử)
+### Frame D3D12 và D3D11 (đã build và cross-compile, chỉ job CI Windows chạy thử)
 
 ```sh
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i a.mp4 \
@@ -705,7 +705,7 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
 - Instance DX12 dùng chung bỏ `VALIDATION`, `GPU_BASED_VALIDATION` và `DEBUG` lấy từ biến môi trường: device
   cũng là của FFmpeg.
 
-### Frame VideoToolbox (C API v9; macOS, đã biên dịch nhưng chưa chạy trên máy Mac)
+### Frame VideoToolbox (macOS, đã biên dịch nhưng chưa chạy trên máy Mac)
 
 ```sh
 ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
@@ -736,6 +736,26 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
   liền nhau, graph có một frame split, input CPU đến muộn và việc từ chối BGRA. Job CI `ffmpeg-macos` build FFmpeg
   từ submodule có VideoToolbox và chạy với `REQUIRE_VT=1`: bị bỏ qua là hỏng, trừ khi FFmpeg không tạo được
   device hoặc không có adapter Metal.
+
+### Nội suy khung hình `gpufx_ai_framerate` (RIFE, gói gpufx-nn)
+
+Filter `gpufx_ai_framerate` (`ffmpeg/vf_gpufx_ai_framerate.c`) tăng frame rate bằng một mạng nơ-ron do libgpufx chạy
+trên cùng loại frame GPU và device như `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). Model là gói gpufx-nn
+(`docs/NN_MODEL_FORMAT-vi.md`) có `io.json` kind `frame_interp` (RIFE v4.6 do `gpufx-nnconv` chuyển từ ncnn); các
+layer chạy bằng compute shader WGSL, biên dịch qua cache shader.
+
+Filter đổi mỗi điểm của lưới frame rate đầu ra thành một thời điểm giữa hai frame nguồn rồi nhờ libgpufx tạo frame
+tại thời điểm đó. FFI (`gpufx.h`, kiểu mờ `GpufxAiInterp`):
+
+- `gpufx_ai_interp_open(model)` / `gpufx_ai_interp_free`: kiểm đường dẫn gói; model được nạp sau.
+- `gpufx_ai_interp_use_vulkan` / `_d3d12` / `_d3d11` / `_videotoolbox`: nạp model lên device của bên gọi (một lần
+  cho mỗi device); `gpufx_ai_interp_device` cho biết tên device.
+- `gpufx_ai_interp_process_vulkan` / `_d3d12` / `_d3d11` / `_videotoolbox`: nhận frame nguồn kế tiếp và tạo
+  `nb_outputs` frame giữa frame nguồn trước và nó, tại `times[k]` trong (0, 1]; thời điểm 1 là copy frame nguồn.
+  Frame nguồn được đổi sang RGBA một lần và giữ trên GPU cho lần gọi sau. Semaphore, layout và fence xử lý như
+  `gpufx_effect_process_*`.
+- `gpufx_ai_interp_set_scene(threshold)`: ngưỡng chuyển cảnh theo phần trăm; cặp đạt ngưỡng là cảnh cắt và mỗi frame
+  tạo ra là frame nguồn gần hơn. `gpufx_ai_interp_reset` quên frame trước (gián đoạn).
 
 ### Ngân sách VRAM (quy tắc cho mọi giai đoạn)
 

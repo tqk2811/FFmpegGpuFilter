@@ -229,7 +229,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
   `auto` rests on the history of the frames processed: an `enable` window shorter than one frame
   interval, or a stream whose first frame is already past the window (trim, seek), never sets it and
   stays on input 0; it is not reset on a seek; after the first window it is always the last input.
-  FFI (API 11, also `gpufx_effect_node_effects`): `gpufx_effect_set_node_bypass`,
+  FFI (also `gpufx_effect_node_effects`): `gpufx_effect_set_node_bypass`,
   `gpufx_effect_set_bypass`, `gpufx_effect_bypass_pad`.
 - **sendcmd / zmq**: `params` is a runtime command (not a filter option) that changes values while the stream
   runs, for example `sendcmd=c='2.0 gpufx@fx params strength=0.2'`. It takes `node.name=value` pairs separated
@@ -446,7 +446,7 @@ The main costs are upload/readback and color conversion on the CPU. The roadmap 
 In every phase, **the package format and shaders do not change**: authors never need to know whether a frame comes from
 the CPU or from CUDA.
 
-### GPU graph inside one filter (done, C API v5)
+### GPU graph inside one filter (done)
 
 A single `gpufx` runs a whole effect graph, so complex branching stays on the GPU on every
 backend (Vulkan, D3D12, Metal), without hardware frames:
@@ -499,11 +499,11 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
 C API (v5, additive): `gpufx_effect_open_graph` (the only open function), `gpufx_effect_output_count`, `gpufx_effect_output_name`,
 `gpufx_effect_output_source`, `gpufx_effect_output_pad_format[_count]`, `gpufx_effect_process_graph`,
 `gpufx_effect_convert_graph`; see `gpufx.h`.
-Inline parameters (API 12, `GPUFX_API_VERSION` 12): `gpufx_effect_open_graph` accepts them in every node, and `gpufx_effect_option_count` /
+Inline parameters: `gpufx_effect_open_graph` accepts them in every node, and `gpufx_effect_option_count` /
 `gpufx_effect_option` read them back (constants are already applied; the caller evaluates expressions, `enable` and
 `bypass`).
 
-### Vulkan frames (done, C API v6)
+### Vulkan frames (done)
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
@@ -651,7 +651,7 @@ image copies are broken; the frames contexts gpufx creates drop the host-transfe
 
 Measured on the 90 s clips (RTX 4060 Laptop, idle GPU): see [BENCHMARK.md](BENCHMARK.md).
 
-### D3D12 and D3D11 frames (C API v7; built and cross-compiled, run only by the Windows CI job)
+### D3D12 and D3D11 frames (built and cross-compiled, run only by the Windows CI job)
 
 ```sh
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i a.mp4 \
@@ -723,7 +723,7 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
 - The shared DX12 instance ignores `VALIDATION`, `GPU_BASED_VALIDATION` and `DEBUG` from the environment: the
   device is FFmpeg's too.
 
-### VideoToolbox frames (C API v9; macOS, compiled but not yet run on a Mac)
+### VideoToolbox frames (macOS, compiled but not yet run on a Mac)
 
 ```sh
 ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
@@ -755,6 +755,27 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
   frames, two filters in a row, a split-frame graph, a late software input and a BGRA rejection. The CI job
   `ffmpeg-macos` builds FFmpeg from the submodule with VideoToolbox and runs it with `REQUIRE_VT=1`: a skip
   fails unless FFmpeg cannot create the device or there is no Metal adapter.
+
+### Frame interpolation `gpufx_ai_framerate` (RIFE, gpufx-nn packages)
+
+The `gpufx_ai_framerate` filter (`ffmpeg/vf_gpufx_ai_framerate.c`) raises the frame rate with a neural network run
+by libgpufx on the same GPU frames and devices as `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). The model is a
+gpufx-nn package (`docs/NN_MODEL_FORMAT.md`) whose `io.json` has kind `frame_interp` (RIFE v4.6 converted from
+ncnn by `gpufx-nnconv`); the layers run as WGSL compute shaders, compiled through the shader cache.
+
+The filter maps every point of the output frame-rate grid to a time between two source frames and asks libgpufx
+for the frame at that time. FFI (`gpufx.h`, opaque `GpufxAiInterp`):
+
+- `gpufx_ai_interp_open(model)` / `gpufx_ai_interp_free`: checks the package path; the model loads later.
+- `gpufx_ai_interp_use_vulkan` / `_d3d12` / `_d3d11` / `_videotoolbox`: load the model on the caller's device
+  (once per device); `gpufx_ai_interp_device` names the device.
+- `gpufx_ai_interp_process_vulkan` / `_d3d12` / `_d3d11` / `_videotoolbox`: take the next source frame and make
+  `nb_outputs` frames between the previous source frame and it, at `times[k]` in (0, 1]; a time of 1 copies the
+  source frame. The source frame is converted to RGBA once and stays on the GPU for the next call. Semaphores,
+  layouts and fences behave as in `gpufx_effect_process_*`.
+- `gpufx_ai_interp_set_scene(threshold)`: scene change threshold in percent; a pair scoring at least this is a
+  cut and each frame made is the nearer source frame. `gpufx_ai_interp_reset` forgets the previous frame (a
+  discontinuity).
 
 ### VRAM budget (rule for every phase)
 

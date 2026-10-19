@@ -55,6 +55,14 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   lỗi). Không có fence: mỗi frame chờ CPU.
 - **Hạn chế:** Metal không có cache shader trên đĩa.
 
+## Nội suy khung hình (`gpufx_ai_framerate`)
+
+- **Chưa test:** đường VideoToolbox (macOS) của `gpufx_ai_framerate` (`gpufx_ai_interp_*_videotoolbox`); chưa từng
+  chạy trên máy Mac.
+- **Chưa test:** `gpufx_ai_framerate` và `models/rife-v4.6.zip` trong bundle linux64; mới chỉ chạy filter trên Windows.
+- **Hạn chế:** D3D12 và D3D11 chậm hơn Vulkan khoảng 1,7 lần trên cùng GPU (RTX 4060 Laptop, 1080p: Vulkan khoảng
+  45 ms mỗi frame, 4K khoảng 174 ms); nên dùng Vulkan.
+
 ## Định dạng, màu, alpha, HDR
 
 - **Hạn chế:** GPU chỉ chuyển `nv12`, `p010le`, `yuv420p`/`422p`/`444p` (cả bản `10le`), `yuva420p`/`444p`, `rgba`,
