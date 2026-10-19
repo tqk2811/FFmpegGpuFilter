@@ -57,7 +57,7 @@ Evidence (FFmpeg `03d9533176`, 320x180 nv12 / yuv420p, Intel = `vk:1`):
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:1,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx=effect=vignette.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip,gpufx_download,format=nv12" out.mp4
 ```
 
 Software inputs given straight to `gpufx` are uploaded by `gpufx` itself and are fine too, and `hwdownload`
@@ -74,7 +74,7 @@ device with both options:
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:1,disable_multiplane=1,linear_images=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,hwupload,gpufx=effect=vignette.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
 ```
 
 Both are needed:

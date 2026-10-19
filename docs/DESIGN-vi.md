@@ -18,23 +18,24 @@ English: [DESIGN.md](DESIGN.md)
 
 ## 2. Tổng quan kiến trúc
 
-```
- ffmpeg -vf "gpufx=effect='vignette.zip=strength=0.8'"
-            │
-            ▼
- ┌────────────────────────────┐   C ABI (gpufx.h)    ┌──────────────────────────────────┐
- │ libavfilter/vf_gpufx.c     │ ───────────────────▶ │ libgpufx (Rust, crates/gpufx-ffi) │
- │  - option effect/graph     │                      │  gpufx-core:                      │
- │  - pad input động theo     │                      │   package  : đọc zip / thư mục    │
- │    manifest (1..N input)   │                      │   manifest : schema, kiểm tra     │
- │  - framesync nhiều input   │                      │   params   : layout uniform       │
- │  - biểu thức theo t, n     │                      │   runtime  : biên dịch shader,    │
- │  - sendcmd / timeline      │                      │              chạy pass trên wgpu  │
- └────────────────────────────┘                      └───────────────┬──────────────────┘
-                                                                     │ wgpu
-                                         ┌────────────┬──────────────┼─────────────┐
-                                         ▼            ▼              ▼             ▼
-                                      Vulkan      DirectX 12       Metal       (WebGPU)
+```mermaid
+flowchart TB
+    cmd["ffmpeg -vf &quot;gpufx=graph='vignette.zip=strength=0.8'&quot;"]
+    filter["<b>libavfilter/vf_gpufx.c</b><br/>- option graph<br/>- pad input động theo manifest (1..N input)<br/>- framesync nhiều input<br/>- biểu thức theo t, n<br/>- sendcmd / timeline"]
+    lib["<b>libgpufx</b> (Rust, crates/gpufx-ffi)<br/>gpufx-core:<br/>package: đọc zip / thư mục<br/>manifest: schema, kiểm tra<br/>params: layout uniform<br/>runtime: biên dịch shader, chạy pass trên wgpu"]
+    wgpu(["wgpu"])
+    vk[Vulkan]
+    dx[DirectX 12]
+    mtl[Metal]
+    web["(WebGPU)"]
+
+    cmd --> filter
+    filter -- "C ABI (gpufx.h)" --> lib
+    lib --> wgpu
+    wgpu --> vk
+    wgpu --> dx
+    wgpu --> mtl
+    wgpu --> web
 ```
 
 **Vì sao chỉ một filter?** FFmpeg không có cơ chế plugin filter lúc chạy: mọi filter phải
@@ -136,21 +137,23 @@ tạo graph thay vì chạy sai.
 ## 5. Filter FFmpeg `gpufx`
 
 ```
-gpufx=effect='<zip|thư mục>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
+gpufx=graph='<zip|thư mục>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
 gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
 ```
 
-- **effect**: đường dẫn gói. Số input của filter lấy từ manifest.
-- **Chuỗi hiệu ứng** `effect='a.zip|b.zip|c.zip'`: chạy lần lượt như ba filter nối nhau, nhưng
+- **graph**: option duy nhất. Một hiệu ứng viết `graph=a.zip`; chuỗi viết `graph='a.zip|b.zip|c.zip'`; cả đồ thị
+  nhiều input và output viết bằng nhãn (xem "Đồ thị GPU trong một filter" ở mục 6). Số input của filter lấy từ
+  manifest của hiệu ứng đầu (hoặc, với graph, pad lớn nhất được đọc cộng một). Câu lệnh không cần nhãn, như filtergraph
+  của FFmpeg: input không nhãn gắn vào pad input thấp nhất mà không nhãn nào trong graph chỉ tới, và output không nhãn
+  thành output của graph (luật đầy đủ ở mục 6).
+- **Chuỗi hiệu ứng** `graph='a.zip|b.zip|c.zip'`: chạy lần lượt như ba filter nối nhau, nhưng
   mọi pass nằm trong một lần submit GPU, không qua frame trung gian.
   Input của filter là input của hiệu ứng đầu; chỉ hiệu ứng đầu được có nhiều input. Output
   theo quy tắc của hiệu ứng cuối. Quy tắc của hiệu ứng sau được kiểm như khi nối filter:
   format là format đầu tiên trong `output.formats` của hiệu ứng trước mà hiệu ứng sau nhận,
   kích thước là kích thước input đầu. Frame vẫn là RGBA trên GPU, không chuyển sang format đó.
-  Mỗi hiệu ứng có tham số inline riêng (`effect='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, xem
+  Mỗi hiệu ứng có tham số inline riêng (`graph='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, xem
   "Tham số inline" bên dưới). Dấu cách quanh `|` được bỏ qua.
-- **graph**: cả đồ thị hiệu ứng với nhiều input và output, thay cho `effect`; xem "Đồ thị GPU trong
-  một filter" ở mục 6.
 - **Chỉ trả ra frame GPU**, giống các filter `*_cuda`: mọi output là frame Vulkan, D3D12, D3D11 hoặc VideoToolbox, nên trước
   filter CPU và encoder phải có `hwdownload,format=<fmt>` hoặc `gpufx_download,format=<fmt>`. Input có thể là frame
   GPU của API đó hoặc frame CPU; frame CPU được filter tự upload (`av_hwframe_transfer_data` vào frames context
@@ -187,26 +190,26 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
   (relabel hoặc copy như trên). `0`: input pad nguồn của mỗi output (input 0 với một effect).
   `auto`: pad đó cho tới khi filter đã bật ít nhất một frame, sau đó là input pad cuối; dành cho
   transition (input 0 chuyển dần sang input cuối) cần tiếp tục hiện clip nó kết thúc ở đó:
-  `[a][b]gpufx=effect=xfade.zip:enable='between(t,2,3)':bypass=auto`. Sau cửa sổ bật đầu tiên nó
+  `[a][b]gpufx=graph=xfade.zip:enable='between(t,2,3)':bypass=auto`. Sau cửa sổ bật đầu tiên nó
   giữ input cuối, kể cả trước các cửa sổ sau. Pad được chọn phải cùng kích thước với output, nếu
   không frame đó báo lỗi (`EINVAL`), không bao giờ lặng lẽ lấy input khác.
 - **Tham số inline**: viết ngay sau tên package, giống option của một filter FFmpeg gốc:
-  `pkg.zip=key=value:key2=value2`, trong `effect=` (kể cả chain: `effect='a.zip=k=1|b.zip'`) và trong mọi node của
+  `pkg.zip=key=value:key2=value2`, trong `graph=` (kể cả chain: `graph='a.zip=k=1|b.zip'`) và trong mọi node của
   `graph=` (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`). Key phải có tên (không có giá trị theo vị trí). Giá
   trị là literal (`0.5`, `1,0,0`, `#ff8800`) hoặc **biểu thức FFmpeg** theo `t`, `n`, `w`, `h`, `a` (`w/h`), `sar`,
   `dar` (`a*sar`), tính lại mỗi frame. Đây là cách làm keyframe/transition không cần tool ngoài.
   Key lạ là lỗi có nêu tên effect và key; key cho hai lần cũng vậy. Filter không có option `params`; muốn đổi
   giá trị trong lúc stream chạy thì dùng lệnh `sendcmd` bên dưới.
-  - **Escape.** Bọc cả giá trị `effect=`/`graph=` trong `'...'`. Bộ parse option của FFmpeg tách option của filter
+  - **Escape.** Bọc cả giá trị `graph=` trong `'...'`. Bộ parse option của FFmpeg tách option của filter
     tại `:` *sau khi* đã bỏ các dấu nháy đó, nên trên dòng lệnh ffmpeg các key inline phân tách bằng `&` (không
     cần escape; dấu `:` kiểu FFmpeg cũng được chấp nhận nhưng phải viết `\:`, vd `a=1\:b=2`; một key thì không cần
     dấu phân tách), còn dấu phẩy trong biểu thức giữ `\,` như thường lệ:
-    `-vf "gpufx=effect='wipe.zip=progress=clip(t/2\,0\,1)&angle=45'"`,
-    `effect='vignette.zip=strength=0.7'`. Bên trong chính chuỗi effect/graph (sau khi FFmpeg đã bỏ escape),
+    `-vf "gpufx=graph='wipe.zip=progress=clip(t/2\,0\,1)&angle=45'"`,
+    `graph='vignette.zip=strength=0.7'`. Bên trong chính chuỗi graph (sau khi FFmpeg đã bỏ escape),
     `\` escape một ký tự trong `\ ' : & ; | = [ ]` (`\&` là `&` nguyên văn trong giá trị; đứng trước ký tự khác thì `\` giữ nguyên, nên đường dẫn
     Windows vẫn dùng được) và `'...'` bọc một giá trị; ở tầng này dấu phẩy không cần escape.
 - **`enable=<expr>` inline** trên một effect bật/tắt effect đó theo từng frame (bật khi biểu thức khác 0; hằng
-  số cũng là biểu thức): `effect='a.zip|b.zip=enable=lt(t\,2)'`. Node graph gồm nhiều effect
+  số cũng là biểu thức): `graph='a.zip|b.zip=enable=lt(t\,2)'`. Node graph gồm nhiều effect
   (`grayscale.zip|vignette.zip`) thì đặt `enable` trên từng effect cần bật/tắt. Nó không phải option timeline
   `enable=` của filter, vốn nằm ngoài chuỗi effect. Package không được khai báo param tên `enable`.
   Effect bị tắt copy input đầu của nó vào texture output của nó (effect nào cũng có kích thước của
@@ -251,18 +254,139 @@ Ví dụ:
 VK="-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk"   # hoặc d3d12va=dx ... dx
 
 # 1 input, tham số động theo thời gian (gpufx tự upload frame, hwdownload đưa về)
-ffmpeg $VK -i in.mp4 -vf "gpufx=effect='vignette.zip=strength=clip(t/2\,0\,1)&color=#200040',hwdownload,format=yuv420p" out.mp4
+ffmpeg $VK -i in.mp4 -vf "gpufx=graph='vignette.zip=strength=clip(t/2\,0\,1)&color=#200040',hwdownload,format=yuv420p" out.mp4
 
 # transition 2 input
 ffmpeg $VK -i a.mp4 -i b.mp4 -filter_complex \
-  "[0][1]gpufx=effect='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
+  "[0][1]gpufx=graph='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
 
 # xâu chuỗi nhiều hiệu ứng: hai filter, frame nằm trên GPU giữa hai filter
-ffmpeg $VK -i in.mp4 -vf "gpufx=effect=gaussian-blur.zip,gpufx=effect='gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
+ffmpeg $VK -i in.mp4 -vf "gpufx=graph=gaussian-blur.zip,gpufx=graph='gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
 
 # cùng kết quả trong một filter: một lần submit GPU
-ffmpeg $VK -i in.mp4 -vf "gpufx=effect='gaussian-blur.zip|gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
+ffmpeg $VK -i in.mp4 -vf "gpufx=graph='gaussian-blur.zip|gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
 ```
+
+### 5.1 Tham chiếu: option của các filter FFmpeg
+
+Thư viện định nghĩa ba filter (`ffmpeg/vf_gpufx.c`, `ffmpeg/vf_gpufx_transfer.c`). Các gạch đầu dòng ở trên mô tả
+hành vi; các bảng dưới đây liệt kê đủ mọi option và key ở một chỗ.
+
+**Filter `gpufx`** (input và output động, `AVFILTER_FLAG_HWDEVICE`, hỗ trợ timeline nội bộ)
+
+| Option | Kiểu | Mặc định | Khoảng / giá trị | Ý nghĩa và ràng buộc |
+|--------|------|----------|------------------|----------------------|
+| `graph` | string | không có | đường dẫn một effect, chuỗi `\|` hoặc graph có nhãn | Bắt buộc: thiếu thì filter lỗi ở init. Số input pad là số input của effect đầu với chain không nhãn, còn lại là pad lớn nhất được đọc (có nhãn hoặc gắn ngầm) cộng một; số output pad là số output của graph |
+| `backend` | string | `auto` | `auto`, `vulkan` (`vk`), `dx12` (`d3d12`, `directx`), `metal` (`mtl`); không phân biệt hoa thường | Chỉ để test: `auto` theo device của frame. `gl` bị từ chối; `metal` bị từ chối nếu bản build không có VideoToolbox (macOS). Tên khác báo lỗi khi mở graph |
+| `shortest` | bool | `0` | `0`, `1` | `0`: chỉ input 0 quyết định điểm kết thúc (input khác giữ frame cuối, và hiện frame trống trước frame đầu của nó). `1`: output kết thúc khi một input bất kỳ kết thúc |
+| `out_format` | pix_fmt | không có (chọn theo input) | tên pixel format bất kỳ của FFmpeg | Ép format của mọi output (`sw_format` của GPU frame). Phải nằm trong `output.formats` của effect, libgpufx ghi được và device lưu được, nếu không cấu hình lỗi. Một format cho mọi output |
+| `passthrough` | int (enum) | `auto` | `auto`, `off` | Khi `enable=` tắt filter: `auto` gắn nhãn lại texture input thành frame output, không copy GPU, nếu pixel không đổi và filter kế tiếp là `gpufx`, `gpufx_download` hoặc `hwdownload`; `off` luôn copy |
+| `bypass` | int (enum) | `0` | `0`, `auto` | Input được chuyển tiếp khi filter bị `enable=` tắt: `0` là input pad nguồn của từng output, `auto` là pad đó cho tới khi filter được bật một frame, sau đó là input pad cuối. Pad được chọn phải cùng size với output, nếu không `EINVAL` |
+| `enable` | string (expression) | không có | expression timeline của FFmpeg | Option timeline chung của FFmpeg (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): bằng 0 thì filter đi đường disabled mô tả ở `passthrough`/`bypass`. Khác với `enable=` inline của một effect |
+
+Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ định effect. Các thông tin khác không phải option:
+
+| Mục | Giá trị |
+|-----|---------|
+| Tên pad | Do libgpufx đặt (`gpufx_effect_input_name`, `gpufx_effect_output_name`) |
+| Lệnh runtime (`process_command`, `sendcmd`, zmq) | Chỉ có `params`; lệnh khác trả `ENOSYS` (lệnh timeline chung `enable` do FFmpeg tự xử lý) |
+| Tham số của `params` | Cặp `node.name=value` phân tách bằng `\|`; thêm `node.enable=<expr>` và `node.bypass=0\|auto`, hoặc `enable`/`bypass` trần (xem 5.2) |
+| Frame output | Chỉ GPU frame (Vulkan, D3D12, D3D11, VideoToolbox) |
+
+**Filter `gpufx_upload`** (một input, một output; vào là software frame, ra là Vulkan frame; `AVFILTER_FLAG_HWDEVICE`) và
+**filter `gpufx_download`** (vào Vulkan frame, ra software frame). Cả hai không hỗ trợ timeline hay lệnh runtime.
+
+| Filter | Option | Kiểu | Mặc định | Khoảng | Ý nghĩa |
+|--------|--------|------|----------|--------|---------|
+| `gpufx_upload` | `depth` | int | `3` | 1..16 | Số staging buffer trong ring: số lần copy đang chạy trước khi CPU phải chờ. Pool Vulkan frame bắt đầu với `depth + 2 + extra_hw_frames` frame |
+| `gpufx_download` | `latency` | int | `2` | 0..16 | Số frame giữ đang chạy: frame N được gửi đi sau khi frame N+`latency` đã submit (`0` chờ từng frame). Output trễ `latency` frame, được xả hết ở cuối stream |
+
+### 5.2 Tham chiếu: key trong chuỗi `graph`
+
+`parse_effect_item` (`crates/gpufx-core/src/graph.rs`) phân tích từng effect: `path[=key=value[:key=value...]]`.
+
+| Mục | Quy tắc |
+|-----|---------|
+| Dấu ngăn giữa các key | `:` (kiểu FFmpeg) hoặc `&`; trên dòng lệnh ffmpeg `&` không cần escape, còn `:` phải viết `\:` |
+| Tên key | Tên parameter của package, `enable` hoặc `bypass`. Key khác là lỗi, nêu tên effect và các key nó có; key lặp hai lần là lỗi; token không có `=` là lỗi |
+| Escape và quote | `\` escape một trong `\ ' : & ; \| = [ ]` (trước ký tự khác thì `\` giữ nguyên, nên đường dẫn Windows dùng được); `'...'` bọc một giá trị; `'` không đóng là lỗi |
+| `enable=<expr>` | Theo từng frame, bật khi expression khác 0 (hằng số cũng là expression). Tắt: effect copy một input vào texture output (một compute pass, không cấp phát lại gì). Package không được khai báo parameter `enable` |
+| `bypass=0\|auto` | Input mà effect đang tắt sẽ copy: `0` input đầu, `auto` input đầu cho tới khi `enable` đúng một lần, sau đó là input cuối. Giá trị khác là lỗi. Package không được khai báo parameter `bypass` |
+| Hằng của parameter | Literal parse được theo kiểu của parameter (`0.5`, `1,0,0`, `#ff8800`, `true`) được đặt khi mở graph và kẹp vào `min`/`max`; parameter `expr` nhận chữ expression theo cùng cách |
+| Expression của parameter | Giá trị khác là expression FFmpeg tính lại mỗi frame theo `t` (giây, `NaN` trước timestamp đầu, đưa vào shader là 0), `n` (số frame của filter này), `w`, `h` (size output), `a` (`w/h`), `sar`, `dar` (`a*sar`) |
+| Câu lệnh graph | `;` ngăn các câu lệnh; nhãn `[0]`, `[1]`... chỉ input pad của filter, nhãn khác (chữ, số, `_`, `-`) nối các effect. Ở mỗi phía của câu lệnh, nhãn bỏ hết hoặc ghi đủ. Input không nhãn lấy các input pad thấp nhất mà không nhãn nào ở bất kỳ đâu trong graph chỉ tới, kể cả các câu phía sau (`ffmpeg -filter_complex` gắn stream chưa dùng đầu tiên theo thứ tự, không nhìn trước; gpufx nhìn trước vì mỗi pad chỉ được đọc một lần). Output không nhãn thành output của graph tên `out0`, `out1`..., bỏ qua nhãn graph đã dùng; `split` không nhãn ghi hai output. Chỉ một câu lệnh hoàn toàn không nhãn mà nút là chain package (không phải `split`/`null`) mới chạy như chain cũ: pad đặt theo input của manifest đầu, output `default`; thêm bất kỳ nhãn nào thì pad thành `in0`, `in1`... và output `out0`... `null` đứng một mình là graph hợp lệ, không làm gì |
+| Runtime (lệnh `params`) | `node.name=value` thay parameter (node = nhãn package, chỉ số từ 0, nhãn output của graph hoặc tên trần); `node.enable=`/`node.bypass=` thay giá trị inline của mọi effect node đó chỉ tới |
+
+### 5.3 Tham chiếu: shader nhận gì ngoài parameter
+
+Mỗi pass là một compute shader. Runtime ghi một prelude trước code của tác giả (`prelude` và `glsl_with_prelude` trong
+`crates/gpufx-core/src/runtime.rs`); code của tác giả không được khai báo lại các tên này. Chi tiết bố cục và ví dụ:
+[EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md).
+
+**Uniform block `globals` có sẵn** (binding 0, 32 byte, ghi lại cho mỗi frame của mỗi effect)
+
+| Field | Kiểu WGSL | Kiểu GLSL | Offset | Ý nghĩa |
+|-------|-----------|-----------|--------|---------|
+| `size` | `vec2f` | `vec2` | 0 | Size output tính bằng pixel (rộng, cao) dạng float. Là size của input đầu của effect; giống nhau cho mọi pass của nó |
+| `time` | `f32` | `float` | 8 | Thời điểm hiển thị tính bằng giây (`t` của filter). Mất độ chính xác với clip dài (bước khoảng 0.008 s sau một ngày) |
+| `frame` | `u32` | `uint` | 12 | Số frame của instance filter này (cũng là `n` trong expression); về 0 khi seek, nên không dùng cho chuyển động theo thời gian |
+| `time_int` | `i32` | `int` | 16 | Số giây nguyên của thời gian (floor; bão hòa ngoài khoảng i32) |
+| `time_frac` | `f32` | `float` | 20 | Phần lẻ của thời gian trong [0, 1), kể cả khi thời gian âm. `time_int + time_frac` là thời gian chính xác |
+| `pixel_aspect` | `f32` | `float` | 24 | Sample aspect ratio (rộng / cao của một pixel); 1 với pixel vuông hoặc khi giá trị không hợp lệ |
+| `gpufx_reserved` | `f32` | `float` | 28 | Luôn bằng 0; để dành |
+
+Thời gian không hữu hạn thành 0.
+
+**Uniform block `params`** (binding 1): `GpufxParams`, mỗi parameter của manifest một field theo thứ tự manifest, tên như parameter.
+
+| Kiểu trong manifest | WGSL | GLSL | Align / size (byte) | Ghi chú |
+|---------------------|------|------|---------------------|---------|
+| `float` | `f32` | `float` | 4 / 4 | |
+| `int` | `i32` | `int` | 4 / 4 | Làm tròn tới số nguyên gần nhất |
+| `bool` | `u32` | `uint` | 4 / 4 | 0 hoặc 1 |
+| `vec2` | `vec2f` | `vec2` | 8 / 8 | |
+| `vec3` | `vec3f` | `vec3` | 16 / 12 | Một scalar có thể nằm ở ô thứ tư |
+| `vec4`, `color` | `vec4f` | `vec4` | 16 / 16 | `color` là RGBA 0..1 |
+| `expr` | không có field | không có field | không | Thành hàm `gpufx_expr_<name>(<vars>)` nhận và trả `f32`/`float` (đối số theo thứ tự `vars`); NaN và vô cực thành 0 |
+
+Size struct làm tròn lên bội của 16 byte. Không có uniform parameter nào thì struct chứa một float `_unused`. Chi tiết về `expr`
+(hàm cho phép, giới hạn, build lại pipeline): [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md).
+
+**Binding** (bind group 0 cho mọi pass)
+
+| Binding | Tên WGSL / GLSL | Loại | Nội dung |
+|---------|-----------------|------|----------|
+| 0 | `globals` | uniform buffer | `GpufxGlobals` (ở trên) |
+| 1 | `params` | uniform buffer | `GpufxParams` (ở trên) |
+| 2 | `out_tex` | storage texture 2D chỉ ghi | Output của pass. `rgba8unorm` (`rgba8` trong GLSL), hoặc `rgba16float` (`rgba16f`) khi một input hoặc output của chuỗi quá 8 bit |
+| 3 | `smp` | sampler filtering | Linear, clamp ở mép, linear giữa các mip level; trong GLSL là `sampler` riêng (dùng `sampler2D(tex, smp)`) |
+| 4 + i | tên thứ i trong `inputs` của pass | texture đọc, float, filterable | `texture_2d<f32>` (`texture2D`), hoặc `texture_2d_array<f32>` (`texture2DArray`) với texture của package có `layers`/`grid`. Manifest không có `inputs` thì danh sách là mọi input của manifest, rồi mọi texture của package |
+
+Một tên trong `inputs` được tra theo thứ tự: input của manifest (frame đã chuyển đổi; chỉ level 0, trừ khi input khai báo
+`mipmaps` thì cả chuỗi mip), texture của package (`rgba8unorm`, nạp một lần, chuỗi mip tạo trên CPU khi có `mipmaps`), hoặc
+output của pass trước (level 0). Pass không đọc được `out_tex`.
+
+**Dispatch và tọa độ**
+
+| Mục | Giá trị |
+|-----|---------|
+| Dispatch | Mỗi pass một lần `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)`, theo thứ tự trong manifest, tất cả trong một compute pass; `w`, `h` = size output. Shader khai báo `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); runtime không kiểm tra điều này. Thread vượt mép phải `return`: `gpufx_in_bounds(id)` |
+| Tọa độ pixel | `id.xy` của `global_invocation_id`, số nguyên, gốc ở góc trên trái, y hướng xuống; `textureLoad`/`imageStore` dùng `vec2i(x, y)` |
+| Tọa độ chuẩn hóa | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, tâm pixel, 0..1, v hướng xuống |
+| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi). Bản GLSL nhận `uvec3` |
+| Đạo hàm | Compute shader không có: dùng `textureSampleLevel` / `textureLod` hoặc `textureLoad` |
+| Tên dành riêng | `globals`, `params`, `out_tex`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable` hay `bypass` |
+
+**Màu**
+
+| Mục | Giá trị |
+|-----|---------|
+| Thứ tự kênh và alpha | RGBA, alpha thẳng (straight, không premultiplied); libgpufx chia input premultiplied cho alpha trước shader và nhân lại ở output khi cần |
+| Dải giá trị | Float 0..1 (`unorm` 8 bit, hoặc half float khi trên 8 bit) |
+| Transfer | Không chuyển gamma: giá trị như trong video (kiểu sRGB / BT.709), không phải ánh sáng tuyến tính; HDR PQ/HLG bị coi như SDR |
+| Chuyển format | YUV hay format khác được chuyển sang/từ RGBA trên GPU, ngoài shader; shader không bao giờ thấy format nguồn |
+| Texture của package | Luôn `rgba8unorm`; alpha thẳng trừ khi `premultiply: true` (premultiplied; filter đúng); mip level luôn tính theo trọng số alpha |
+| Mip level của input | Tạo trên GPU mỗi frame bằng trung bình có trọng số alpha của 2x2 texel |
 
 ## 6. Đường đi của frame và hiệu năng
 
@@ -330,20 +454,28 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
 
 - Các câu cách nhau bởi `;`; mỗi câu đọc nhãn, chạy một nút rồi ghi nhãn.
 - `[0]`, `[1]`... là input pad của filter (tên `in0`, `in1`...). Mọi pad tới pad cao nhất đều phải được đọc.
+- Có thể bỏ nhãn, như filtergraph của FFmpeg, nhưng ở mỗi phía của câu lệnh thì bỏ hết hoặc ghi đủ. Input không nhãn
+  gắn vào các input pad thấp nhất mà không nhãn nào ở bất kỳ đâu trong graph chỉ tới, kể cả các câu phía sau
+  (`[1]a.zip[x]; b.zip[y]` cho `b.zip` pad `[0]`). Khác với `ffmpeg -filter_complex`, vốn gắn stream chưa dùng đầu
+  tiên theo thứ tự mà không nhìn trước; gpufx nhìn trước vì mỗi pad chỉ được đọc một lần. Output không nhãn thành
+  output của graph tên `out0`, `out1`..., bỏ qua nhãn graph đã dùng; `split` không nhãn ghi hai output.
+- Chỉ mô tả gồm một câu lệnh hoàn toàn không nhãn mà nút là chain package (không phải `split`/`null`) mới chạy như
+  chain cũ: pad đặt theo input của manifest đầu, output `default`. Thêm bất kỳ nhãn nào thì tên pad thành `in0`,
+  `in1`... và output `out0`. `null` đứng một mình là graph hợp lệ, không làm gì.
 - Nhãn khác (chữ, số, `_`, `-`; không có `.` vì trùng với `nhãn.tham_số`) được ghi đúng một lần và đọc nhiều nhất một lần (muốn đọc hai lần thì `split`).
 - **Output**: các nhãn không câu nào đọc là output pad của filter, theo thứ tự được ghi (được phép
   nhiều output; tên pad là nhãn). Không có danh sách output riêng: nhãn gõ sai thành output pad thừa,
   FFmpeg báo là chưa nối.
 - Nút là `split` (một nhãn vào, bao nhiêu nhãn ra cũng được), `null` (một vào, một ra), hoặc các gói
-  nối bằng `|` như `effect=`, đọc số nhãn bằng số input của gói đầu và ghi một nhãn. `split` và
+  nối bằng `|` như `graph=`, đọc số nhãn bằng số input của gói đầu và ghi một nhãn. `split` và
   `null` không tốn gì: output của chúng *chính là* input (hai cạnh cùng đọc một texture).
 - Hiệu ứng ghi kích thước input đầu của nó; output pad k lấy kích thước, SAR và frame rate của input
   pad mà nguồn của nó đi ra. Frame ra theo sự kiện của input 0 (framesync như khi có nhiều input).
 - Mỗi input pad upload một lần, mỗi output pad readback một lần, mọi output qua một buffer readback
   dùng chung; cả đồ thị chạy trong một lần submit, hiệu ứng theo thứ tự topo. Các frame output của
   một sự kiện được gửi cùng nhau.
-- `effect='a.zip|b.zip'` là đồ thị thẳng: `EffectChain` bọc `EffectGraph`, và `Effect` đơn cũng chạy
-  qua cùng đoạn mã. `effect` và `graph` không dùng cùng lúc.
+- `graph='a.zip|b.zip'` là đồ thị thẳng: `EffectGraph::parse` dựng nó, và một hiệu ứng đơn cũng chạy
+  qua cùng đoạn mã. `graph` là option duy nhất của filter.
 - Tham số viết inline sau từng gói của một nút (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`, xem "Tham số
   inline" ở mục 5), nên ví dụ graph có giá trị là
   `graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=clip((t-1)/1.5\,0\,1)&enable=between(t\,1\,3)&bypass=auto[x]'`.
@@ -358,18 +490,17 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
   chuyển sang format của output.
 - Đường dẫn trong đồ thị không được chứa `[`, `]`, `;` hoặc `|`.
 
-C API (v5, chỉ thêm): `gpufx_effect_open_graph`, `gpufx_effect_output_count`, `gpufx_effect_output_name`,
+C API (v5, chỉ thêm): `gpufx_effect_open_graph` (hàm open duy nhất), `gpufx_effect_output_count`, `gpufx_effect_output_name`,
 `gpufx_effect_output_source`, `gpufx_effect_output_pad_format[_count]`, `gpufx_effect_process_graph`,
 `gpufx_effect_convert_graph`; xem `gpufx.h`.
-Tham số inline (API 12, `GPUFX_API_VERSION` 12): `gpufx_effect_open_effects(effects, backend)` mở một chuỗi chain
-có option inline, `gpufx_effect_open_graph` nhận chúng ở mọi nút, còn `gpufx_effect_option_count` /
+Tham số inline (API 12, `GPUFX_API_VERSION` 12): `gpufx_effect_open_graph` nhận chúng ở mọi nút, còn `gpufx_effect_option_count` /
 `gpufx_effect_option` đọc lại chúng (hằng số đã được áp; biểu thức, `enable` và `bypass` do bên gọi tự tính).
 
 ### Frame Vulkan (xong, C API v6)
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,hwupload,gpufx=effect=vignette.zip,gpufx=effect=sepia.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,hwdownload,format=nv12" out.mp4
 ```
 
 - Mọi pad input nhận thêm `AV_PIX_FMT_VULKAN`, pad output chỉ nhận format GPU (mục 5). Input có thể trộn frame
@@ -462,7 +593,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx=effect=vignette.zip,gpufx=effect=sepia.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
 ```
 
 Thay thẳng cho `hwupload` / `hwdownload` trên device Vulkan (`ffmpeg/vf_gpufx_transfer.c`, C thuần dùng
@@ -510,9 +641,9 @@ Số đo trên clip 90 s (RTX 4060 Laptop, GPU rảnh): xem [BENCHMARK-vi.md](BE
 
 ```sh
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i a.mp4 \
-  -vf "format=nv12,hwupload,gpufx=effect=vignette.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
 ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
-  -vf "format=nv12,hwupload,gpufx=effect=vignette.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
 ```
 
 - Pad nhận thêm `AV_PIX_FMT_D3D12` và `AV_PIX_FMT_D3D11` (khi libavfilter build có d3d12va/d3d11va và libgpufx
@@ -578,7 +709,7 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
 
 ```sh
 ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
-  -vf "format=nv12,hwupload,gpufx=effect=vignette.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
 ```
 
 - Pad nhận thêm `AV_PIX_FMT_VIDEOTOOLBOX` (khi libavfilter build có videotoolbox và libgpufx là bản macOS).

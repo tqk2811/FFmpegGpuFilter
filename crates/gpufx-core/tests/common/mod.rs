@@ -17,3 +17,12 @@ pub fn backend() -> Backend {
 pub fn is_warp(ctx: &gpufx_core::GpuContext) -> bool {
     ctx.description().starts_with("Microsoft Basic Render Driver")
 }
+
+/// The chain of `effects` (`e0|e1|...`, a graph of one statement without labels), each
+/// opened as given: label and effect.
+#[allow(dead_code)]
+pub fn chain(effects: Vec<(String, gpufx_core::Effect)>) -> Result<gpufx_core::EffectGraph, gpufx_core::Error> {
+    let text = (0..effects.len()).map(|k| format!("e{k}")).collect::<Vec<_>>().join("|");
+    let mut effects = effects.into_iter();
+    gpufx_core::EffectGraph::parse(&text, |_| Ok(effects.next().expect("one effect per item")))
+}

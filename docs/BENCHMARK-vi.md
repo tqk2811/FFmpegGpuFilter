@@ -12,7 +12,7 @@ Bản build `577bd42` (gói release win64), đo ngày 2026-10-14.
 - **Đường frame**: `gpufx` chỉ trả ra frame GPU và tự upload input CPU lên device chỉ định bởi
   `-filter_hw_device`. Vì vậy mọi lệnh gpufx ở đây đều có `-init_hw_device` / `-filter_hw_device` và kết thúc bằng
   `hwdownload` (hoặc `gpufx_download`) để bước sau nhận frame CPU; upload và readback nằm trong thời gian đo. Ví dụ:
-  `-init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 -i b.mp4 -filter_complex "[0][1]gpufx=effect=crossfade.zip,hwdownload,format=yuv420p"`.
+  `-init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 -i b.mp4 -filter_complex "[0][1]gpufx=graph=crossfade.zip,hwdownload,format=yuv420p"`.
   Các dòng chuỗi và truyền frame tạo device Vulkan bằng `vulkan=vk:0,disable_multiplane=1`. Dòng D3D dùng frame
   D3D11, loại frame D3D mà FFmpeg dùng khắp nơi (`-init_hw_device d3d11va=dx:0`); gpufx chạy shader trên D3D12 của
   cùng adapter (wgpu không có backend D3D11) và tự chọn API; `hwdownload` khi đó cần `format=nv12`.
@@ -79,7 +79,7 @@ Nhận xét:
 - Một `gpufx` với input CPU tốn khoảng 1.7 ms mỗi frame so với chỉ decode (5.1 s so với 1.5 s): upload, đổi
   YUV → RGBA trên GPU, shader, readback và chờ GPU. Việc đổi pixel format chạy bằng shader, FFmpeg không chèn
   filter `scale`. Vì vậy một chuyển cảnh nhẹ đứng riêng chậm hơn `xfade` trên CPU mạnh.
-- Gom cả chuỗi vào một `gpufx` (`graph=` hoặc `effect='a.zip|b.zip'`): frame chỉ qua bus một lần, thêm hiệu ứng gần
+- Gom cả chuỗi vào một `gpufx` (`graph='a.zip|b.zip'`): frame chỉ qua bus một lần, thêm hiệu ứng gần
   như không tốn (8 hiệu ứng: 6.7 s, hoặc 5.2 s với `gpufx_upload`/`gpufx_download`, so với 5.1 s của một
   crossfade; nhanh gấp 5–7 lần CPU).
 - 8 `gpufx` riêng chuyền frame GPU cho nhau nhưng mỗi filter là một lượt xử lý cả frame 1080p: 10.5 s với
@@ -98,7 +98,7 @@ Bản build `c62d150` (bundle win64), đo ngày 2026-10-15, cùng máy như trê
 - **Ba cách** (script filter đầy đủ truyền bằng `-/filter_complex <file>`):
   1. CPU: FFmpeg 8.0.1, chuỗi 5 `xfade=transition=fade:duration=1:offset=9|18|27|36|45`, rồi `format=yuv420p`.
   2. Năm `gpufx` riêng, mỗi chỗ nối một filter, chỉ bật trong lúc chuyển cảnh của nó:
-     `[x1][u2]gpufx=effect='effects/ffmpeg/crossfade.zip=progress=clip(t-18\,0\,1)':enable='between(t,18,19)':bypass=auto[x2]`.
+     `[x1][u2]gpufx=graph='effects/ffmpeg/crossfade.zip=progress=clip(t-18\,0\,1)':enable='between(t,18,19)':bypass=auto[x2]`.
      Ngoài cửa sổ, filter chuyền texture input đi dưới nhãn mới (`passthrough=auto`, không copy): input 0 trước
      chuyển cảnh và clip mới sau chuyển cảnh (`bypass=auto`).
   3. Một `gpufx` với graph gồm 5 crossfade, bật tắt từng effect bằng key inline `enable` / `bypass`:

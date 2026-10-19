@@ -13,7 +13,7 @@ Build `577bd42` (win64 release package), measured on 2026-10-14.
   `-filter_hw_device`. Every gpufx command here therefore has `-init_hw_device` / `-filter_hw_device` and ends with
   `hwdownload` (or `gpufx_download`) so the next step gets CPU frames; the upload and the readback are part of
   the times. Example:
-  `-init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 -i b.mp4 -filter_complex "[0][1]gpufx=effect=crossfade.zip,hwdownload,format=yuv420p"`.
+  `-init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 -i b.mp4 -filter_complex "[0][1]gpufx=graph=crossfade.zip,hwdownload,format=yuv420p"`.
   The chain and transfer rows create the Vulkan device with `vulkan=vk:0,disable_multiplane=1`. The D3D row uses
   D3D11 frames, the D3D frame type FFmpeg uses throughout (`-init_hw_device d3d11va=dx:0`); gpufx runs its
   shaders on D3D12 of the same adapter (wgpu has no D3D11 backend) and chooses the API itself; `hwdownload` then
@@ -81,7 +81,7 @@ What the numbers say:
 - One `gpufx` on software input costs about 1.7 ms per frame over plain decoding (5.1 s against 1.5 s): upload,
   YUV → RGBA on the GPU, the shader, readback and the wait for the GPU. The pixel format conversion runs in a
   shader, FFmpeg inserts no `scale` filter. A light transition alone is therefore slower than `xfade` on a fast CPU.
-- Put the whole chain in one `gpufx` (`graph=` or `effect='a.zip|b.zip'`): the frames cross the bus once and
+- Put the whole chain in one `gpufx` (`graph='a.zip|b.zip'`): the frames cross the bus once and
   extra effects are nearly free (8 effects: 6.7 s, or 5.2 s with `gpufx_upload`/`gpufx_download`, against 5.1 s for
   one crossfade; 5–7× faster than CPU).
 - Eight separate `gpufx` pass GPU frames between them but each one is a pass over the 1080p frame:
@@ -102,7 +102,7 @@ Build `c62d150` (win64 bundle), measured on 2026-10-15, same machine as above.
   1. CPU: FFmpeg 8.0.1, chain of 5 `xfade=transition=fade:duration=1:offset=9|18|27|36|45`, then
      `format=yuv420p`.
   2. Five separate `gpufx`, one per join, each on only while its transition runs:
-     `[x1][u2]gpufx=effect='effects/ffmpeg/crossfade.zip=progress=clip(t-18\,0\,1)':enable='between(t,18,19)':bypass=auto[x2]`.
+     `[x1][u2]gpufx=graph='effects/ffmpeg/crossfade.zip=progress=clip(t-18\,0\,1)':enable='between(t,18,19)':bypass=auto[x2]`.
      Outside its window a filter hands on its input texture relabelled (`passthrough=auto`): input 0 before
      the transition and the incoming clip after it (`bypass=auto`).
   3. One `gpufx` with a graph of 5 crossfades, each switched by the inline `enable` / `bypass` keys:

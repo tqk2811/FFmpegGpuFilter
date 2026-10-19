@@ -1,5 +1,5 @@
 //! Effects wired as a graph (a DAG) and run in one GPU submission: chains
-//! (`a.zip|b.zip`) and graphs (`[0]split[a][b]; [a]blur.zip[x]; ...`) share this engine.
+//! (`a.zip|b.zip`, one statement without labels) and graphs (`[0]split[a][b]; [a]blur.zip[x]; ...`) share this engine.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -926,11 +926,12 @@ fn record_gpu(
     Ok(())
 }
 
-/// One `[in]...body[out]...` statement of a graph description.
+/// One `[in]...body[out]...` statement of a graph description. Labels left out are
+/// empty until [`EffectGraph::parse`] binds them.
 struct NodeSpec<'a> {
-    inputs: Vec<&'a str>,
+    inputs: Vec<String>,
     body: &'a str,
-    outputs: Vec<&'a str>,
+    outputs: Vec<String>,
 }
 
 fn graph_err(msg: impl Into<String>) -> Error {
@@ -1081,22 +1082,16 @@ fn parse_spec(text: &str) -> Result<Vec<NodeSpec<'_>>, Error> {
     let mut nodes = Vec::new();
     for statement in split_unquoted(text, b';').into_iter().map(str::trim).filter(|s| !s.is_empty()) {
         let mut rest = statement;
-        let inputs = parse_labels(&mut rest, statement)?;
+        let inputs = parse_labels(&mut rest, statement)?.into_iter().map(String::from).collect();
         let end = find_unquoted(rest, b'[').unwrap_or(rest.len());
         let body = rest[..end].trim();
         rest = &rest[end..];
-        let outputs = parse_labels(&mut rest, statement)?;
+        let outputs = parse_labels(&mut rest, statement)?.into_iter().map(String::from).collect();
         if !rest.trim().is_empty() {
             return Err(graph_err(format!("unexpected `{}` after the output labels of `{statement}`", rest.trim())));
         }
         if body.is_empty() {
             return Err(graph_err(format!("`{statement}` names no effect")));
-        }
-        if inputs.is_empty() {
-            return Err(graph_err(format!("`{statement}` has no input label, e.g. `[0]{body}`")));
-        }
-        if outputs.is_empty() {
-            return Err(graph_err(format!("`{statement}` has no output label, e.g. `{body}[out]`")));
         }
         nodes.push(NodeSpec { inputs, body, outputs });
     }
@@ -1115,6 +1110,32 @@ fn pad_label(label: &str) -> Option<Result<usize, Error>> {
         Ok(i) if i.to_string() == label && i < 64 => Ok(i),
         _ => Err(graph_err(format!("input pad label `[{label}]`: write it as a number from 0 to 63 without leading zeros"))),
     })
+}
+
+/// An effect opened for a graph: its parameter label, the effect and its inline options.
+type Opened = (String, Effect, InlineOptions);
+
+/// Opens the packages of a node, `a.zip=key=value|b.zip`, in order. Only the first may
+/// take more than one input.
+fn open_items(body: &str, open: &mut impl FnMut(&str) -> Result<(String, Effect), Error>) -> Result<Vec<Opened>, Error> {
+    let mut items: Vec<Opened> = Vec::new();
+    for item in split_unquoted(body, b'|').into_iter().map(str::trim).filter(|p| !p.is_empty()) {
+        let (path, options) = parse_effect_item(item)?;
+        let (label, mut fx) = open(&path)?;
+        check_options(&path, &fx, &options)?;
+        apply_constants(&mut fx, &options);
+        if !items.is_empty() && fx.input_count() != 1 {
+            return Err(graph_err(format!(
+                "`{path}` takes {} inputs; only the first effect of `{body}` may take more than one",
+                fx.input_count()
+            )));
+        }
+        items.push((label, fx, options));
+    }
+    if items.is_empty() {
+        return Err(graph_err(format!("`{body}` names no package")));
+    }
+    Ok(items)
 }
 
 enum NodeKind {
@@ -1161,26 +1182,99 @@ pub struct EffectGraph {
 
 impl EffectGraph {
     /// Builds a graph from its description:
-    /// `[0]split[a][b]; [a]gaussian-blur.zip[ba]; [b]grayscale.zip|vignette.zip[gb]; [ba][gb]crossfade.zip[out]`.
+    /// `[0]split[a][b]; [a]gaussian-blur.zip[ba]; [b]grayscale.zip|vignette.zip[gb]; [ba][gb]crossfade.zip[out]`,
+    /// or simply `a.zip=key=value|b.zip`.
     ///
     /// Statements are separated by `;`. Each reads labels, runs a node and names its
     /// outputs. `[0]`, `[1]`... are the input pads; every pad up to the highest must be
     /// read. Every other label is written once and read at most once (`split` it to read
     /// it twice); labels nobody reads are the outputs of the graph, in the order they are
-    /// written. A node is `split` (any number of outputs, no copy), `null` (one output,
-    /// no copy), or packages chained with `|`, which take as many labels as the first
-    /// package has inputs and write one. `open` loads a package from its text and returns
-    /// its parameter label (see [`EffectChain::new`]) and the effect.
+    /// written. A node is `split` (any number of outputs, two when unlabelled, no copy),
+    /// `null` (one output, no copy), or packages chained with `|`, which take as many
+    /// labels as the first package has inputs and write one; each package may carry
+    /// inline options (see [`parse_effect_item`]).
+    ///
+    /// As in an FFmpeg filtergraph, labels may be left out: a statement without input
+    /// labels reads the input pads no label names, the lowest first (as many as the first
+    /// package has inputs; one for `split` and `null`), and a statement without output
+    /// labels writes outputs of the graph. A description that is one statement without
+    /// labels is a chain: its pads take the input names of the first package's manifest
+    /// and its output is `default`, as one FFmpeg filter.
+    ///
+    /// `open` loads a package from its text and returns its parameter label (the package
+    /// file name, used in parameter names such as `vignette.strength`) and the effect.
+    /// All effects must share one GPU context.
     pub fn parse(text: &str, mut open: impl FnMut(&str) -> Result<(String, Effect), Error>) -> Result<Self, Error> {
-        let specs = parse_spec(text)?;
-        let mut producers: HashMap<&str, usize> = HashMap::new();
-        let mut defined: Vec<&str> = Vec::new();
+        let mut specs = parse_spec(text)?;
+        if let [spec] = specs.as_slice() {
+            if spec.inputs.is_empty() && spec.outputs.is_empty() && !matches!(spec.body, "split" | "null") {
+                let (effects, options): (Vec<_>, Vec<_>) =
+                    open_items(spec.body, &mut open)?.into_iter().map(|(label, fx, options)| ((label, fx), options)).unzip();
+                let mut graph = Self::linear(effects)?;
+                graph.options = options;
+                return Ok(graph);
+            }
+        }
+
         let mut kinds = Vec::with_capacity(specs.len());
         let mut options = Vec::new();
         let mut effects = Vec::new();
         let mut labels = Vec::new();
-        for (n, spec) in specs.iter().enumerate() {
-            for &label in &spec.outputs {
+        for spec in &specs {
+            kinds.push(match spec.body {
+                "split" | "null" => NodeKind::Split,
+                body => {
+                    let mut ks = Vec::new();
+                    for (label, fx, item_options) in open_items(body, &mut open)? {
+                        ks.push(effects.len());
+                        effects.push(fx);
+                        labels.push(label);
+                        options.push(item_options);
+                    }
+                    NodeKind::Effects(ks)
+                }
+            });
+        }
+
+        // Labels left out: inputs read the pads no label names, in order; outputs are
+        // outputs of the graph, under names no statement uses.
+        let named_pads: HashSet<usize> = specs.iter().flat_map(|s| &s.inputs).filter_map(|l| pad_label(l).and_then(Result::ok)).collect();
+        let used: HashSet<String> = specs.iter().flat_map(|s| s.inputs.iter().chain(&s.outputs)).cloned().collect();
+        let (mut next_pad, mut next_out) = (0, 0);
+        for (spec, kind) in specs.iter_mut().zip(&kinds) {
+            if spec.inputs.is_empty() {
+                let wanted = match kind {
+                    NodeKind::Split => 1,
+                    NodeKind::Effects(ks) => effects[ks[0]].input_count(),
+                };
+                for _ in 0..wanted {
+                    while named_pads.contains(&next_pad) {
+                        next_pad += 1;
+                    }
+                    spec.inputs.push(next_pad.to_string());
+                    next_pad += 1;
+                }
+            }
+            if spec.outputs.is_empty() {
+                for _ in 0..if spec.body == "split" { 2 } else { 1 } {
+                    let label = loop {
+                        let label = format!("out{next_out}");
+                        next_out += 1;
+                        if !used.contains(&label) {
+                            break label;
+                        }
+                    };
+                    spec.outputs.push(label);
+                }
+            }
+        }
+        let specs = specs;
+
+        let mut producers: HashMap<&str, usize> = HashMap::new();
+        let mut defined: Vec<&str> = Vec::new();
+        for (n, (spec, kind)) in specs.iter().zip(&kinds).enumerate() {
+            for label in &spec.outputs {
+                let label = label.as_str();
                 if pad_label(label).is_some() {
                     return Err(graph_err(format!("`[{label}]` names an input pad; output labels must not be numbers")));
                 }
@@ -1190,56 +1284,32 @@ impl EffectGraph {
                 defined.push(label);
             }
             let (ins, outs) = (spec.inputs.len(), spec.outputs.len());
-            let kind = match spec.body {
-                "split" | "null" => {
+            match kind {
+                NodeKind::Split => {
                     if ins != 1 {
                         return Err(graph_err(format!("`{}` reads one label, got {ins}", spec.body)));
                     }
                     if spec.body == "null" && outs != 1 {
                         return Err(graph_err(format!("`null` writes one label, got {outs}")));
                     }
-                    NodeKind::Split
                 }
-                body => {
+                NodeKind::Effects(ks) => {
                     if outs != 1 {
-                        return Err(graph_err(format!("`{body}` writes one label, got {outs}; split it to use it twice")));
+                        return Err(graph_err(format!("`{}` writes one label, got {outs}; split it to use it twice", spec.body)));
                     }
-                    let mut ks = Vec::new();
-                    for item in split_unquoted(body, b'|').into_iter().map(str::trim).filter(|p| !p.is_empty()) {
-                        let (path, item_options) = parse_effect_item(item)?;
-                        let path = path.as_str();
-                        let (label, mut fx) = open(path)?;
-                        check_options(path, &fx, &item_options)?;
-                        apply_constants(&mut fx, &item_options);
-                        options.push(item_options);
-                        let wanted = if ks.is_empty() { ins } else { 1 };
-                        if fx.input_count() != wanted {
-                            return Err(graph_err(if ks.is_empty() {
-                                format!("`{path}` takes {} inputs, the node gives it {ins}", fx.input_count())
-                            } else {
-                                format!(
-                                    "`{path}` takes {} inputs; only the first effect of `{body}` may take more than one",
-                                    fx.input_count()
-                                )
-                            }));
-                        }
-                        ks.push(effects.len());
-                        effects.push(fx);
-                        labels.push(label);
+                    let fx = &effects[ks[0]];
+                    if fx.input_count() != ins {
+                        return Err(graph_err(format!("`{}` takes {} inputs, the node gives it {ins}", labels[ks[0]], fx.input_count())));
                     }
-                    if ks.is_empty() {
-                        return Err(graph_err(format!("`{body}` names no package")));
-                    }
-                    NodeKind::Effects(ks)
                 }
-            };
-            kinds.push(kind);
+            }
         }
 
         let mut readers: HashSet<&str> = HashSet::new();
         let mut nb_inputs = 0;
         for spec in &specs {
-            for &label in &spec.inputs {
+            for label in &spec.inputs {
+                let label = label.as_str();
                 match pad_label(label) {
                     Some(pad) => nb_inputs = nb_inputs.max(pad? + 1),
                     None if !producers.contains_key(label) => {
@@ -1274,7 +1344,7 @@ impl EffectGraph {
             match &kinds[n] {
                 NodeKind::Effects(ks) => Ok(Source::Node(*ks.last().expect("at least one"))),
                 NodeKind::Split if depth > specs.len() => Err(graph_err(format!("the graph has a cycle through `[{label}]`"))),
-                NodeKind::Split => resolve(specs[n].inputs[0], specs, producers, kinds, depth + 1),
+                NodeKind::Split => resolve(&specs[n].inputs[0], specs, producers, kinds, depth + 1),
             }
         }
         let mut node_inputs = vec![Vec::new(); effects.len()];
@@ -1336,6 +1406,20 @@ impl EffectGraph {
     /// already set; the caller evaluates the rest.
     pub fn inline_options(&self) -> &[InlineOptions] {
         &self.options
+    }
+
+    /// Effects run one after the other, as if each fed the next through its own filter:
+    /// the inputs are those of the first effect, named as in its manifest, and the one
+    /// output is `default`.
+    fn linear(effects: Vec<(String, Effect)>) -> Result<Self, Error> {
+        let first = &effects[0].1;
+        let nb_inputs = first.input_count();
+        let input_names = first.package().manifest.inputs.iter().map(|d| d.name.clone()).collect();
+        let n = effects.len();
+        let mut node_inputs = vec![(0..nb_inputs).map(Source::Input).collect::<Vec<_>>()];
+        node_inputs.extend((1..n).map(|k| vec![Source::Node(k - 1)]));
+        let topo = Topology { nb_inputs, node_inputs, order: (0..n).collect(), outputs: vec![Source::Node(n - 1)] };
+        Self::from_parts(effects, topo, input_names, vec!["default".into()], Vec::new(), "chain")
     }
 
     pub(crate) fn from_parts(
@@ -1450,6 +1534,11 @@ impl EffectGraph {
         })
     }
 
+    /// The graph is a chain: one statement without labels (see [`EffectGraph::parse`]).
+    pub fn is_chain(&self) -> bool {
+        self.what == "chain"
+    }
+
     /// Effects in the order they were given (statement order for a parsed graph).
     pub fn effects(&self) -> &[Effect] {
         &self.effects
@@ -1474,7 +1563,7 @@ impl EffectGraph {
     }
 
     /// Names of the input pads: `in0`, `in1`... for a graph, the manifest input names of
-    /// the first effect for a chain.
+    /// the first effect for a chain (one statement without labels).
     pub fn input_names(&self) -> &[String] {
         &self.input_names
     }
@@ -1696,8 +1785,12 @@ impl EffectGraph {
 
     /// Checks one stream per input pad against the rules of every effect: an effect
     /// reading another sees that effect's size (the size of its first input) and the
-    /// format negotiated between them.
+    /// format negotiated between them. A chain given the wrong number of streams fails
+    /// as its first effect would.
     pub fn check_inputs(&self, streams: &[StreamInfo]) -> Result<(), Error> {
+        if streams.len() != self.topo.nb_inputs && self.what == "chain" {
+            return self.effects[0].package().manifest.check_inputs(streams);
+        }
         if streams.len() != self.topo.nb_inputs {
             return Err(Error::Unsupported(format!("the {} takes {} input(s), got {}", self.what, self.topo.nb_inputs, streams.len())));
         }
@@ -1816,147 +1909,6 @@ impl EffectGraph {
     #[doc(hidden)]
     pub fn frame_binds(&self) -> usize {
         self.io.frame_binds
-    }
-}
-
-/// Effects run one after the other in one GPU submission, as if each fed the next
-/// through its own filter, without the round trip to CPU memory in between. A linear
-/// [`EffectGraph`].
-pub struct EffectChain {
-    graph: EffectGraph,
-}
-
-impl EffectChain {
-    /// `effects` pairs a label (the package file name, used in parameter names such as
-    /// `vignette.strength`) with an effect. All effects must share one GPU context.
-    pub fn new(effects: Vec<(String, Effect)>) -> Result<Self, Error> {
-        if effects.is_empty() {
-            return Err(Error::Unsupported("a chain needs at least one effect".into()));
-        }
-        let ctx = effects[0].1.program.ctx.clone();
-        for (k, (label, fx)) in effects.iter().enumerate().skip(1) {
-            if !Arc::ptr_eq(&fx.program.ctx, &ctx) {
-                return Err(Error::Unsupported(format!("effect {k} (`{label}`) runs on another GPU device")));
-            }
-            if fx.input_count() != 1 {
-                return Err(Error::Unsupported(format!(
-                    "effect {k} (`{label}`) takes {} inputs; only the first effect of a chain may take more than one",
-                    fx.input_count()
-                )));
-            }
-        }
-        let first = &effects[0].1;
-        let nb_inputs = first.input_count();
-        let input_names = first.package().manifest.inputs.iter().map(|d| d.name.clone()).collect();
-        let n = effects.len();
-        let mut node_inputs = vec![(0..nb_inputs).map(Source::Input).collect::<Vec<_>>()];
-        node_inputs.extend((1..n).map(|k| vec![Source::Node(k - 1)]));
-        let topo = Topology { nb_inputs, node_inputs, order: (0..n).collect(), outputs: vec![Source::Node(n - 1)] };
-        let graph = EffectGraph::from_parts(effects, topo, input_names, vec!["default".into()], Vec::new(), "chain")?;
-        Ok(EffectChain { graph })
-    }
-
-    /// Builds a chain from its description, `a.zip=key=value:key=value|b.zip`: effects
-    /// separated by `|`, each with inline options as in a graph (see [`parse_effect_item`]).
-    /// `open` loads a package from its path and returns its label and the effect.
-    pub fn parse(text: &str, mut open: impl FnMut(&str) -> Result<(String, Effect), Error>) -> Result<Self, Error> {
-        let mut effects = Vec::new();
-        let mut options = Vec::new();
-        for item in split_unquoted(text, b'|').into_iter().map(str::trim).filter(|p| !p.is_empty()) {
-            let (path, item_options) = parse_effect_item(item)?;
-            let (label, mut fx) = open(&path)?;
-            check_options(&path, &fx, &item_options)?;
-            apply_constants(&mut fx, &item_options);
-            effects.push((label, fx));
-            options.push(item_options);
-        }
-        if effects.is_empty() {
-            return Err(graph_err("the chain names no package"));
-        }
-        let mut chain = Self::new(effects)?;
-        chain.graph.options = options;
-        Ok(chain)
-    }
-
-    /// The chain as the graph it is.
-    pub fn graph(&self) -> &EffectGraph {
-        &self.graph
-    }
-
-    pub fn into_graph(self) -> EffectGraph {
-        self.graph
-    }
-
-    pub fn effects(&self) -> &[Effect] {
-        self.graph.effects()
-    }
-
-    pub fn labels(&self) -> &[String] {
-        self.graph.labels()
-    }
-
-    /// The first effect: its inputs are the inputs of the chain.
-    pub fn first(&self) -> &Effect {
-        &self.graph.effects[0]
-    }
-
-    /// The last effect: its output rules are those of the chain.
-    pub fn last(&self) -> &Effect {
-        self.graph.effects.last().expect("at least one effect")
-    }
-
-    /// See [`EffectGraph::param_names`].
-    pub fn param_names(&self) -> &[String] {
-        self.graph.param_names()
-    }
-
-    /// See [`EffectGraph::find_param`]; a package named `2.zip` is reached by its index only.
-    pub fn find_param(&self, name: &str) -> Result<usize, Error> {
-        self.graph.find_param(name)
-    }
-
-    pub fn set_param_str(&mut self, name: &str, text: &str) -> Result<(), Error> {
-        self.graph.set_param_str(name, text)
-    }
-
-    pub fn set_param(&mut self, name: &str, values: &[f64]) -> Result<(), Error> {
-        self.graph.set_param(name, values)
-    }
-
-    /// Checks one stream per input of the first effect against the rules of every effect:
-    /// later effects see the first stream's size and the format negotiated in `new`.
-    pub fn check_inputs(&self, streams: &[StreamInfo]) -> Result<(), Error> {
-        if streams.len() != self.graph.input_count() {
-            return self.first().package().manifest.check_inputs(streams);
-        }
-        self.graph.check_inputs(streams)
-    }
-
-    /// Runs every effect on `inputs` (one per input of the first effect) and writes the
-    /// RGBA result of the last one into `out`, which has the size of `inputs[0]`.
-    pub fn process(&mut self, inputs: &[Image], out: ImageMut, info: &FrameInfo) -> Result<(), Error> {
-        self.graph.process(inputs, vec![out], info)
-    }
-
-    /// [`EffectChain::process`] for frames in any [`PixelFormat`], converted on the GPU.
-    pub fn process_frames(&mut self, inputs: &[Frame], out: FrameMut, info: &FrameInfo) -> Result<(), Error> {
-        self.graph.process_frames(inputs, &mut [out], info)
-    }
-
-    /// See [`EffectGraph::allocations`].
-    pub fn allocations(&self) -> usize {
-        self.graph.allocations()
-    }
-
-    /// See [`EffectGraph::memory`].
-    pub fn memory(&self) -> MemoryStats {
-        self.graph.memory()
-    }
-
-    /// Converts `input` (in place of input 0) to the format of `out` without running the
-    /// effects, as a disabled filter passes its first input through.
-    pub fn convert(&mut self, input: &Frame, out: FrameMut) -> Result<(), Error> {
-        self.graph.convert(std::slice::from_ref(input), &mut [out])
     }
 }
 

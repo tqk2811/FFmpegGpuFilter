@@ -108,7 +108,6 @@ typedef struct NodeExpr {
 typedef struct GpufxContext {
     const AVClass *class;
 
-    char *effect_path;
     char *graph_str;
     char *backend;
     int shortest;
@@ -430,10 +429,9 @@ static av_cold int init(AVFilterContext *ctx)
     GpufxContext *s = ctx->priv;
     int ret;
 
-    if (!s->effect_path == !s->graph_str) {
-        av_log(ctx, AV_LOG_ERROR, s->effect_path ?
-               "Set either 'effect' or 'graph', not both.\n" :
-               "The 'effect' option (path to a .zip package) or the 'graph' option is required.\n");
+    if (!s->graph_str) {
+        av_log(ctx, AV_LOG_ERROR, "The 'graph' option is required: a package ('a.zip'), "
+               "a chain ('a.zip=k=v|b.zip') or a graph ('[0][1]x.zip[out]').\n");
         return AVERROR(EINVAL);
     }
     /*
@@ -454,12 +452,8 @@ static av_cold int init(AVFilterContext *ctx)
         return AVERROR(EINVAL);
     }
 
-    if (s->graph_str) {
-        if (!(s->fx = gpufx_effect_open_graph(s->graph_str, s->backend)))
-            return gpufx_error(ctx, "Cannot load graph");
-    } else if (!(s->fx = gpufx_effect_open_effects(s->effect_path, s->backend))) {
-        return gpufx_error(ctx, "Cannot load effect");
-    }
+    if (!(s->fx = gpufx_effect_open_graph(s->graph_str, s->backend)))
+        return gpufx_error(ctx, "Cannot load graph");
     /* The device is chosen in config_inputs(): FFmpeg's, of the GPU inputs or -filter_hw_device. */
     av_log(ctx, AV_LOG_VERBOSE, "Loaded '%s'\n", gpufx_effect_name(s->fx));
 
@@ -2592,8 +2586,7 @@ static int process_command(AVFilterContext *ctx, const char *cmd, const char *ar
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
 static const AVOption gpufx_options[] = {
-    { "effect",   "effect package (.zip or directory) with inline parameters, or a chain: 'a.zip=k=v:k2=v2|b.zip'", OFFSET(effect_path), AV_OPT_TYPE_STRING, { .str = NULL },   0, 0, FLAGS },
-    { "graph",    "effect graph: '[0]split[a][b]; [a]x.zip=k=v[c]; [c][b]y.zip[out]'", OFFSET(graph_str),   AV_OPT_TYPE_STRING, { .str = NULL },   0, 0, FLAGS },
+    { "graph",    "effect graph: a package or chain 'a.zip=k=v|b.zip', or '[0]split[a][b]; [a]x.zip=k=v[c]; [c][b]y.zip[out]'", OFFSET(graph_str),   AV_OPT_TYPE_STRING, { .str = NULL },   0, 0, FLAGS },
     { "backend",  "GPU API (testing only, auto follows the frames): auto, vulkan, dx12", OFFSET(backend),    AV_OPT_TYPE_STRING, { .str = "auto" }, 0, 0, FLAGS },
     { "shortest", "end when the shortest input ends",                OFFSET(shortest),    AV_OPT_TYPE_BOOL,   { .i64 = 0 },      0, 1, FLAGS },
     { "out_format", "output pixel format (also the sw_format of GPU frames), e.g. rgba between chained gpufx; default: chosen from the input", OFFSET(out_format), AV_OPT_TYPE_PIXEL_FMT, { .i64 = AV_PIX_FMT_NONE }, -1, INT_MAX, FLAGS },

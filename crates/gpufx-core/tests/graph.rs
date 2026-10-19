@@ -6,9 +6,7 @@ mod common;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpufx_core::{
-    parse_effect_item, Effect, EffectChain, EffectGraph, Error, FrameInfo, GpuContext, Image, ImageMut, Package, Source, StreamInfo,
-};
+use gpufx_core::{parse_effect_item, Effect, EffectGraph, Error, FrameInfo, GpuContext, Image, ImageMut, Package, Source, StreamInfo};
 
 fn examples() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects")
@@ -187,15 +185,77 @@ fn a_linear_graph_is_a_chain() {
     let Some(ctx) = gpu() else { return };
     let src = gradient(W, H);
     let info = FrameInfo::new(0.0, 0);
-    let mut chain =
-        EffectChain::new(vec![("grayscale".into(), effect(&ctx, "grayscale")), ("vignette".into(), effect(&ctx, "vignette"))]).unwrap();
+    let mut chain = graph(&ctx, "grayscale.zip|vignette.zip").unwrap();
     let mut want = vec![0u8; src.len()];
-    chain.process(&[img(&src)], ImageMut { data: &mut want, width: W, height: H, stride: W * 4 }, &info).unwrap();
+    chain.process(&[img(&src)], vec![ImageMut { data: &mut want, width: W, height: H, stride: W * 4 }], &info).unwrap();
     let mut g = graph(&ctx, "[0] grayscale.zip | vignette.zip [out]").unwrap();
     assert_eq!(g.param_names(), chain.param_names());
     assert_eq!(run_graph(&mut g, &[&src], &info)[0], want);
     // The chain pools like the graph: two pass outputs ping-pong.
     assert_eq!(chain.memory().pass_textures, 2);
+}
+
+#[test]
+fn labels_left_out_bind_as_in_ffmpeg() {
+    let Some(ctx) = gpu() else { return };
+    let manifest_inputs =
+        |name: &str| -> Vec<String> { effect(&ctx, name).package().manifest.inputs.iter().map(|d| d.name.clone()).collect() };
+    let s = |w| StreamInfo { format: Some("rgba"), width: w, height: 8 };
+
+    // One statement without labels is a chain: pads named as the first package's
+    // inputs, one output `default`.
+    let single = graph(&ctx, "invert.zip").unwrap();
+    assert_eq!(single.input_names(), manifest_inputs("invert"));
+    assert_eq!(single.output_names(), ["default"]);
+    let chain = graph(&ctx, "invert.zip=amount=0.5|vignette.zip").unwrap();
+    assert_eq!(chain.input_count(), 1);
+    assert_eq!(chain.effect_inputs(1), [Source::Node(0)]);
+    assert_eq!(chain.effects()[0].params().get("amount").unwrap().0[0], 0.5);
+    assert_eq!(chain.output_names(), ["default"]);
+    let two = graph(&ctx, "crossfade.zip|invert.zip").unwrap();
+    assert_eq!(two.input_names(), manifest_inputs("crossfade"));
+    assert_eq!(two.effect_inputs(0), [Source::Input(0), Source::Input(1)]);
+    assert_eq!(two.output_names(), ["default"]);
+    two.check_inputs(&[s(8), s(8)]).unwrap();
+    // Too few streams fail as the first package would.
+    let got = two.check_inputs(&[s(8)]).unwrap_err().to_string();
+    assert!(got.contains("takes 2 input(s), got 1"), "{got}");
+
+    // Statements without input labels read the pads no label names, lowest first.
+    let g = graph(&ctx, "[1]invert.zip[a]; crossfade.zip[b]; [a][b]crossfade.zip").unwrap();
+    assert_eq!(g.input_count(), 3);
+    assert_eq!(g.input_names(), ["in0", "in1", "in2"]);
+    assert_eq!(g.effect_inputs(0), [Source::Input(1)]);
+    assert_eq!(g.effect_inputs(1), [Source::Input(0), Source::Input(2)]);
+    assert_eq!(g.effect_inputs(2), [Source::Node(0), Source::Node(1)]);
+    assert_eq!(g.output_names(), ["out0"]);
+    let got = g.check_inputs(&[s(8), s(8)]).unwrap_err().to_string();
+    assert!(got.contains("takes 3 input(s), got 2"), "{got}");
+    let g = graph(&ctx, "invert.zip; grayscale.zip").unwrap();
+    assert_eq!(g.effect_inputs(0), [Source::Input(0)]);
+    assert_eq!(g.effect_inputs(1), [Source::Input(1)]);
+
+    // Statements without output labels write outputs of the graph, in order with the
+    // labels nobody reads, under names no statement uses.
+    let g = graph(&ctx, "[0]split[a][b]; [a]invert.zip; [b]grayscale.zip[g]").unwrap();
+    assert_eq!(g.output_names(), ["out0", "g"]);
+    let g = graph(&ctx, "[0]split; [1]invert.zip[x]").unwrap();
+    assert_eq!(g.output_names(), ["out0", "out1", "x"]);
+    assert_eq!(g.output_source(0), Source::Input(0));
+    let g = graph(&ctx, "[0]invert.zip[out0]; [1]grayscale.zip").unwrap();
+    assert_eq!(g.output_names(), ["out0", "out1"]);
+
+    // Parameters of a chain keep their names; `index.enable` and labels still work.
+    let mut chain = graph(&ctx, "invert.zip|vignette.zip|invert.zip").unwrap();
+    assert_eq!(chain.find_param("strength").unwrap(), chain.find_param("vignette.strength").unwrap());
+    assert_eq!(chain.find_node("1").unwrap(), [1]);
+    assert_eq!(chain.find_node("vignette").unwrap(), [1]);
+    chain.set_param_str("2.amount", "0.5").unwrap();
+    assert_eq!(chain.effects()[2].params().get("amount").unwrap().0[0], 0.5);
+    // A package label wins over the name given to an unlabelled output.
+    let g = graph(&ctx, "[0]invert.zip|vignette.zip").unwrap();
+    assert_eq!(g.find_node("vignette").unwrap(), [1]);
+    assert_eq!(g.find_node("out0").unwrap(), [0, 1]);
 }
 
 #[test]
@@ -215,8 +275,6 @@ fn graph_mistakes_are_explained() {
         ("[0]invert.zip|crossfade.zip[a]", "only the first effect"),
         ("[0][1]invert.zip[a]", "takes 1 inputs, the node gives it 2"),
         ("[0]invert.zip[a][b]", "writes one label, got 2"),
-        ("[0]invert.zip", "has no output label"),
-        ("invert.zip[a]", "has no input label"),
         ("[0]invert.zip[1]", "names an input pad"),
         ("[0]invert.zip[a b]", "bad label"),
         ("[0]invert.zip[a.b]", "clash with `label.param`"),
@@ -494,14 +552,10 @@ fn inline_options_set_parameters_and_keep_the_rest_for_the_caller() {
     assert_eq!(o[3][0].1, "clip((t-1)/1.5,0,1)");
 
     // A chain written as one string takes the same options.
-    let chain = EffectChain::parse("invert.zip | vignette.zip=strength=0.5:enable=gt(t,2)", |path| {
-        let name = path.strip_suffix(".zip").unwrap_or(path);
-        Ok((name.to_string(), effect(&ctx, name)))
-    })
-    .unwrap();
+    let chain = graph(&ctx, "invert.zip | vignette.zip=strength=0.5:enable=gt(t,2)").unwrap();
     assert_eq!(chain.effects()[1].params().get("strength").unwrap().0[0], 0.5);
-    assert_eq!(chain.graph().inline_options()[1].len(), 2);
-    assert!(chain.graph().inline_options()[0].is_empty());
+    assert_eq!(chain.inline_options()[1].len(), 2);
+    assert!(chain.inline_options()[0].is_empty());
 }
 
 #[test]
@@ -519,7 +573,7 @@ fn inline_option_mistakes_are_explained() {
         let got = graph(&ctx, text).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(got.contains(want), "`{text}`: {got}");
     }
-    let got = EffectChain::parse("invert.zip=strength=1", |path| Ok(("invert".into(), effect(&ctx, path.trim_end_matches(".zip")))))
+    let got = EffectGraph::parse("invert.zip=strength=1", |path| Ok(("invert".into(), effect(&ctx, path.trim_end_matches(".zip")))))
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();

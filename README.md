@@ -9,11 +9,12 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
 - The FFmpeg filter runs on **Vulkan, Direct3D 12, Direct3D 11** and **Metal** (macOS) frames (via
   [wgpu](https://wgpu.rs)), on Windows/Linux/macOS. OpenGL is not supported.
 - Parameters are literals or time-based expressions; change them at run time with `sendcmd`.
-- Several effects in one filter (`effect='blur.zip|vignette.zip'`): the whole chain runs in one GPU
+- Several effects in one filter (`graph='blur.zip|vignette.zip'`): the whole chain runs in one GPU
   submission, without intermediate frames.
 - A whole **effect graph** in one filter (`graph='[0]split[a][b]; [a]blur.zip[x]; [x][b]crossfade.zip[out]'`):
   branches, several inputs and several outputs, all in one GPU submission; `split` copies nothing and
-  intermediate textures are pooled.
+  intermediate textures are pooled. `graph` is the only option; labels may be left out as in an FFmpeg
+  filtergraph (an unlabelled input takes the next unused input pad, an unlabelled output becomes an output).
 - A package declares **input/output rules** (pixel format, size, same size across inputs);
   a stream that does not match gets a clear error instead of a silent conversion.
 - 36 sample effects: color adjustment, grayscale, sepia, sharpen, pixelate, chroma key,
@@ -42,7 +43,7 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
 # gpufx outputs GPU frames: give it a device (it uploads software inputs itself) and
 # download before the encoder
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 -i b.mp4 -filter_complex \
-  "[0][1]gpufx=effect='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
+  "[0][1]gpufx=graph='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
 ```
 
 ```sh
@@ -53,16 +54,16 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 ```
 
 Parameters are written **inline**, right after the package name, like the options of a native FFmpeg filter:
-`pkg.zip=key=value:key2=value2`. This works in `effect=` (also in a chain: `effect='a.zip=k=1|b.zip'`) and in
+`pkg.zip=key=value:key2=value2`. This works in `graph=` (also in a chain: `graph='a.zip=k=1|b.zip'`) and in
 every node of `graph=`. Keys are named, a value is a constant or an expression (`t`, `n`, `w`, `h`, `a`, `sar`,
 `dar`), and two keys are reserved for the effect instance: `enable=<expr>` switches that effect on and off per
 frame and `bypass=0|auto` picks the input it copies while off. They are separate from the filter's own timeline
 `enable=` and `bypass=` options, which stay outside the effect string. An unknown key, a key given twice or a
 `bypass` other than `0`/`auto` is an error that names the effect and the key.
 
-- Put the whole `effect=`/`graph=` value in `'...'`. FFmpeg splits filter options at `:` *after* it removes
-  those quotes, so separate inline keys with `&` (`effect='x.zip=a=1&b=2'`, no escaping needed at the FFmpeg
-  level). The FFmpeg-style `:` also works but must be written `\:` there (`effect='x.zip=a=1\:b=2'`); a single
+- Put the whole `graph=` value in `'...'`. FFmpeg splits filter options at `:` *after* it removes
+  those quotes, so separate inline keys with `&` (`graph='x.zip=a=1&b=2'`, no escaping needed at the FFmpeg
+  level). The FFmpeg-style `:` also works but must be written `\:` there (`graph='x.zip=a=1\:b=2'`); a single
   key needs no separator. Commas in expressions are escaped `\,` as for any filter option.
 - Inside the effect string, `\` escapes one of `\ ' : & ; | = [ ]` (`\&` is a literal `&` in a value; before any other character it stays literal, so
   Windows paths work) and `'...'` quotes a value.
@@ -75,7 +76,7 @@ frame and `bypass=0|auto` picks the input it copies while off. They are separate
 ```sh
 # a chain: the first gpufx uploads, every effect runs on FFmpeg's Vulkan device, one download
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx=effect=vignette.zip,gpufx=effect=sepia.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,hwdownload,format=nv12" out.mp4
 # D3D12 (Windows): the same with -init_hw_device d3d12va=dx -filter_hw_device dx
 ```
 
@@ -83,7 +84,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 # Faster transfers (Vulkan): gpufx_upload/gpufx_download pipeline the copies; out_format=rgba keeps
 # separate gpufx filters in RGBA between them (the last one goes back to nv12)
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx=effect=vignette.zip:out_format=rgba,gpufx=effect=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip:out_format=rgba,gpufx=graph=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
 ```
 
 Like FFmpeg's `*_cuda` filters, `gpufx` outputs **GPU frames only** (Vulkan, D3D12, D3D11, or VideoToolbox on macOS). Inputs may be GPU
@@ -103,7 +104,7 @@ device with `disable_multiplane=1,linear_images=1`. `gpufx` refuses such frames.
 
 The filter's `backend` option is for testing only (leave it at `auto`, which follows the frames); it refuses
 `backend=metal` except on macOS (the library and the `gpufx` CLI still take it). On macOS the filter works on VideoToolbox frames (nv12, p010le) through Metal, e.g.
-`-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=effect=vignette.zip,hwdownload,format=nv12"`;
+`-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12"`;
 this path has not run on a Mac yet (see below).
 
 Docs: [design](docs/DESIGN.md) · [package format and how to write shaders](docs/EFFECT_FORMAT.md) · [benchmark](docs/BENCHMARK.md)

@@ -6,7 +6,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpufx_core::{ColorInfo, Effect, EffectChain, Error, Frame, FrameInfo, FrameMut, GpuContext, Image, ImageMut, Package, PixelFormat};
+use gpufx_core::{ColorInfo, Effect, EffectGraph, Error, Frame, FrameInfo, FrameMut, GpuContext, Image, ImageMut, Package, PixelFormat};
 
 fn gpu() -> Option<Arc<GpuContext>> {
     static CTX: std::sync::OnceLock<Option<Arc<GpuContext>>> = std::sync::OnceLock::new();
@@ -199,15 +199,15 @@ fn chained_effect_outputs_get_mips_when_read_as_mipmapped_inputs() {
     let flat = package_dir("chain-c", &m(false), TOP_LEVEL, false);
     let open = |d: &Dir| ("x".to_string(), Effect::new(ctx.clone(), Package::open(&d.0).unwrap()).unwrap());
     let checker = checker_frame(w, h);
-    let run_chain = |chain: &mut EffectChain| {
+    let run_chain = |chain: &mut EffectGraph| {
         let mut out = vec![0u8; (w * h * 4) as usize];
         let input = Image { data: &checker, width: w, height: h, stride: w * 4 };
-        chain.process(&[input], ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }, &FrameInfo::new(0.0, 0)).unwrap();
+        chain.process(&[input], vec![ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }], &FrameInfo::new(0.0, 0)).unwrap();
         out
     };
-    let mut mipped = EffectChain::new(vec![open(&first), open(&second)]).unwrap();
+    let mut mipped = common::chain(vec![open(&first), open(&second)]).unwrap();
     assert!(is_grey(&run_chain(&mut mipped)), "the link between the effects has mips");
-    let mut plain = EffectChain::new(vec![open(&first), open(&flat)]).unwrap();
+    let mut plain = common::chain(vec![open(&first), open(&flat)]).unwrap();
     assert_eq!(run_chain(&mut plain), checker);
     // The mip chain of the link costs a third more than the plain link.
     let (a, b) = (mipped.memory(), plain.memory());
