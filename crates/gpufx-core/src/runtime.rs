@@ -49,6 +49,7 @@ impl Backend {
 
 /// Optional features a device asks for when the adapter has them.
 pub(crate) const GPU_FEATURES: wgpu::Features = wgpu::Features::PIPELINE_CACHE
+    .union(wgpu::Features::SHADER_F16)
     .union(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
     .union(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
 

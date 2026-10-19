@@ -110,6 +110,16 @@ The output is `scale` times the input on each axis. `pad_mode` `reflect` mirrors
 the margin in input pixels added around each tile: inside the frame it overlaps the next tile, at the frame border it
 is padded with `pad_mode`; its `scale * tile_pad` output pixels are cut.
 
+The gpufx runtime (`FrameUpscale`) runs a frame in tiles sized from the device's storage buffer limits. Its overlap is
+the larger of `tile_pad` and the receptive field of the graph (computed from the ops: 19 to 21 pixels for
+realesr-animevideov3, 35 for realesr-general-x4v3), so a tiled frame equals the whole frame padded by `tile_pad` (the
+reference above) up to float noise; at the frame border a tile ends with that padded frame. It needs `pad_multiple`
+1 and a graph whose resizes have a scale, not a size. Convolutions run in f16 where the device has `SHADER_F16`
+(about 55 dB against the f32 reference on Real-ESRGAN; f32 matches at 90 dB and more). The f16 path keeps the
+convolution sums in f16 (f32 sums cost about 55% more time for ~10 dB), so it assumes activations stay well below
+65504, the f16 maximum (inputs above it are clamped): fine for models on [0, 1] images such as Real-ESRGAN; force
+`Precision::F32` for a model with large activations.
+
 ## Bundles (several scales in one package)
 
 ```

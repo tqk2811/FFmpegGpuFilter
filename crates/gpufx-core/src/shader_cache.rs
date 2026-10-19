@@ -409,7 +409,7 @@ impl ShaderCache {
         }
         if let (Some(record), Some(name)) = (&self.record, packaged) {
             let compiled = crate::dxil::hlsl(module, desc.entries, desc.entry)
-                .and_then(|(hlsl, entry)| self.dxc?.compile(&hlsl, &entry))
+                .and_then(|(hlsl, entry, f16)| self.dxc?.compile(&hlsl, &entry, f16))
                 // Checked on this device so a package never ships DXIL D3D12 refuses.
                 .and_then(|dxil| Some((passthrough_pipeline(device, desc, size, &dxil)?, dxil)));
             let Some((pipeline, dxil)) = compiled else {
@@ -439,8 +439,8 @@ impl ShaderCache {
             }
             // Refused (another DXC wrote it, a driver update...): rewritten below.
         }
-        let (hlsl, name) = crate::dxil::hlsl(module, desc.entries, desc.entry)?;
-        let dxil = dxc.compile(&hlsl, &name)?;
+        let (hlsl, name, f16) = crate::dxil::hlsl(module, desc.entries, desc.entry)?;
+        let dxil = dxc.compile(&hlsl, &name, f16)?;
         let Some(pipeline) = passthrough_pipeline(device, desc, size, &dxil) else {
             // Fresh DXIL refused too. After a second distinct shader, D3D12 likely takes
             // none on this device (no dxil.dll...). A file that was there is useless now.

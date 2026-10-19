@@ -83,12 +83,33 @@ fn groups_1d(n: u32, size: u32) -> (u32, u32) {
     (gx, g.div_ceil(gx))
 }
 
-fn act_code(a: Option<Activation>) -> (u32, f32) {
+/// An activation of the convolution epilogue (`act` in kernels.rs): kind, `a`, `b`, slope offset and count.
+type ActCode = (u32, f32, f32, u32, u32);
+
+fn act_code(a: Option<Activation>) -> ActCode {
     match a {
-        None => (0, 0.0),
-        Some(Activation::Relu) => (1, 0.0),
-        Some(Activation::LeakyRelu { slope }) => (2, slope),
-        Some(Activation::Sigmoid) => (3, 0.0),
+        None => (0, 0.0, 0.0, 0, 0),
+        Some(Activation::Relu) => (1, 0.0, 0.0, 0, 0),
+        Some(Activation::LeakyRelu { slope }) => (2, slope, 0.0, 0, 0),
+        Some(Activation::Sigmoid) => (3, 0.0, 0.0, 0, 0),
+    }
+}
+
+/// Whether an op of `kind` is an activation a convolution can apply in its epilogue.
+fn is_unary_act(kind: &OpKind) -> bool {
+    matches!(kind, OpKind::Activation(_) | OpKind::Prelu { .. } | OpKind::Clip { .. })
+}
+
+/// The epilogue code of activation op `k` (see [`is_unary_act`]).
+fn op_act_code(m: &NnModel, k: usize) -> ActCode {
+    match &m.model.ops[k].kind {
+        OpKind::Activation(a) => act_code(Some(*a)),
+        OpKind::Prelu { .. } => {
+            let (off, n) = m.slopes[&k];
+            (4, 0.0, 0.0, off, n)
+        }
+        OpKind::Clip { min, max } => (5, *min, *max, 0, 0),
+        _ => unreachable!("not an activation"),
     }
 }
 
@@ -125,7 +146,14 @@ fn infer(kind: &OpKind, ins: &[[u32; 3]]) -> Result<[u32; 3], String> {
             let (Some(oh), Some(ow)) = (axis(h, 0), axis(w, 1)) else { return Err(format!("input {h}x{w} is too small")) };
             [c.out_channels, oh, ow]
         }
-        OpKind::Activation(_) => one()?,
+        OpKind::Activation(_) | OpKind::Clip { .. } => one()?,
+        OpKind::Prelu { slope } => {
+            let s = one()?;
+            if slope.count != 1 && slope.count != s[0] as u64 {
+                return Err(format!("prelu slope has {} values, expected 1 or {}", slope.count, s[0]));
+            }
+            s
+        }
         OpKind::Binary { scalar, .. } => match (scalar, ins) {
             (Some(_), [a]) => *a,
             (None, [a, b]) => {
@@ -191,17 +219,19 @@ fn infer(kind: &OpKind, ins: &[[u32; 3]]) -> Result<[u32; 3], String> {
     })
 }
 
-/// One step after fusion: an op, maybe with the residual add and activation that followed it.
+/// One step after fusion: an op, maybe with the activation, residual add and activation that followed it.
 struct Step {
     op: usize,
     inputs: Vec<String>,
     output: String,
     residual: Option<String>,
-    post_act: Option<Activation>,
+    /// Activation ops applied in the epilogue (op indices): right after the conv, and after the residual add.
+    pre_act: Option<usize>,
+    post_act: Option<usize>,
 }
 
-/// Finds `conv -> add(conv, r) [-> activation]` where the conv output and the sum have one reader each, and
-/// `r` exists before the conv runs.
+/// Finds `conv [-> activation] [-> add(conv, r) [-> activation]]` where every intermediate has one reader and `r`
+/// exists before the conv runs (activation: relu, leaky relu, sigmoid, prelu or clip).
 fn fuse(m: &NnModel, shapes: &HashMap<String, [u32; 3]>) -> Vec<Step> {
     let ops = &m.model.ops;
     let mut uses: HashMap<&str, usize> = HashMap::new();
@@ -221,27 +251,34 @@ fn fuse(m: &NnModel, shapes: &HashMap<String, [u32; 3]>) -> Vec<Step> {
         if taken[i] {
             continue;
         }
-        let mut step = Step { op: i, inputs: op.inputs.clone(), output: op.output.clone(), residual: None, post_act: None };
-        if matches!(op.kind, OpKind::Conv2d(_)) && uses.get(op.output.as_str()) == Some(&1) {
-            if let Some(j) = reader(&op.output, i) {
+        let mut step = Step { op: i, inputs: op.inputs.clone(), output: op.output.clone(), residual: None, pre_act: None, post_act: None };
+        let single = |name: &str, after: usize| if uses.get(name) == Some(&1) { reader(name, after) } else { None };
+        if let OpKind::Conv2d(c) = &op.kind {
+            // the activation op right after a convolution without its own (conv -> prelu in Real-ESRGAN)
+            let mut last = i;
+            if c.activation.is_none() {
+                if let Some(k) = single(&op.output, i).filter(|&k| is_unary_act(&ops[k].kind)) {
+                    taken[k] = true;
+                    step.pre_act = Some(k);
+                    step.output = ops[k].output.clone();
+                    last = k;
+                }
+            }
+            let cur = step.output.clone();
+            if let Some(j) = single(&cur, last) {
                 let add = &ops[j];
                 let is_add = matches!(add.kind, OpKind::Binary { kind: BinaryKind::Add, scalar: None }) && add.inputs.len() == 2;
-                let other = add.inputs.iter().find(|n| **n != op.output).cloned();
+                let other = add.inputs.iter().find(|n| **n != cur).cloned();
                 let ready = |r: &str| producer.get(r).is_none_or(|&p| p < i);
                 if let (true, Some(r)) = (is_add, other) {
-                    if shapes.get(&r) == shapes.get(&op.output) && ready(&r) && add.inputs.iter().filter(|n| **n == op.output).count() == 1
-                    {
+                    if shapes.get(&r) == shapes.get(&cur) && ready(&r) && add.inputs.iter().filter(|n| **n == cur).count() == 1 {
                         taken[j] = true;
                         step.residual = Some(r);
                         step.output = add.output.clone();
-                        if uses.get(add.output.as_str()) == Some(&1) {
-                            if let Some(k) = reader(&add.output, j) {
-                                if let OpKind::Activation(a) = ops[k].kind {
-                                    taken[k] = true;
-                                    step.post_act = Some(a);
-                                    step.output = ops[k].output.clone();
-                                }
-                            }
+                        if let Some(k) = single(&add.output, j).filter(|&k| is_unary_act(&ops[k].kind)) {
+                            taken[k] = true;
+                            step.post_act = Some(k);
+                            step.output = ops[k].output.clone();
                         }
                     }
                 }
@@ -258,10 +295,10 @@ struct Alloc {
     slot: usize,
 }
 
-pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, Error> {
+/// The `c x h x w` shape of every tensor of the graph for the given input shapes.
+pub(crate) fn infer_shapes(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<HashMap<String, [u32; 3]>, Error> {
     let ops = &m.model.ops;
     let graph = |msg: String| Error::Graph(msg);
-    // shapes
     let mut shapes: HashMap<String, [u32; 3]> = HashMap::new();
     for name in &m.model.inputs {
         let Some((_, s)) = inputs.iter().find(|(n, _)| n == name) else { return Err(graph(format!("missing shape of input \"{name}\""))) };
@@ -287,6 +324,12 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
             return Err(graph(format!("output \"{o}\" is never produced")));
         }
     }
+    Ok(shapes)
+}
+
+pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, Error> {
+    let ops = &m.model.ops;
+    let shapes = infer_shapes(m, inputs)?;
     let steps = fuse(m, &shapes);
 
     // lifetimes: tensor -> (alloc, offset)
@@ -427,7 +470,12 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
     for step in &steps {
         let op = &ops[step.op];
         let out = view(&step.output);
-        let fused = if step.residual.is_some() { "+add" } else { "" };
+        let fused = format!(
+            "{}{}{}",
+            if step.pre_act.is_some() { "+act" } else { "" },
+            if step.residual.is_some() { "+add" } else { "" },
+            if step.post_act.is_some() { "+act" } else { "" }
+        );
         let detail = format!("{}{fused} {}x{}x{}", op.name, out.c, out.h, out.w);
         let ins: Vec<TensorView> = step.inputs.iter().map(|n| view(n)).collect();
         let ew = |label, words: Words, a: &TensorView, b: &TensorView, n: u32| {
@@ -460,8 +508,8 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
             OpKind::Conv2d(c) | OpKind::Deconv2d(c) => {
                 let x = &ins[0];
                 let res = step.residual.as_deref().map(view);
-                let (pre, pre_slope) = act_code(c.activation);
-                let (post, post_slope) = act_code(step.post_act);
+                let pre = step.pre_act.map_or_else(|| act_code(c.activation), |k| op_act_code(m, k));
+                let post = step.post_act.map_or_else(|| act_code(None), |k| op_act_code(m, k));
                 let (w_off, b_off) = m.conv_weights[&step.op];
                 let words = Words::default()
                     .u(x.c)
@@ -477,11 +525,17 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
                     .u(res.map_or(0, |r| r.offset))
                     .u(w_off)
                     .u(b_off)
-                    .u(pre)
+                    .u(pre.0)
                     .u(res.is_some() as u32)
-                    .u(post)
-                    .f(pre_slope)
-                    .f(post_slope);
+                    .u(post.0)
+                    .f(pre.1)
+                    .f(post.1)
+                    .f(pre.2)
+                    .f(post.2)
+                    .u(pre.3)
+                    .u(pre.4)
+                    .u(post.3)
+                    .u(post.4);
                 let shape = conv_shape(c);
                 let src1 = res.map_or(x.slot, |r| r.slot);
                 if matches!(op.kind, OpKind::Conv2d(_)) {
@@ -514,6 +568,17 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
                     Activation::Sigmoid => (12, 0.0),
                 };
                 pend.push(ew("activation", ew_words(mode, true, x, x, slope, 1.0, 1.0), x, x, out.len()));
+            }
+            OpKind::Prelu { .. } => {
+                let x = &ins[0];
+                let (off, n) = m.slopes[&step.op];
+                // the slopes stand in for input b: offset and count (read from the weights, not src1)
+                let slopes = TensorView { slot: x.slot, offset: off, c: n, h: 1, w: 1 };
+                pend.push(ew("prelu", ew_words(15, true, x, &slopes, 0.0, 1.0, 1.0), x, x, out.len()));
+            }
+            OpKind::Clip { min, max } => {
+                let x = &ins[0];
+                pend.push(ew("clip", ew_words(16, true, x, x, 0.0, *min, *max), x, x, out.len()));
             }
             OpKind::Binary { kind, scalar } => {
                 let a = &ins[0];

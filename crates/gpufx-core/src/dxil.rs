@@ -68,11 +68,12 @@ impl DxcCompiler {
         Some(DxcCompiler { compiler: Mutex::new(compiler), version, _lib: lib })
     }
 
-    /// DXIL of the compute entry point `entry` of `hlsl`, `None` on any error.
-    pub(crate) fn compile(&self, hlsl: &str, entry: &str) -> Option<Vec<u8>> {
+    /// DXIL of the compute entry point `entry` of `hlsl`, `None` on any error. `f16`: shader model 6.2 with
+    /// `-enable-16bit-types`, so `half` is a 16-bit float (without it DXC computes `half` in 32 bits).
+    pub(crate) fn compile(&self, hlsl: &str, entry: &str, f16: bool) -> Option<Vec<u8>> {
         let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
         let entry = wide(entry);
-        let target = wide(&format!("cs_{}", SHADER_MODEL.to_str()));
+        let target = wide(&format!("cs_{}", if f16 { SHADER_MODEL_F16 } else { SHADER_MODEL }.to_str()));
         // As wgpu-hal's compile_dxc, without debug info.
         let args = [
             windows::core::w!("-E"),
@@ -83,12 +84,14 @@ impl DxcCompiler {
             windows::core::w!("2018"),
             windows::core::w!("-no-warnings"),
             Dxc::DXC_ARG_ENABLE_STRICTNESS,
+            windows::core::w!("-enable-16bit-types"),
         ];
+        let args = if f16 { &args[..] } else { &args[..args.len() - 1] };
         let buffer = Dxc::DxcBuffer { Ptr: hlsl.as_ptr().cast(), Size: hlsl.len(), Encoding: Dxc::DXC_CP_UTF8.0 };
         let compiler = self.compiler.lock().ok()?;
         // SAFETY: every pointer outlives the call.
         unsafe {
-            let result: Dxc::IDxcResult = compiler.Compile(&buffer, Some(&args), None).ok()?;
+            let result: Dxc::IDxcResult = compiler.Compile(&buffer, Some(args), None).ok()?;
             if result.GetStatus().ok()?.is_err() {
                 return None;
             }
@@ -154,17 +157,69 @@ pub(crate) fn hlsl_options(entries: &[wgpu::BindGroupLayoutEntry]) -> Option<hls
     Some(options)
 }
 
-/// HLSL of the compute entry point `entry` of `module` for a layout of `entries`, and
-/// the entry point name to compile.
-pub(crate) fn hlsl(module: &naga::Module, entries: &[wgpu::BindGroupLayoutEntry], entry: &str) -> Option<(String, String)> {
+/// Shader model 6.2 with native 16-bit types: what a module using `f16` needs (wgpu's `SHADER_F16` on D3D12).
+const SHADER_MODEL_F16: hlsl::ShaderModel = hlsl::ShaderModel::V6_2;
+
+/// Whether `module`, valid with every capability, uses 16-bit floats: it is not valid without them (an f16
+/// value may have no entry in the type arena, e.g. a `let`).
+fn uses_f16(module: &naga::Module) -> bool {
+    let caps = naga::valid::Capabilities::all() - naga::valid::Capabilities::SHADER_FLOAT16;
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), caps).validate(module).is_err()
+}
+
+/// HLSL of the compute entry point `entry` of `module` for a layout of `entries`, the
+/// entry point name to compile, and whether it needs 16-bit types (see [`DxcCompiler::compile`]).
+pub(crate) fn hlsl(module: &naga::Module, entries: &[wgpu::BindGroupLayoutEntry], entry: &str) -> Option<(String, String, bool)> {
     if !module.overrides.is_empty() {
         return None;
     }
-    let options = hlsl_options(entries)?;
+    let mut options = hlsl_options(entries)?;
     let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(module).ok()?;
+    let f16 = uses_f16(module);
+    if f16 {
+        options.shader_model = SHADER_MODEL_F16;
+    }
     let pipeline = hlsl::PipelineOptions { entry_point: Some((naga::ShaderStage::Compute, entry.to_string())) };
     let mut source = String::new();
     let mut reflection = hlsl::Writer::new(&mut source, &options, &pipeline).write(module, &info, None).ok()?;
     let name = reflection.entry_point_names.pop()?.ok()?;
-    Some((source, name))
+    Some((source, name, f16))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn module(src: &str) -> naga::Module {
+        naga::front::wgsl::parse_str(src).unwrap()
+    }
+
+    const ENTRIES: [wgpu::BindGroupLayoutEntry; 1] = [wgpu::BindGroupLayoutEntry {
+        binding: 0,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: false },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }];
+
+    /// A module using f16 compiles for shader model 6.2 with 16-bit types: without `-enable-16bit-types` DXC
+    /// takes `half` as a 32-bit float, and the f16 convolutions of gpufx-nn ran in f32 through the DXIL cache.
+    #[test]
+    fn f16_modules_compile_with_16bit_types() {
+        let f16 = "enable f16;\n@group(0) @binding(0) var<storage, read_write> d: array<f32>;\n\
+                   @compute @workgroup_size(1) fn main() { let h = f16(d[0]) * 3.0h; d[0] = f32(h); }";
+        let f32 = "@group(0) @binding(0) var<storage, read_write> d: array<f32>;\n\
+                   @compute @workgroup_size(1) fn main() { d[0] = d[0] * 3.0; }";
+        let (src, _, uses) = hlsl(&module(f16), &ENTRIES, "main").unwrap();
+        assert!(uses && src.contains("half"), "{src}");
+        assert!(!hlsl(&module(f32), &ENTRIES, "main").unwrap().2);
+        let Some(dxc) = DxcCompiler::get() else { return };
+        let (src, name, _) = hlsl(&module(f16), &ENTRIES, "main").unwrap();
+        let with = dxc.compile(&src, &name, true).expect("f16 compiles with 16-bit types");
+        let without = dxc.compile(&src, &name, false).expect("min precision half");
+        assert_ne!(with, without, "16-bit types change the DXIL");
+    }
 }

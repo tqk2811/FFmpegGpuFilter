@@ -110,6 +110,16 @@ Output lớn gấp `scale` lần input theo mỗi trục. `pad_mode` `reflect` l
 phần lề (tính theo pixel input) thêm quanh mỗi tile: trong frame thì chồng lên tile bên cạnh, ở viền frame thì pad
 theo `pad_mode`; `scale * tile_pad` pixel output tương ứng bị cắt bỏ.
 
+Runtime gpufx (`FrameUpscale`) chạy frame theo tile, kích thước tile chọn theo giới hạn storage buffer của thiết bị.
+Phần overlap là số lớn hơn giữa `tile_pad` và receptive field của graph (tính từ các op: 19 đến 21 pixel với
+realesr-animevideov3, 35 với realesr-general-x4v3), nên frame chạy theo tile bằng frame chạy nguyên khối pad
+`tile_pad` (bản tham chiếu ở trên) tới mức nhiễu float; ở viền frame tile kết thúc đúng chỗ frame đã pad kết thúc.
+Runtime cần `pad_multiple` 1 và mọi resize trong graph có `scale`, không phải `size`. Convolution chạy f16 khi
+thiết bị có `SHADER_F16` (khoảng 55 dB so với tham chiếu f32 trên Real-ESRGAN; f32 khớp từ 90 dB trở lên). Đường
+f16 cộng dồn tổng convolution bằng f16 (cộng dồn f32 chậm hơn khoảng 55% để được thêm ~10 dB), nên giả định
+activation luôn nhỏ hơn nhiều so với 65504, giá trị lớn nhất của f16 (input vượt ngưỡng bị clamp): ổn với model
+chạy trên ảnh [0, 1] như Real-ESRGAN; model có activation lớn thì ép `Precision::F32`.
+
 ## Bundle (nhiều scale trong một package)
 
 ```

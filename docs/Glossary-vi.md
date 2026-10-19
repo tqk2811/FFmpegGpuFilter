@@ -35,3 +35,11 @@ Phép đổi chỗ phần tử để tăng độ phân giải: tensor `C·r² x 
 ## Tile
 
 Cắt ảnh thành các ô (tile) để chạy model từng ô một, khi tensor trung gian của cả frame quá lớn so với VRAM hoặc giới hạn binding buffer. Mỗi tile được nới thêm một viền overlap; output chỉ giữ phần giữa tile để không lộ đường nối, vì pixel ở mép tile thiếu ngữ cảnh của vùng bên cạnh.
+
+## Receptive field
+
+Vùng pixel input mà một pixel output của mạng có thể "nhìn thấy": mỗi convolution 3x3 nới thêm 1 pixel mỗi phía, nên 18 lớp nhìn xa 18 pixel. Khi chạy theo [tile](#L35), overlap phải ít nhất bằng receptive field thì pixel giữ lại mới không bị ảnh hưởng bởi phần pad 0 ở mép tile, và kết quả mới bằng chạy cả frame.
+
+## f16
+
+Số thực dấu phẩy động 16 bit (half precision, 11 bit mantissa, tối đa 65504). Tính convolution bằng f16 nhanh hơn f32 trên nhiều GPU (ít băng thông workgroup memory và thanh ghi hơn) nhưng sai số lớn hơn; WGSL cần `enable f16` và thiết bị có tính năng `SHADER_F16`.

@@ -7,7 +7,7 @@ mod common;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpufx_core::nn::{FrameInterp, InterpFrames, NnModel};
+use gpufx_core::nn::{FrameInterp, FrameUpscale, InterpFrames, NnModel, Precision, UpscaleOptions};
 use gpufx_core::{ColorInfo, GpuContext, GpuFrame, Image, Matrix, PixelFormat, Range};
 use gpufx_nnconv::reference::{Reference, Tensor};
 
@@ -116,7 +116,20 @@ fn model(inputs: &[&str], outputs: &[&str], ops: &[String]) -> String {
 
 /// Runs the model on the GPU and on the CPU reference with random inputs of `shapes`; every output must agree.
 fn check(ctx: &Arc<GpuContext>, json: &str, weights: &[u8], shapes: &[(&str, [u32; 3])], rng: &mut Rng) {
-    let gpu = NnModel::from_parts(ctx.clone(), json.as_bytes(), weights, None).expect("gpu model");
+    check_with(ctx, json, weights, shapes, rng, Precision::F32, 2e-5);
+}
+
+/// [`check`] with a precision and the largest error allowed (relative to 1 + |value|).
+fn check_with(
+    ctx: &Arc<GpuContext>,
+    json: &str,
+    weights: &[u8],
+    shapes: &[(&str, [u32; 3])],
+    rng: &mut Rng,
+    precision: Precision,
+    tol: f32,
+) {
+    let gpu = NnModel::from_parts_with(ctx.clone(), json.as_bytes(), weights, None, precision).expect("gpu model");
     let cpu = Reference::from_parts(json.as_bytes(), weights, None).expect("cpu model");
     let plan = gpu.plan(shapes).expect("plan");
     let mut inputs = HashMap::new();
@@ -140,7 +153,7 @@ fn check(ctx: &Arc<GpuContext>, json: &str, weights: &[u8], shapes: &[(&str, [u3
                 worst = (err, i);
             }
         }
-        assert!(worst.0 <= 2e-5, "{name}: error {} at {} (gpu {}, cpu {})", worst.0, worst.1, got[worst.1], w.data[worst.1]);
+        assert!(worst.0 <= tol, "{name}: error {} at {} (gpu {}, cpu {})", worst.0, worst.1, got[worst.1], w.data[worst.1]);
     }
 }
 
@@ -722,4 +735,343 @@ fn reset_forgets_the_previous_frame() {
     assert!(call(&ctx, &mut fi, &a, &[0.3]).is_err(), "no previous frame");
     assert!(call(&ctx, &mut fi, &a, &[1.0]).unwrap()[0] == a, "time 1 is the source frame");
     assert!(call(&ctx, &mut fi, &b, &[0.3]).unwrap()[0] == a, "a cut after a reset");
+}
+
+// ---- prelu, clip, bundles and FrameUpscale (super_resolution) ----
+
+fn prelu(w: &mut Weights, r: &mut Rng, name: &str, input: &str, n: usize) -> String {
+    let slope = w.add(&r.vec(n), false);
+    op("prelu", name, &[input], &format!(r#""slope":{slope}"#))
+}
+
+fn conv_same(w: &mut Weights, r: &mut Rng, name: &str, input: &str, cin: u32, cout: u32) -> String {
+    conv(w, r, "conv2d", name, input, cin, cout, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], "null")
+}
+
+/// prelu (per channel and shared) and clip, fused into the convolution before them (alone, and around a fused
+/// residual add) and standalone.
+#[test]
+fn prelu_and_clip_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(11));
+    let ops = vec![
+        // conv -> prelu (Real-ESRGAN), 6 channels: not a multiple of the 4 slopes the epilogue reads at once
+        conv_same(&mut w, &mut r, "c1", "x", 5, 6),
+        prelu(&mut w, &mut r, "p1", "c1", 6),
+        // conv -> prelu (shared slope) -> add -> clip, all one dispatch
+        conv_same(&mut w, &mut r, "c2", "p1", 6, 6),
+        prelu(&mut w, &mut r, "p2", "c2", 1),
+        op("binary", "s", &["p2", "p1"], r#""kind":"add","scalar":null"#),
+        op("clip", "k", &["s"], r#""min":-0.25,"max":0.5"#),
+        // standalone: on a model input, per channel and shared, and a clip
+        prelu(&mut w, &mut r, "q1", "x", 5),
+        prelu(&mut w, &mut r, "q2", "x", 1),
+        op("clip", "q3", &["x"], r#""min":0,"max":0.75"#),
+    ];
+    let json = model(&["x"], &["k", "q1", "q2", "q3"], &ops);
+    check(&ctx, &json, &w.0, &[("x", [5, 13, 19])], &mut r);
+    let m = NnModel::from_parts(ctx, json.as_bytes(), &w.0, None).unwrap();
+    // c1+p1, c2+p2+s+k, q1, q2, q3
+    assert_eq!(m.plan(&[("x", [5, 13, 19])]).unwrap().dispatch_count(), 5, "conv -> prelu -> add -> clip fused");
+}
+
+/// Convolutions in f16 (devices with SHADER_F16) stay close to the f32 reference: 64 input channels as in
+/// Real-ESRGAN, fused prelu and a fused residual add.
+#[test]
+fn f16_convolutions_stay_close_to_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(14));
+    let ops = vec![
+        conv_same(&mut w, &mut r, "c1", "x", 64, 64),
+        prelu(&mut w, &mut r, "p1", "c1", 64),
+        conv_same(&mut w, &mut r, "c2", "x", 64, 64),
+        op("binary", "s", &["c2", "x"], r#""kind":"add","scalar":null"#),
+    ];
+    let json = model(&["x"], &["p1", "s"], &ops);
+    let m = NnModel::from_parts_with(ctx.clone(), json.as_bytes(), &w.0, None, Precision::Auto).unwrap();
+    if !m.uses_f16() {
+        eprintln!("skipping: no SHADER_F16 on {}", ctx.description());
+        return;
+    }
+    // 576 products accumulated in f16 (11 bit mantissa) on partial sums up to ~10: a few hundredths
+    check_with(&ctx, &json, &w.0, &[("x", [64, 9, 21])], &mut r, Precision::Auto, 0.05);
+}
+
+/// A prelu whose slope count is neither 1 nor the channel count fails at load (after a conv) or when planned;
+/// a slope blob past the end of weights.bin fails at load.
+#[test]
+fn prelu_slope_count_is_checked() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(13));
+    let ops = vec![
+        conv(&mut w, &mut r, "conv2d", "c", "x", 3, 4, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        prelu(&mut w, &mut r, "p", "c", 3),
+    ];
+    let json = model(&["x"], &["p"], &ops);
+    let e = NnModel::from_parts(ctx.clone(), json.as_bytes(), &w.0, None).err().expect("bad slope count");
+    assert!(e.to_string().contains("slope"), "{e}");
+    let (mut w, mut r) = (Weights::default(), Rng(13));
+    let json = model(&["x"], &["p"], &[prelu(&mut w, &mut r, "p", "x", 2)]);
+    let m = NnModel::from_parts(ctx.clone(), json.as_bytes(), &w.0, None).unwrap();
+    assert!(m.plan(&[("x", [3, 4, 4])]).is_err());
+    let json = json.replace(r#""count":2"#, r#""count":2000"#);
+    assert!(NnModel::from_parts(ctx, json.as_bytes(), &w.0, None).is_err());
+}
+
+/// A small super resolution model with the structure of Real-ESRGAN compact: conv + prelu body, pixel shuffle,
+/// nearest upsampled input added, then a bicubic downscale (as the x2 / x3 packages do) and a clip.
+fn sr_model(scale_down: bool) -> (String, Vec<u8>, String) {
+    let (mut w, mut r) = (Weights::default(), Rng(21));
+    let mut ops = vec![
+        conv_same(&mut w, &mut r, "c0", "data", 3, 8),
+        prelu(&mut w, &mut r, "p0", "c0", 8),
+        conv_same(&mut w, &mut r, "c1", "p0", 8, 8),
+        prelu(&mut w, &mut r, "p1", "c1", 8),
+        conv_same(&mut w, &mut r, "c2", "p1", 8, 8),
+        prelu(&mut w, &mut r, "p2", "c2", 8),
+        conv_same(&mut w, &mut r, "c3", "p2", 8, 48),
+        op("pixel_shuffle", "ps", &["c3"], r#""factor":4"#),
+        op("resize", "up", &["data"], r#""mode":"nearest","scale":[4,4],"size":null,"align_corners":false"#),
+        op("binary", "sum", &["ps", "up"], r#""kind":"add","scalar":null"#),
+    ];
+    let (last, scale) = if scale_down {
+        ops.push(op("resize", "down", &["sum"], r#""mode":"bicubic","scale":[0.5,0.5],"size":null,"align_corners":false"#));
+        ("down", 2)
+    } else {
+        ("sum", 4)
+    };
+    ops.push(op("clip", "output", &[last], r#""min":0,"max":1"#));
+    let io = format!(
+        r#"{{"kind":"super_resolution","inputs":{{"image":"data"}},"output":"output","scale":{scale},"color":"rgb",
+        "range":[0,1],"pad_multiple":1,"pad_mode":"reflect","output_clamp":[0,1],"tile_pad":3}}"#
+    );
+    (model(&["data"], &["output"], &ops), w.0, io)
+}
+
+fn random_rgb(r: &mut Rng, w: u32, h: u32) -> Vec<u8> {
+    (0..w * h * 3).map(|_| ((r.next() + 1.0) * 127.9) as u8).collect()
+}
+
+fn rgba_of(rgb: &[u8]) -> Vec<u8> {
+    rgb.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect()
+}
+
+/// Largest difference of the RGB values and the count of differing values.
+fn diff_rgb(gpu_rgba: &[u8], cpu_rgb: &[u8]) -> (i32, usize) {
+    let mut worst = 0;
+    let mut n = 0;
+    for (p, q) in gpu_rgba.chunks(4).zip(cpu_rgb.chunks(3)) {
+        assert_eq!(p[3], 255);
+        for c in 0..3 {
+            let d = (p[c] as i32 - q[c] as i32).abs();
+            worst = worst.max(d);
+            n += (d != 0) as usize;
+        }
+    }
+    (worst, n)
+}
+
+fn upscaler(ctx: &Arc<GpuContext>, (json, weights, io): &(String, Vec<u8>, String), tile: Option<u32>) -> FrameUpscale {
+    let m = NnModel::from_parts(ctx.clone(), json.as_bytes(), weights, Some(io.as_bytes())).unwrap();
+    FrameUpscale::new(Arc::new(m), UpscaleOptions { tile, ..Default::default() }).unwrap()
+}
+
+/// The pre/post processing of `super_resolution` against gpufx-nnconv's `frames::upscale`, on frames smaller than
+/// the reflect padding (5x7 and 1x2 with tile_pad 3), with and without the bicubic downscale.
+#[test]
+fn frame_upscale_matches_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    for down in [false, true] {
+        let m = sr_model(down);
+        let cpu = Reference::from_parts(m.0.as_bytes(), &m.1, Some(m.2.as_bytes())).unwrap();
+        let mut up = upscaler(&ctx, &m, None);
+        let mut r = Rng(31);
+        for (wd, ht) in [(5u32, 7u32), (1, 2), (23, 11)] {
+            let rgb = random_rgb(&mut r, wd, ht);
+            let frame = gpufx_nnconv::frames::Rgb8 { w: wd as usize, h: ht as usize, data: rgb.clone() };
+            let want = gpufx_nnconv::frames::upscale(&cpu, &frame).unwrap();
+            let rgba = rgba_of(&rgb);
+            let got = up.upscale(&view(&rgba, wd, ht)).unwrap();
+            let s = up.scale();
+            assert_eq!((want.w, want.h), ((wd * s) as usize, (ht * s) as usize));
+            assert_eq!(got.len(), want.data.len() / 3 * 4);
+            let (worst, n) = diff_rgb(&got, &want.data);
+            // a value on a rounding edge may differ by one, rarely
+            assert!(worst <= 1 && n <= 2 + want.data.len() / 2000, "{wd}x{ht} down={down}: {n} values differ, worst {worst}");
+        }
+    }
+}
+
+/// Tiles down to 1 pixel give the frame a whole run gives up to float noise: the context covers what the
+/// convolutions see, so no seam shows.
+#[test]
+fn tiled_upscale_equals_untiled() {
+    let Some(ctx) = gpu() else { return };
+    for down in [false, true] {
+        let m = sr_model(down);
+        let mut whole = upscaler(&ctx, &m, None);
+        let (wd, ht) = (41u32, 29u32);
+        let rgba = rgba_of(&random_rgb(&mut Rng(41), wd, ht));
+        let want = whole.upscale(&view(&rgba, wd, ht)).unwrap();
+        assert_eq!(whole.prepare(wd, ht).unwrap().cols, 1);
+        for tile in [16u32, 7, 3, 1] {
+            let mut tiled = upscaler(&ctx, &m, Some(tile));
+            let got = tiled.upscale(&view(&rgba, wd, ht)).unwrap();
+            let l = tiled.prepare(wd, ht).unwrap();
+            assert_eq!((l.cols, l.rows), (wd.div_ceil(tile), ht.div_ceil(tile)));
+            let differ = got.iter().zip(&want).filter(|(a, b)| a != b).count();
+            let worst = got.iter().zip(&want).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap();
+            // float noise flips a value on a rounding edge now and then (as against the CPU); a seam is far off
+            assert!(worst <= 1 && differ <= want.len() / 400, "tile {tile} down={down}: {differ} values differ, worst {worst}");
+        }
+    }
+}
+
+/// Bundles: the variant is picked by scale, a missing scale lists the available ones, a variant directory must
+/// be a simple name.
+#[test]
+fn bundle_variant_is_picked_by_scale() {
+    let Some(ctx) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("gpufx-nn-bundle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (sub, down) in [("x2", true), ("x4", false)] {
+        let (json, weights, io) = sr_model(down);
+        let d = dir.join(sub);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("model.json"), json).unwrap();
+        std::fs::write(d.join("weights.bin"), weights).unwrap();
+        std::fs::write(d.join("io.json"), io).unwrap();
+    }
+    let manifest = |x2: &str| {
+        format!(
+            r#"{{"format":"gpufx-nn-bundle","version":1,"name":"t","kind":"super_resolution",
+            "variants":[{{"scale":2,"dir":"{x2}"}},{{"scale":4,"dir":"x4"}}]}}"#
+        )
+    };
+    std::fs::write(dir.join("package.json"), manifest("x2")).unwrap();
+    for s in [2, 4] {
+        let up = FrameUpscale::open(ctx.clone(), &dir, s, UpscaleOptions::default()).unwrap();
+        assert_eq!(up.scale(), s);
+    }
+    let e = NnModel::load_with(ctx.clone(), &dir, Some(3), Precision::F32).err().unwrap().to_string();
+    assert!(e.contains("available: 2, 4"), "{e}");
+    let e = NnModel::load(ctx.clone(), &dir).err().unwrap().to_string();
+    assert!(e.contains("choose a scale") && e.contains("2, 4"), "{e}");
+    std::fs::write(dir.join("package.json"), manifest("../x2")).unwrap();
+    let e = NnModel::load_with(ctx, &dir, Some(2), Precision::F32).err().unwrap().to_string();
+    assert!(e.contains("simple name"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn repo_path(rel: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(rel)
+}
+
+/// The Real-ESRGAN packages on the GPU against the CPU reference on a real image (`GPUFX_SR_IMAGE`, default
+/// `build/sr-test.png`; packages from `scripts/fetch-models.ps1` in `build/models`), whole and in small tiles,
+/// plus the time per 1080p frame (`GPUFX_SR_BENCH=0` skips it). Run in release: the CPU reference is slow in debug.
+#[test]
+#[ignore = "needs build/models/realesr-*.zip and build/sr-test.png"]
+fn realesrgan_matches_the_cpu_reference() {
+    let Some(ctx) = gpu() else { return };
+    let img_path = std::env::var("GPUFX_SR_IMAGE").map(std::path::PathBuf::from).unwrap_or_else(|_| repo_path("build/sr-test.png"));
+    let img = image::open(&img_path).unwrap_or_else(|e| panic!("{}: {e}", img_path.display())).to_rgb8();
+    let (wd, ht) = img.dimensions();
+    let rgba = rgba_of(img.as_raw());
+    for (pkg, scale) in [("realesr-animevideov3", 2u32), ("realesr-animevideov3", 4), ("realesr-general-x4v3", 4)] {
+        let path = repo_path(&format!("build/models/{pkg}.zip"));
+        let cpu = Reference::load_variant(&path, Some(scale as u64)).unwrap();
+        let frame = gpufx_nnconv::frames::Rgb8 { w: wd as usize, h: ht as usize, data: img.as_raw().clone() };
+        let want = gpufx_nnconv::frames::upscale(&cpu, &frame).unwrap();
+        let want = image::RgbaImage::from_raw(want.w as u32, want.h as u32, rgba_of(&want.data)).unwrap();
+        for precision in [Precision::F32, Precision::Auto] {
+            let opts = UpscaleOptions { precision, ..Default::default() };
+            let mut up = FrameUpscale::open(ctx.clone(), &path, scale, opts).unwrap();
+            let db = psnr_rgb(&up.upscale(&view(&rgba, wd, ht)).unwrap(), &want);
+            let mut tiled = FrameUpscale::open(ctx.clone(), &path, scale, UpscaleOptions { tile: Some(40), ..opts }).unwrap();
+            let db_tiled = psnr_rgb(&tiled.upscale(&view(&rgba, wd, ht)).unwrap(), &want);
+            let l = tiled.prepare(wd, ht).unwrap();
+            let f16 = up.model().uses_f16();
+            eprintln!(
+                "{pkg} x{scale} {}: {db:.2} dB whole, {db_tiled:.2} dB in {}x{} tiles (context {}) against the CPU reference on {}",
+                if f16 { "f16" } else { "f32" },
+                l.cols,
+                l.rows,
+                l.context,
+                ctx.description()
+            );
+            let min = if f16 { 45.0 } else { 50.0 };
+            assert!(db >= min && db_tiled >= min, "{pkg} x{scale}: {db:.2} / {db_tiled:.2} dB");
+        }
+    }
+    if std::env::var("GPUFX_SR_BENCH").is_ok_and(|v| v == "0") {
+        return;
+    }
+    let big = image::imageops::resize(&img, 1920, 1080, image::imageops::FilterType::Triangle);
+    let rgba = rgba_of(big.as_raw());
+    for (pkg, scale) in [("realesr-animevideov3", 2u32), ("realesr-general-x4v3", 4)] {
+        let path = repo_path(&format!("build/models/{pkg}.zip"));
+        for precision in [Precision::F32, Precision::Auto] {
+            let mut up = FrameUpscale::open(ctx.clone(), &path, scale, UpscaleOptions { precision, ..Default::default() }).unwrap();
+            up.upscale(&view(&rgba, 1920, 1080)).unwrap();
+            let l = up.prepare(1920, 1080).unwrap();
+            let ms = up.bench(5).unwrap();
+            let mb = up.plan().unwrap().tensor_bytes() as f64 / (1 << 20) as f64;
+            eprintln!(
+                "{pkg} x{scale} {} 1080p: {ms:.1} ms/frame, {}x{} tiles of {}x{} ({mb:.0} MiB of tensors) on {}",
+                if up.model().uses_f16() { "f16" } else { "f32" },
+                l.cols,
+                l.rows,
+                l.tile_w,
+                l.tile_h,
+                ctx.description()
+            );
+        }
+    }
+}
+
+/// A graph that downscales before it upscales (a strided convolution) runs as one tile but is refused in several:
+/// tile starts would have to fall on the grid of the downscaled tensors.
+#[test]
+fn downscaling_graph_is_not_tiled() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(51));
+    let ops = vec![
+        conv(&mut w, &mut r, "conv2d", "c", "data", 3, 48, [3, 3], [2, 2], [1, 1], [1, 1, 1, 1], [0, 0], "null"),
+        op("pixel_shuffle", "output", &["c"], r#""factor":4"#),
+    ];
+    let io = r#"{"kind":"super_resolution","inputs":{"image":"data"},"output":"output","scale":2,"tile_pad":2}"#;
+    let m = (model(&["data"], &["output"], &ops), w.0, io.to_string());
+    let rgba = rgba_of(&random_rgb(&mut Rng(52), 20, 20));
+    upscaler(&ctx, &m, None).upscale(&view(&rgba, 20, 20)).unwrap();
+    let e = upscaler(&ctx, &m, Some(5)).upscale(&view(&rgba, 20, 20)).expect_err("tiles refused").to_string();
+    assert!(e.contains("downscales"), "{e}");
+}
+
+/// Sizes the device cannot hold fail with an error, not a validation panic: an output past the texture limit, an
+/// `encode` target of the wrong size, a forced tile larger than the tensor budget.
+#[test]
+fn upscale_size_limits_are_errors() {
+    let Some(ctx) = gpu() else { return };
+    let m = sr_model(false);
+    let max = ctx.device().limits().max_texture_dimension_2d;
+    let w = max / 4 + 1;
+    let rgba = vec![128u8; w as usize * 4];
+    let e = upscaler(&ctx, &m, None).upscale(&view(&rgba, w, 1)).expect_err("output too wide").to_string();
+    assert!(e.contains("texture limit"), "{e}");
+
+    let mut up = upscaler(&ctx, &m, None);
+    let input = rgba_texture(&ctx, 8, 8, wgpu::TextureUsages::TEXTURE_BINDING);
+    let out = rgba_texture(&ctx, 31, 32, wgpu::TextureUsages::STORAGE_BINDING);
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    let (a, b) = (input.create_view(&Default::default()), out.create_view(&Default::default()));
+    let e = up.encode(&mut enc, &a, &b, 8, 8).expect_err("output of the wrong size").to_string();
+    assert!(e.contains("31x32"), "{e}");
+
+    let (json, weights, io) = &m;
+    let model = NnModel::from_parts(ctx.clone(), json.as_bytes(), weights, Some(io.as_bytes())).unwrap();
+    let opts = UpscaleOptions { tile: Some(4096), max_tensor_bytes: Some(1 << 20), ..Default::default() };
+    let up = FrameUpscale::new(Arc::new(model), opts).unwrap();
+    let e = up.layout_for(4096, 4096).expect_err("forced tile over the budget").to_string();
+    assert!(e.contains("do not fit"), "{e}");
 }
