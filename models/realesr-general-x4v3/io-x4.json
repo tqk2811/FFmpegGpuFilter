@@ -1,0 +1,13 @@
+{
+  "kind": "super_resolution",
+  "family": "realesr",
+  "inputs": { "image": "data" },
+  "output": "output",
+  "scale": 4,
+  "color": "rgb",
+  "range": [0, 1],
+  "pad_multiple": 1,
+  "pad_mode": "reflect",
+  "output_clamp": [0, 1],
+  "tile_pad": 10
+}

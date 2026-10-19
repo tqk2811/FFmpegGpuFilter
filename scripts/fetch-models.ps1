@@ -4,6 +4,10 @@
 #   scripts/fetch-models.ps1                      all models
 #   scripts/fetch-models.ps1 rife-v4.6            chosen models
 #   scripts/fetch-models.ps1 -Bin <gpufx-nnconv>  use a built converter instead of `cargo run`
+#
+# A source.json with a "variants" array is a multi-scale bundle: each variant has a dir, io, url_param,
+# sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/models/<name>.zip.
+# A flat source.json (url_param/url_bin/io.json) stays a single-model package.
 param(
     [string]$Bin = '',
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Names
@@ -32,26 +36,54 @@ function Get-Model([string]$url, [string]$sha256, [string]$file) {
     Move-Item -LiteralPath $part -Destination $file -Force
 }
 
+function Invoke-Converter([string[]]$convertArgs) {
+    if ($Bin) {
+        & $Bin @convertArgs
+    } else {
+        cargo run --release --quiet --manifest-path (Join-Path $root 'Cargo.toml') -p gpufx-nnconv -- @convertArgs
+    }
+    if ($LASTEXITCODE -ne 0) { throw "gpufx-nnconv failed" }
+}
+
 foreach ($name in $Names) {
     $srcFile = Join-Path $root "models/$name/source.json"
     if (-not (Test-Path $srcFile)) { throw "$name`: no models/$name/source.json" }
     $src = Get-Content -Raw $srcFile | ConvertFrom-Json
     $dir = Join-Path $root "build/models/$name"
     New-Item -ItemType Directory -Force $dir | Out-Null
-    Get-Model $src.url_param $src.sha256_param (Join-Path $dir 'flownet.param')
-    Get-Model $src.url_bin $src.sha256_bin (Join-Path $dir 'flownet.bin')
-    $convertArgs = @('ncnn', '--param', (Join-Path $dir 'flownet.param'), '--bin', (Join-Path $dir 'flownet.bin'),
-        '--io', (Join-Path $root "models/$name/io.json"), '--name', $name, '-o', (Join-Path $root "build/models/$name.zip"))
-    $readmeFile = Join-Path $root "models/$name/README.md"
-    if (Test-Path $readmeFile) { $convertArgs += @('--readme', $readmeFile) }
+
+    $license = $null
     if ($src.license_url) {
         Get-Model $src.license_url $src.sha256_license (Join-Path $dir 'LICENSE')
-        $convertArgs += @('--license', (Join-Path $dir 'LICENSE'))
+        $license = Join-Path $dir 'LICENSE'
     }
-    if ($Bin) {
-        & $Bin @convertArgs
+    $readmeFile = Join-Path $root "models/$name/README.md"
+
+    if ($src.variants) {
+        # Multi-scale bundle: convert each variant to a package directory, then bundle them.
+        $variantArgs = @()
+        foreach ($v in $src.variants) {
+            $vdir = Join-Path $dir $v.dir
+            New-Item -ItemType Directory -Force $vdir | Out-Null
+            Get-Model $v.url_param $v.sha256_param (Join-Path $vdir 'model.param')
+            Get-Model $v.url_bin $v.sha256_bin (Join-Path $vdir 'model.bin')
+            $pkgDir = Join-Path $dir "pkg-$($v.dir)"
+            Invoke-Converter @('ncnn', '--param', (Join-Path $vdir 'model.param'), '--bin', (Join-Path $vdir 'model.bin'),
+                '--io', (Join-Path $root "models/$name/$($v.io)"), '--name', "$name-$($v.dir)", '-o', $pkgDir)
+            $variantArgs += @('--variant', "$($v.dir)=$pkgDir")
+        }
+        $bundleArgs = @('bundle') + $variantArgs + @('--name', $name, '-o', (Join-Path $root "build/models/$name.zip"))
+        if (Test-Path $readmeFile) { $bundleArgs += @('--readme', $readmeFile) }
+        if ($license) { $bundleArgs += @('--license', $license) }
+        Invoke-Converter $bundleArgs
     } else {
-        cargo run --release --quiet --manifest-path (Join-Path $root 'Cargo.toml') -p gpufx-nnconv -- @convertArgs
+        # Single-model package (e.g. RIFE).
+        Get-Model $src.url_param $src.sha256_param (Join-Path $dir 'flownet.param')
+        Get-Model $src.url_bin $src.sha256_bin (Join-Path $dir 'flownet.bin')
+        $convertArgs = @('ncnn', '--param', (Join-Path $dir 'flownet.param'), '--bin', (Join-Path $dir 'flownet.bin'),
+            '--io', (Join-Path $root "models/$name/io.json"), '--name', $name, '-o', (Join-Path $root "build/models/$name.zip"))
+        if (Test-Path $readmeFile) { $convertArgs += @('--readme', $readmeFile) }
+        if ($license) { $convertArgs += @('--license', $license) }
+        Invoke-Converter $convertArgs
     }
-    if ($LASTEXITCODE -ne 0) { throw "gpufx-nnconv failed for $name" }
 }
