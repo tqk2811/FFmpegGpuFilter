@@ -53,6 +53,16 @@
 - **Vì sao**: gửi báo lỗi để FFmpeg/Intel sửa; khi driver hoặc FFmpeg đã sửa thì bỏ lệnh từ chối (đang chặn cả người dùng driver mới) và nhánh `INTEL_HIC` trong test.
 - **Ngày ghi**: 2026-10-14
 
+### [Thấp] Build lại libavutil trong image BtbN: các finding review để sau
+- **Vấn đề**:
+  - `build-avutil.sh` lấy dòng configure từ chuỗi trong avutil dựng sẵn rồi chạy bằng `eval`. Hiện chạy được vì dòng của BtbN không có khoảng trắng trong giá trị hay ký tự đặc biệt của shell. Đổi sang image khác mà dòng configure có những thứ đó thì configure có thể sai mà không báo, hoặc chạy lệnh lạ.
+  - `AVUTIL_LIB` chép thẳng thư viện vào bundle, không kiểm export, import và tên loại thiết bị như đường build, cũng không kiểm major version có khớp file cũ không.
+  - Phép bỏ qua format trong test D3D dựa vào đúng câu log "Invalid output format … for hwframe download". FFmpeg đổi câu chữ thì bài skip thành FAIL.
+  - Mỗi lần chạy, mỗi job CI kéo image BtbN vài GB, không có cache, tốn thêm khoảng 1–3 phút.
+- **Vị trí**: [build-avutil.sh:55](../scripts/build-avutil.sh#L55), [build-prebuilt.sh:109-111](../scripts/build-prebuilt.sh#L109-L111), [test-bundle.sh:874](../scripts/test-bundle.sh#L874), [ci.yml](../.github/workflows/ci.yml).
+- **Vì sao**: hướng gọn hơn là áp `ffmpeg/patches` ngay trong repo tqk2811/FFmpegBuild, hoặc đăng libavutil đã vá một lần làm asset của release rồi tải về bằng `AVUTIL_LIB` kèm checksum. Như vậy CI bỏ được bước build trong docker, và không còn phụ thuộc dòng configure lẫn digest image phải giữ khớp với version.
+- **Ngày ghi**: 2026-10-19
+
 ### Build Docker đầy đủ chưa chạy lại trên FFmpeg 9.0
 - **Vấn đề**: submodule `external/FFmpeg` đã chuyển từ master (9.1-dev) về `n9.0-2-g03d9533176`. `build.sh` và job CI `ffmpeg-docker` (chỉ chạy khi bấm tay `workflow_dispatch`) chưa được chạy lại trên commit này.
 - **Vị trí**: [build.sh](../build.sh), [docker/build-in-container.sh](../docker/build-in-container.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml).
