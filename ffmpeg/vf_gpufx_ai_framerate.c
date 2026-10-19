@@ -6,7 +6,7 @@
  * frame at time T between the source frames at T0 and T1 is made by the model at
  * t = (T - T0) / (T1 - T0); a grid point on a source frame is that frame itself. A pair of
  * source frames further apart than max_gap source frame durations (a gap in a VFR stream),
- * going back in time, or scored as a scene change is not interpolated: the nearer source
+ * going back in time, or detected as a scene change is not interpolated: the nearer source
  * frame is repeated instead. The input and output are GPU frames (Vulkan, D3D12, D3D11 or
  * VideoToolbox), read and written in place on FFmpeg's device as by the gpufx filter: put
  * hwupload/gpufx_upload before it and hwdownload/gpufx_download after it.
@@ -69,7 +69,7 @@ typedef struct AiFramerateContext {
 
     char *model;
     AVRational fps;   /* output rate; 0/1: twice the input's */
-    double scene;     /* scene change threshold in percent, 0: off */
+    double scene;     /* scene change SSIM threshold (0..1), 0: off */
     double max_gap;   /* pairs further apart than this many input frame durations are not interpolated */
 
     GpufxAiInterp *ai;
@@ -768,7 +768,7 @@ static int filter_frame(AVFilterContext *ctx, AVFrame *in)
         }
         nb++;
     }
-    /* A discontinuity: libgpufx forgets the previous frame and its scene history. */
+    /* A discontinuity: libgpufx forgets the previous frame. */
     if (discont && !first)
         gpufx_ai_interp_reset(s->ai);
     /* libgpufx always takes the frame (it keeps it for the next pair); with frames of our own,
@@ -883,7 +883,7 @@ static int activate(AVFilterContext *ctx)
 static const AVOption gpufx_ai_framerate_options[] = {
     { "model",   "frame interpolation package (gpufx-nn, io.json kind frame_interp), e.g. models/rife-v4.6.zip", OFFSET(model), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
     { "fps",     "output frame rate; default: twice the input's", OFFSET(fps), AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, INT_MAX, FLAGS },
-    { "scene",   "scene change threshold (0-100) under which pairs are interpolated; 0: never detect cuts (always interpolate)", OFFSET(scene), AV_OPT_TYPE_DOUBLE, { .dbl = 20 }, 0, 100, FLAGS },
+    { "scene",   "scene change SSIM threshold (32x32): below it a pair is a cut and is not interpolated; 0: off", OFFSET(scene), AV_OPT_TYPE_DOUBLE, { .dbl = 0.2 }, 0, 1, FLAGS },
     { "max_gap", "pairs further apart than this many input frame durations are repeated, not interpolated", OFFSET(max_gap), AV_OPT_TYPE_DOUBLE, { .dbl = 2.0 }, 1, 100, FLAGS },
     { NULL }
 };

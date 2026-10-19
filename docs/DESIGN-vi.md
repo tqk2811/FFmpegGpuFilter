@@ -754,8 +754,9 @@ tại thời điểm đó. FFI (`gpufx.h`, kiểu mờ `GpufxAiInterp`):
   `nb_outputs` frame giữa frame nguồn trước và nó, tại `times[k]` trong (0, 1]; thời điểm 1 là copy frame nguồn.
   Frame nguồn được đổi sang RGBA một lần và giữ trên GPU cho lần gọi sau. Semaphore, layout và fence xử lý như
   `gpufx_effect_process_*`.
-- `gpufx_ai_interp_set_scene(threshold)`: ngưỡng chuyển cảnh theo phần trăm; cặp đạt ngưỡng là cảnh cắt và mỗi frame
-  tạo ra là frame nguồn gần hơn. `gpufx_ai_interp_reset` quên frame trước (gián đoạn).
+- `gpufx_ai_interp_set_scene(threshold)`: ngưỡng chuyển cảnh là SSIM trong 0..1, tính như `inference_video.py` của
+  RIFE gốc (hai frame thu bilinear về 32x32, `ssim_matlab` trên RGB); cặp thấp hơn ngưỡng là cảnh cắt và mỗi frame
+  tạo ra là frame nguồn gần hơn (RIFE lặp frame 0; RIFE thu nhỏ frame đã pad 0, ở đây thu frame chưa pad). `gpufx_ai_interp_reset` quên frame trước (gián đoạn).
 
 ### Ngân sách VRAM (quy tắc cho mọi giai đoạn)
 

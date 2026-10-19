@@ -449,7 +449,7 @@ fn rife_matches_the_cpu_reference() {
     }
 }
 
-// ---- InterpFrames (the stage behind the FFmpeg filter): scene scoring across calls ----
+// ---- InterpFrames (the stage behind the FFmpeg filter): the scene check ----
 
 const FW: u32 = 64;
 const FH: u32 = 16;
@@ -520,7 +520,7 @@ fn call(ctx: &Arc<GpuContext>, fi: &mut InterpFrames, src: &[u8], times: &[f32])
     Ok(outs.iter().map(|o| read_frame(ctx, o)).collect())
 }
 
-/// A bright gradient and a black frame: a pair of them scores far above any threshold used here.
+/// A bright gradient and a black frame: a pair of them is a cut at any threshold used here.
 fn bright() -> Vec<u8> {
     (0..FW * FH).flat_map(|i| [(190 + (i % FW) * 2) as u8, (200 + (i / FW) * 3) as u8, 220, 255]).collect()
 }
@@ -529,46 +529,191 @@ fn black() -> Vec<u8> {
     [0u8, 0, 0, 255].repeat((FW * FH) as usize)
 }
 
-/// A first call that makes only a copy (time 1) has no pair: it must not leave a score behind (the first pair
-/// then starts from a fresh baseline and is a cut).
+/// A frame of `f(x, y)` in [0, 1] on every channel (green and blue scaled down), RGBA8.
+fn pattern(f: impl Fn(f64, f64) -> f64) -> Vec<u8> {
+    (0..FW * FH)
+        .flat_map(|i| {
+            let v = f((i % FW) as f64, (i / FW) as f64).clamp(0.0, 1.0);
+            [(v * 255.0).round() as u8, (v * 230.0).round() as u8, (v * 200.0).round() as u8, 255]
+        })
+        .collect()
+}
+
+/// The scene check of the official RIFE inference_video.py on the CPU: both frames to 32x32 as
+/// F.interpolate(bilinear, align_corners=False) does (2x2 taps, no antialias), then ssim_matlab of
+/// model/pytorch_msssim: an 11x11x11 gaussian (sigma 1.5) over the 32x32x3 volume with replicate padding,
+/// C1 = 0.01^2, C2 = 0.03^2, the SSIM map averaged.
+fn ssim_ref(a: &[u8], b: &[u8], w: u32, h: u32) -> f64 {
+    const N: usize = 32;
+    let down = |img: &[u8]| -> Vec<f64> {
+        let coord = |o: usize, size: u32| {
+            let s = ((o as f64 + 0.5) * size as f64 / N as f64 - 0.5).max(0.0);
+            let i0 = (s as usize).min(size as usize - 1);
+            (i0, (i0 + 1).min(size as usize - 1), s - i0 as f64)
+        };
+        let px = |x: usize, y: usize, c: usize| img[(y * w as usize + x) * 4 + c] as f64 / 255.0;
+        let mut v = vec![0.0; 3 * N * N];
+        for c in 0..3 {
+            for oy in 0..N {
+                let (y0, y1, ly) = coord(oy, h);
+                for ox in 0..N {
+                    let (x0, x1, lx) = coord(ox, w);
+                    v[(c * N + oy) * N + ox] = (1.0 - ly) * ((1.0 - lx) * px(x0, y0, c) + lx * px(x1, y0, c))
+                        + ly * ((1.0 - lx) * px(x0, y1, c) + lx * px(x1, y1, c));
+                }
+            }
+        }
+        v
+    };
+    let g: Vec<f64> = {
+        let raw: Vec<f64> = (0..11).map(|k| (-((k - 5) as f64).powi(2) / 4.5).exp()).collect();
+        let sum: f64 = raw.iter().sum();
+        raw.iter().map(|v| v / sum).collect()
+    };
+    let at = |i: usize, k: usize, size: usize| (i as i64 + k as i64 - 5).clamp(0, size as i64 - 1) as usize;
+    // The 3D window applied directly (not separated), as F.conv3d does.
+    let blur = |v: &[f64]| -> Vec<f64> {
+        let mut out = vec![0.0; v.len()];
+        for c in 0..3 {
+            for y in 0..N {
+                for x in 0..N {
+                    let mut s = 0.0;
+                    for (kc, gc) in g.iter().enumerate() {
+                        for (ky, gy) in g.iter().enumerate() {
+                            for (kx, gx) in g.iter().enumerate() {
+                                s += gc * gy * gx * v[(at(c, kc, 3) * N + at(y, ky, N)) * N + at(x, kx, N)];
+                            }
+                        }
+                    }
+                    out[(c * N + y) * N + x] = s;
+                }
+            }
+        }
+        out
+    };
+    let (x, y) = (down(a), down(b));
+    let prod = |p: &[f64], q: &[f64]| -> Vec<f64> { p.iter().zip(q).map(|(p, q)| p * q).collect() };
+    let (mu1, mu2) = (blur(&x), blur(&y));
+    let (e11, e22, e12) = (blur(&prod(&x, &x)), blur(&prod(&y, &y)), blur(&prod(&x, &y)));
+    let (c1, c2) = (0.01f64.powi(2), 0.03f64.powi(2));
+    let sum: f64 = (0..x.len())
+        .map(|i| {
+            let (m1, m2) = (mu1[i], mu2[i]);
+            let v1 = 2.0 * (e12[i] - m1 * m2) + c2;
+            let v2 = (e11[i] - m1 * m1) + (e22[i] - m2 * m2) + c2;
+            (2.0 * m1 * m2 + c1) * v1 / ((m1 * m1 + m2 * m2 + c1) * v2)
+        })
+        .sum();
+    sum / x.len() as f64
+}
+
+/// Whether the pair `a` -> `b` is a cut at `threshold`: on a cut the frame at time 0.3 is `a` itself.
+fn is_cut(ctx: &Arc<GpuContext>, threshold: f32, a: &[u8], b: &[u8]) -> bool {
+    let mut fi = interp_frames(ctx, threshold);
+    call(ctx, &mut fi, a, &[]).unwrap();
+    let out = call(ctx, &mut fi, b, &[0.3]).unwrap().remove(0);
+    let mut reference = interp_frames(ctx, 0.0);
+    call(ctx, &mut reference, a, &[]).unwrap();
+    let interpolated = call(ctx, &mut reference, b, &[0.3]).unwrap().remove(0);
+    assert!(interpolated != a, "the model should not return a source frame");
+    assert!(out == a || out == interpolated, "either the nearer source frame or the interpolated one");
+    out == a
+}
+
+fn random_frame(r: &mut Rng) -> Vec<u8> {
+    (0..FW * FH * 4).map(|i| if i % 4 == 3 { 255 } else { ((r.next() + 1.0) * 127.0) as u8 }).collect()
+}
+
+/// The GPU check against the CPU port of RIFE's: on pairs over the whole SSIM range, a threshold just above
+/// the reference SSIM makes a cut and one just below does not.
 #[test]
-fn a_first_call_at_time_one_scores_no_pair() {
+fn scene_check_matches_the_rife_ssim() {
+    let Some(ctx) = gpu() else { return };
+    let mut r = Rng(11);
+    let (a, noise) = (random_frame(&mut r), random_frame(&mut r));
+    let mut seen = Vec::new();
+    for k in [0.05, 0.2, 0.4, 0.6, 0.8, 0.95] {
+        let b: Vec<u8> = a.iter().zip(&noise).map(|(&p, &q)| (p as f64 * (1.0 - k) + q as f64 * k).round() as u8).collect();
+        let s = ssim_ref(&a, &b, FW, FH);
+        seen.push(s);
+        assert!(is_cut(&ctx, (s + 0.002).min(1.0) as f32, &a, &b), "SSIM {s:.4}: a cut just above it");
+        if s > 0.002 {
+            assert!(!is_cut(&ctx, (s - 0.002) as f32, &a, &b), "SSIM {s:.4}: no cut just below it");
+        }
+    }
+    assert!(seen.iter().any(|&s| s > 0.8) && seen.iter().any(|&s| s < 0.3), "the pairs span the range: {seen:?}");
+}
+
+/// Two different patterns of the same mean brightness (waves of another direction and period) are a cut. The
+/// previous check (FFmpeg framerate's mean luma difference, in percent) scores this pair below its default
+/// 20: it missed such cuts.
+#[test]
+fn same_brightness_different_content_is_a_cut() {
+    let Some(ctx) = gpu() else { return };
+    let tau = std::f64::consts::TAU;
+    let a = pattern(|x, _| 0.5 + 0.2 * (x * tau / 16.0).sin());
+    let b = pattern(|x, y| 0.5 + 0.2 * ((x + y) * tau / 6.0).cos());
+    let luma = |p: &[u8]| p.chunks(4).map(|p| 0.299 * p[0] as f64 + 0.587 * p[1] as f64 + 0.114 * p[2] as f64).collect::<Vec<_>>();
+    let (la, lb) = (luma(&a), luma(&b));
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+    assert!((mean(&la) - mean(&lb)).abs() < 1.0, "same mean brightness");
+    let mafd = la.iter().zip(&lb).map(|(p, q)| (p - q).abs()).sum::<f64>() / la.len() as f64 * 100.0 / 255.0;
+    assert!(mafd < 20.0, "the old score {mafd:.2} would not have cut");
+    let s = ssim_ref(&a, &b, FW, FH);
+    assert!(s < 0.2, "SSIM {s:.4}");
+    assert!(is_cut(&ctx, 0.2, &a, &b), "a cut at RIFE's 0.2");
+}
+
+/// A textured frame moved by a pixel is motion, not a cut.
+#[test]
+fn a_small_translation_is_not_a_cut() {
+    let Some(ctx) = gpu() else { return };
+    let tex =
+        |dx: f64| move |x: f64, y: f64| 0.5 + 0.2 * ((x - dx) * 0.7).sin() * (y * 0.9).cos() + 0.15 * ((x - dx) * 0.23 + y * 0.31).sin();
+    let (a, b) = (pattern(tex(0.0)), pattern(tex(1.0)));
+    let s = ssim_ref(&a, &b, FW, FH);
+    assert!(s > 0.5, "SSIM {s:.4}");
+    assert!(!is_cut(&ctx, 0.2, &a, &b), "no cut at RIFE's 0.2");
+}
+
+#[test]
+fn scene_threshold_is_an_ssim() {
+    let Some(ctx) = gpu() else { return };
+    let mut fi = interp_frames(&ctx, 1.0);
+    assert!(fi.set_scene_threshold(1.5).is_err());
+    assert!(fi.set_scene_threshold(-0.1).is_err());
+    assert!(fi.set_scene_threshold(0.2).is_ok());
+}
+
+/// A first call that makes only a copy (time 1) has no pair; the first pair is then checked on its own.
+#[test]
+fn a_first_call_at_time_one_checks_no_pair() {
     let Some(ctx) = gpu() else { return };
     let (a, b) = (bright(), black());
-    let mut reference = interp_frames(&ctx, 0.0);
-    call(&ctx, &mut reference, &a, &[1.0]).unwrap();
-    let interpolated = call(&ctx, &mut reference, &b, &[0.3]).unwrap().remove(0);
-    assert!(interpolated != a && interpolated != b, "the model should not return a source frame");
-
-    let mut fi = interp_frames(&ctx, 5.0);
+    let mut fi = interp_frames(&ctx, 0.2);
     assert!(call(&ctx, &mut fi, &a, &[1.0]).unwrap()[0] == a, "time 1 is the source frame");
     assert!(call(&ctx, &mut fi, &b, &[0.3]).unwrap()[0] == a, "a cut repeats the nearer source frame");
+    assert!(call(&ctx, &mut fi, &a, &[0.7]).unwrap()[0] == a, "a cut repeats the nearer source frame");
 }
 
-/// Calls without frames in between still score their pair, so the next pair is scored against it as in
-/// FFmpeg's framerate filter: after bright -> black, black -> bright changes by nothing and is no cut.
+/// Calls without frames in between only move the previous frame: the next pair is checked on its own, so
+/// bright -> black -> bright is a cut each way.
 #[test]
-fn pairs_without_frames_in_between_are_scored() {
+fn pairs_without_frames_in_between_keep_the_previous_frame() {
     let Some(ctx) = gpu() else { return };
     let (a, b) = (bright(), black());
-    let mut reference = interp_frames(&ctx, 0.0);
-    call(&ctx, &mut reference, &b, &[]).unwrap();
-    let interpolated = call(&ctx, &mut reference, &a, &[0.3]).unwrap().remove(0);
-    assert!(interpolated != a && interpolated != b, "the model should not return a source frame");
-
-    let mut fi = interp_frames(&ctx, 5.0);
+    let mut fi = interp_frames(&ctx, 0.2);
     call(&ctx, &mut fi, &a, &[]).unwrap();
     call(&ctx, &mut fi, &b, &[]).unwrap();
-    assert!(call(&ctx, &mut fi, &a, &[0.3]).unwrap()[0] == interpolated, "no cut: the interpolated frame");
+    assert!(call(&ctx, &mut fi, &a, &[0.3]).unwrap()[0] == b, "a cut: the nearer source frame");
 }
 
-/// After a reset the previous frame and the scene history are gone: time below 1 fails, time 1 works, and the
-/// first pair scores from a fresh baseline.
+/// After a reset the previous frame is gone: time below 1 fails, time 1 works, the next pair is checked.
 #[test]
-fn reset_forgets_the_previous_frame_and_the_scene_history() {
+fn reset_forgets_the_previous_frame() {
     let Some(ctx) = gpu() else { return };
     let (a, b) = (bright(), black());
-    let mut fi = interp_frames(&ctx, 5.0);
+    let mut fi = interp_frames(&ctx, 0.2);
     call(&ctx, &mut fi, &a, &[]).unwrap();
     call(&ctx, &mut fi, &b, &[]).unwrap();
     assert!(fi.has_previous());
@@ -576,6 +721,5 @@ fn reset_forgets_the_previous_frame_and_the_scene_history() {
     assert!(!fi.has_previous());
     assert!(call(&ctx, &mut fi, &a, &[0.3]).is_err(), "no previous frame");
     assert!(call(&ctx, &mut fi, &a, &[1.0]).unwrap()[0] == a, "time 1 is the source frame");
-    // black -> bright scored the same as bright -> black before the reset: still a cut, not "no change"
     assert!(call(&ctx, &mut fi, &b, &[0.3]).unwrap()[0] == a, "a cut after a reset");
 }

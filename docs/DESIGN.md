@@ -773,8 +773,10 @@ for the frame at that time. FFI (`gpufx.h`, opaque `GpufxAiInterp`):
   `nb_outputs` frames between the previous source frame and it, at `times[k]` in (0, 1]; a time of 1 copies the
   source frame. The source frame is converted to RGBA once and stays on the GPU for the next call. Semaphores,
   layouts and fences behave as in `gpufx_effect_process_*`.
-- `gpufx_ai_interp_set_scene(threshold)`: scene change threshold in percent; a pair scoring at least this is a
-  cut and each frame made is the nearer source frame. `gpufx_ai_interp_reset` forgets the previous frame (a
+- `gpufx_ai_interp_set_scene(threshold)`: scene change threshold, an SSIM in 0..1 computed as the official RIFE
+  `inference_video.py` does (both frames scaled to 32x32 bilinearly, `ssim_matlab` over RGB); a pair below it is a
+  cut and each frame made is the nearer source frame (RIFE repeats frame 0; it also scales the zero-padded frame, here the
+  unpadded one). `gpufx_ai_interp_reset` forgets the previous frame (a
   discontinuity).
 
 ### VRAM budget (rule for every phase)

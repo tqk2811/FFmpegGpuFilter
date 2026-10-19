@@ -592,13 +592,13 @@ void gpufx_ai_interp_free(GpufxAiInterp *ai);
 const char *gpufx_ai_interp_device(const GpufxAiInterp *ai);
 
 /*
- * Scene change threshold in percent (0..100) of the luma difference of the pair (scored as
- * FFmpeg's framerate filter does: min(mean difference, its change from the last pair)): a
- * pair scoring at least this is a cut, and each frame made is the nearer source frame
- * instead of an interpolation. 0 (the default) interpolates every pair.
+ * Scene change threshold, an SSIM in 0..1 checked as the official RIFE inference_video.py
+ * does (both frames scaled to 32x32, SSIM over RGB): a pair whose SSIM is below it is a cut,
+ * and each frame made is the nearer source frame instead of an interpolation. 0 (the default)
+ * interpolates every pair; RIFE uses 0.2.
  */
 int gpufx_ai_interp_set_scene(GpufxAiInterp *ai, double threshold);
-/* Forgets the previous source frame and the scene history (a discontinuity): the next call makes no frame below time 1. */
+/* Forgets the previous source frame (a discontinuity): the next call makes no frame below time 1. */
 void gpufx_ai_interp_reset(GpufxAiInterp *ai);
 
 /* Load the model on the caller's device (once; a later call with the same device is free). */
