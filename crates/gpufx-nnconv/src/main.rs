@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use gpufx_nnconv::{convert_ncnn, Package};
+use gpufx_nnconv::reference::Reference;
+use gpufx_nnconv::{convert_ncnn, frames, Package};
 
 const USAGE: &str = "\
 usage:
@@ -11,12 +12,18 @@ usage:
                     [--license <file>] [--name <name>] -o <out.zip|out_dir>
              converts an ncnn model to a gpufx-nn package: model.json, weights.bin,
              io.json (copied as given) and LICENSE. -o ending in .zip writes a zip,
-             anything else a directory. The name defaults to the output file stem.";
+             anything else a directory. The name defaults to the output file stem.
+  gpufx-nnconv run-ref --model <pkg.zip|dir> --frame0 <a.png> --frame1 <b.png> [--t 0.5] -o <out.png>
+             dev tool: interpolates with the CPU reference executor (slow, golden semantics).
+  gpufx-nnconv psnr <a.png> <b.png>
+             dev tool: prints the PSNR in dB between two images.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("ncnn") => ncnn(&args[1..]),
+        Some("run-ref") => run_ref(&args[1..]),
+        Some("psnr") => psnr(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -67,4 +74,37 @@ fn summary(c: &gpufx_nnconv::Converted, out: &Path) {
     }
     let ops: Vec<String> = counts.iter().map(|(k, n)| format!("{k} {n}")).collect();
     println!("{}: {} ops ({}), weights {} bytes", out.display(), c.model.ops.len(), ops.join(", "), c.weights.len());
+}
+
+fn run_ref(args: &[String]) -> Result<(), String> {
+    let (mut model, mut f0, mut f1, mut t, mut out) = (None, None, None, None, None);
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let slot = match flag.as_str() {
+            "--model" => &mut model,
+            "--frame0" => &mut f0,
+            "--frame1" => &mut f1,
+            "--t" => &mut t,
+            "-o" => &mut out,
+            _ => return Err(USAGE.to_string()),
+        };
+        *slot = Some(it.next().ok_or_else(|| format!("{flag} needs a value"))?.clone());
+    }
+    let (Some(model), Some(f0), Some(f1), Some(out)) = (model, f0, f1, out) else { return Err(USAGE.to_string()) };
+    let t: f32 = t.as_deref().unwrap_or("0.5").parse().map_err(|e| format!("--t: {e}"))?;
+    let reference = Reference::load(Path::new(&model)).map_err(|e| format!("{model}: {e}"))?;
+    let a = frames::load_png(Path::new(&f0)).map_err(|e| e.to_string())?;
+    let b = frames::load_png(Path::new(&f1)).map_err(|e| e.to_string())?;
+    let start = std::time::Instant::now();
+    let res = frames::interpolate(&reference, &a, &b, t).map_err(|e| e.to_string())?;
+    println!("{}x{} t={t}: {:.2}s", res.w, res.h, start.elapsed().as_secs_f64());
+    frames::save_png(Path::new(&out), &res).map_err(|e| e.to_string())
+}
+
+fn psnr(args: &[String]) -> Result<(), String> {
+    let [a, b] = args else { return Err(USAGE.to_string()) };
+    let a = frames::load_png(Path::new(a)).map_err(|e| e.to_string())?;
+    let b = frames::load_png(Path::new(b)).map_err(|e| e.to_string())?;
+    println!("{:.3} dB", frames::psnr(&a, &b).map_err(|e| e.to_string())?);
+    Ok(())
 }

@@ -1,9 +1,11 @@
 //! Converts neural network models to `gpufx-nn` packages (see docs/NN_MODEL_FORMAT.md).
 
 pub mod convert;
+pub mod frames;
 pub mod model;
 pub mod ncnn;
 pub mod package;
+pub mod reference;
 
 pub use convert::{convert_ncnn, Converted};
 pub use package::Package;
