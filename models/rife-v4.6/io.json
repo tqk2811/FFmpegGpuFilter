@@ -1,0 +1,11 @@
+{
+  "kind": "frame_interp",
+  "family": "rife-v4",
+  "inputs": { "frame0": "in0", "frame1": "in1", "timestep": "in2" },
+  "output": "out0",
+  "color": "rgb",
+  "range": [0, 1],
+  "pad_multiple": 32,
+  "pad_mode": "zero",
+  "output_clamp": [0, 1]
+}
