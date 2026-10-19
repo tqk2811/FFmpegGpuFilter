@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/gpufx-core", "crates/gpufx-ffi", "crates/gpufx-cli"]
+members = ["crates/gpufx-core", "crates/gpufx-ffi", "crates/gpufx-cli", "crates/gpufx-nnconv"]
 
 [workspace.package]
 version = "0.1.0"
