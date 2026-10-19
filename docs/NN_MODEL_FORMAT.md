@@ -57,7 +57,7 @@ parameters of its kind. Unknown ncnn layer types or parameters make the converte
 | `conv2d` | `in_channels`, `out_channels`, `kernel` [h,w], `stride` [h,w], `dilation` [h,w], `pad` [top,left,bottom,right], `activation`, `weight`, `bias` | cross-correlation with zero padding, no groups; weight layout `[out][in][kh][kw]` (ncnn native) |
 | `deconv2d` | same, plus `output_pad` [h,w] | transposed convolution; weight layout `[out][in][kh][kw]` (ncnn native; PyTorch `ConvTranspose2d` is `[in][out]`), kernel not flipped |
 | `activation` | `type` | from ReLU (slope 0 is `relu`, else `leaky_relu`) and Sigmoid layers |
-| `binary` | `kind`, `scalar` | `add sub mul div max min pow rsub rdiv`; one input when `scalar` is set, else two of the same shape. `rsub` is `b - a`, `rdiv` is `b / a` (`b` the scalar or the second input) |
+| `binary` | `kind`, `scalar` | `add sub mul div max min pow rsub rdiv`; one input when `scalar` is set, else two inputs whose dimensions are equal or 1 (a size 1 dimension is repeated, e.g. a `1 x H x W` mask times a `3 x H x W` image). `rsub` is `b - a`, `rdiv` is `b / a` (`b` the scalar or the second input) |
 | `eltwise` | `kind` (`prod sum max`), `coeffs` | n inputs; `sum` with `coeffs` is `sum(c_i * x_i)` |
 | `concat` | `axis` | along channels (only `0`) |
 | `slice` | `axis`, `start`, `end` | channels `[start, end)` (only axis `0`); `end` `null` is to the end |
@@ -101,7 +101,8 @@ Quantized weights (tags other than fp16 and f32), grouped convolution, `Crop` ot
 size, SAME padding, activation types other than none, relu, leaky relu and sigmoid inside a convolution, any
 layer type not in the table.
 
-## Uncertain
+## Verification
 
-The deconvolution layout `[out][in][kh][kw]` was read from ncnn's generic `Deconvolution::forward` (the optimised
-x86/Vulkan paths repack the same data); it has not been checked against an inference run yet.
+`gpufx-nnconv run-ref` runs a package with the CPU reference executor (`src/reference.rs`, f32). On RIFE v4.6 with
+real frames it matches rife-ncnn-vulkan 20221029 (fp16 storage on the GPU) at 60 to 66 dB PSNR, which confirms the
+deconvolution layout, the resize rule, `warp` and the op order.

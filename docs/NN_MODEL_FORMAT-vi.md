@@ -57,7 +57,7 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 | `conv2d` | `in_channels`, `out_channels`, `kernel` [h,w], `stride` [h,w], `dilation` [h,w], `pad` [top,left,bottom,right], `activation`, `weight`, `bias` | cross-correlation, pad bằng 0, không group; layout weight `[out][in][kh][kw]` (ncnn native) |
 | `deconv2d` | như trên, thêm `output_pad` [h,w] | transposed convolution; layout weight `[out][in][kh][kw]` (ncnn native; `ConvTranspose2d` của PyTorch là `[in][out]`), kernel không lật |
 | `activation` | `type` | từ layer ReLU (slope 0 là `relu`, khác 0 là `leaky_relu`) và Sigmoid |
-| `binary` | `kind`, `scalar` | `add sub mul div max min pow rsub rdiv`; có `scalar` thì 1 input, không thì 2 input cùng shape. `rsub` là `b - a`, `rdiv` là `b / a` (`b` là scalar hoặc input thứ hai) |
+| `binary` | `kind`, `scalar` | `add sub mul div max min pow rsub rdiv`; có `scalar` thì 1 input, không thì 2 input có từng chiều bằng nhau hoặc bằng 1 (chiều kích thước 1 được lặp lại, vd mask `1 x H x W` nhân ảnh `3 x H x W`). `rsub` là `b - a`, `rdiv` là `b / a` (`b` là scalar hoặc input thứ hai) |
 | `eltwise` | `kind` (`prod sum max`), `coeffs` | n input; `sum` có `coeffs` là `sum(c_i * x_i)` |
 | `concat` | `axis` | theo channel (chỉ `0`) |
 | `slice` | `axis`, `start`, `end` | channel `[start, end)` (chỉ axis `0`); `end` là `null` nghĩa là tới cuối |
@@ -100,7 +100,8 @@ Weights quantized (tag khác fp16 và f32), grouped convolution, `Crop` khác m�
 theo trục khác channel, `PixelShuffle` mode khác 0, output size cố định của deconvolution, padding SAME, activation
 trong convolution ngoài none/relu/leaky relu/sigmoid, mọi loại layer không có trong bảng.
 
-## Chưa chắc
+## Đối chiếu
 
-Layout deconvolution `[out][in][kh][kw]` đọc từ `Deconvolution::forward` bản chung của ncnn (các đường tối ưu
-x86/Vulkan chỉ sắp xếp lại cùng dữ liệu); chưa đối chiếu bằng một lần chạy inference.
+`gpufx-nnconv run-ref` chạy package bằng bộ thực thi tham chiếu CPU (`src/reference.rs`, f32). Với RIFE v4.6 trên
+khung hình thật, kết quả khớp rife-ncnn-vulkan 20221029 (GPU lưu fp16) ở 60 đến 66 dB PSNR, xác nhận layout
+deconvolution, quy tắc resize, `warp` và thứ tự op.
