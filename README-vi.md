@@ -124,8 +124,8 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
 | Option | Mặc định | Ý nghĩa |
 |---|---|---|
 | `model` | (bắt buộc) | đường dẫn gói `frame_interp`, vd `models/rife-v4.6.zip` |
-| `fps` | gấp đôi input | frame rate đầu ra; tỉ lệ bất kỳ, không chỉ bội số |
-| `scene` | 8.2 | ngưỡng chuyển cảnh (0-100, chấm điểm như filter `framerate` của FFmpeg); cặp frame đạt ngưỡng thì không nội suy (lặp frame gần hơn); 0 thì nội suy mọi cặp |
+| `fps` | gấp đôi input | frame rate đầu ra; số hoặc phân số (`30`, `24000/1001`; không nhận tên như `ntsc`); tỉ lệ bất kỳ, không chỉ bội số |
+| `scene` | 20 | ngưỡng chuyển cảnh (0-100, chấm điểm như filter `framerate` của FFmpeg); cặp frame đạt ngưỡng thì không nội suy (lặp frame gần hơn); 0 thì không bao giờ phát hiện chuyển cảnh, chỉ cặp gần như giống hệt bị lặp. Cặp frame gần như giống hệt (cảnh tĩnh, frame lặp) luôn lặp lại frame nguồn |
 | `max_gap` | 2 | cặp frame cách nhau quá số lần thời lượng frame input này (khoảng hở của luồng VFR) thì không nội suy |
 
 Đầu ra là lưới frame rate cố định: điểm lưới nằm giữa hai frame nguồn được nội suy đúng thời điểm, điểm trùng
@@ -138,6 +138,10 @@ chất lượng).
 Model không nằm trong git: bundle win64/linux64 kèm sẵn trong `models/` (cùng license), hoặc tự tải và chuyển đổi
 bằng `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (URL và sha256 cố định, ghi ra `build/models/`). Trên
 D3D12 shader của model cần DXC (`dxcompiler.dll`); lần chạy đầu phải biên dịch (đặt `GPUFX_SHADER_CACHE` để giữ lại).
+
+**Chưa test:** đường VideoToolbox (macOS) của `gpufx_ai_framerate` chưa từng chạy trên máy Mac, và bundle linux64 của
+filter chưa được chạy (xem [hạn chế](docs/LIMITATIONS-vi.md)). Đã đo: Windows với RTX 4060 Laptop, Vulkan khoảng
+45 ms mỗi frame 1080p; D3D12/D3D11 chậm hơn Vulkan khoảng 1,7 lần (nên dùng Vulkan).
 
 ## Yêu cầu phần cứng và hệ điều hành
 

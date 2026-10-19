@@ -54,12 +54,22 @@ if [ ! -f "$CLIPS/straight.png" ]; then
     "$REF" -v error -y -f lavfi -i testsrc2=s=64x36 -vf format=rgba -frames:v 1 "$CLIPS/straight.png"
     printf "file 'r1.mkv'\nfile 'r2.mkv'\n" > "$CLIPS/resize.txt"
 fi
+# Frame interpolation clips (gpufx_ai_framerate), made apart so older clip dirs get them too:
+# 12 fps testsrc2, and a cut from yellow to blue (both 12 fps, 0.5 s each).
+if [ ! -f "$CLIPS/ai12.mkv" ] || [ ! -f "$CLIPS/aicut.mkv" ]; then
+    REF=${REF_FFMPEG:-ffmpeg}
+    "$REF" -v error -y -f lavfi -i testsrc2=s=160x96:r=12:d=1 -c:v ffv1 "$CLIPS/ai12.mkv"
+    "$REF" -v error -y -f lavfi -i color=yellow:s=160x96:r=12:d=0.5 -f lavfi -i color=blue:s=160x96:r=12:d=0.5 \
+        -filter_complex "[0][1]concat" -c:v ffv1 "$CLIPS/aicut.mkv"
+fi
 [ "${TEST_CLIPS_ONLY:-0}" = 1 ] && exit 0
 A=$CLIPS/a.mkv B=$CLIPS/b.mkv C=$CLIPS/c.mkv D=$CLIPS/d.nut E=$CLIPS/e.mkv R=$CLIPS/resize.txt
 X=$CLIPS/premul.exr P=$CLIPS/straight.png
+AI=$CLIPS/ai12.mkv AICUT=$CLIPS/aicut.mkv
 if command -v cygpath >/dev/null; then   # Git Bash on Windows: give ffmpeg.exe C:/ paths
     A=$(cygpath -m "$A") B=$(cygpath -m "$B") C=$(cygpath -m "$C") D=$(cygpath -m "$D")
     E=$(cygpath -m "$E") R=$(cygpath -m "$R") X=$(cygpath -m "$X") P=$(cygpath -m "$P")
+    AI=$(cygpath -m "$AI") AICUT=$(cygpath -m "$AICUT")
 fi
 cd "$DIST"
 
@@ -554,6 +564,56 @@ ok "falling-maple: custom path (mode 4) + sendcmd" -i "$A" \
     -vf "sendcmd=c='0.5 gpufx@l params path_x=x0+0.2*sin(u)',gpufx@l=graph='$FX/standalone/falling-maple.zip=mode=4&life=2&path_y=-0.1+1.2*p&angle=max(90*u\,0)'" -f null -
 rejects "falling-maple: bad path expression" "unknown variable .q." -i "$A" \
     -vf "gpufx=graph='$FX/standalone/falling-maple.zip=mode=4&path_x=q*2'" -f null -
+
+echo "frame interpolation (gpufx_ai_framerate):"
+# Frame flow only, not quality: the output is a constant rate grid whatever the input
+# timestamps do. The model is the one the bundle ships.
+AIF="gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=24000/1001,hwdownload,format=nv12"
+# ai_flow NAME FRAMES END_MS ARGS...: FRAMES output frames, pts strictly increasing, every
+# duration > 0, the last frame ending at END_MS (+-10 ms; empty: not checked).
+ai_flow() {
+    name=$1 want=$2 end=$3; shift 3
+    got=$(pts "$@")
+    if echo "$got" | tr ' ' '\n' | grep -v '^$' | awk -F/ -v want="$want" -v end="$end" '
+        {if (NR > 1 && $1 <= last) bad = 1; if ($2 <= 0) bad = 1; last = $1; stop = $1 + $2}
+        END {if (bad || NR != want) exit 1; if (end != "" && (stop < end - 10 || stop > end + 10)) exit 1}'
+    then pass "$name ($want frames)"
+    else fail "$name (want $want frames ending at ${end:-?} ms)"; echo "    got: $got"; cat "$CLIPS/last.log"; fi
+}
+if ! grep -qw gpufx_ai_framerate "$CLIPS/filters.txt"; then
+    echo "  skip  this bundle has no gpufx_ai_framerate"
+elif [ ! -f models/rife-v4.6.zip ]; then
+    echo "  skip  this bundle has no models/rife-v4.6.zip"
+else
+    # 12 frames over 1 s: 24 grid points of 1001/24000 s below 1 s, the last ending at 1.001 s.
+    ai_flow "12 -> 24000/1001 fps" 24 1001 -i "$AI" -vf "format=nv12,$AIF"
+    # A 0.5 s gap after frame 6 (more than max_gap): the grid goes on over the gap, 1.5 s.
+    ai_flow "gap in the input pts" 36 1502 -i "$AI" -vf "setpts='PTS+gte(N,6)*0.5/TB',format=nv12,$AIF"
+    # Frame 6 goes back 0.3 s: it is not interpolated, the output pts still go forward.
+    ai_flow "backward input pts" 24 1001 -i "$AI" -vf "setpts='PTS-eq(N,6)*0.3/TB',format=nv12,$AIF"
+    # 320x180 then 300x180, 25 fps, 0.8 s; the filter sees the size change itself
+    # (-reinit_filter 0) and restarts its pairs: 20 grid points below 0.8 s.
+    ai_flow "size change mid-stream" 20 834 -reinit_filter 0 -f concat -safe 0 -i "$R" -vf "format=nv12,$AIF"
+    # A cut is never blended: every output frame is pure yellow or pure blue (one pixel of
+    # the middle of each frame, as RGB, within 15 levels: with scene=0 RIFE gives 248,249,5).
+    CUT=$(gpu_ff -i "$AICUT" -an -vf "format=nv12,$AIF,crop=2:2,scale=1:1,format=rgb24" -f rawvideo - \
+        2> "$CLIPS/last.log" | od -An -v -tu1 | tr -s ' ' '\n' | grep -v '^$' | paste -d, - - - | tr '\n' ' ')
+    if [ -n "$CUT" ] && echo "$CUT" | tr ' ' '\n' | grep -v '^$' | awk -F, '
+        {if (!(($1 >= 240 && $2 >= 240 && $3 <= 15) || ($1 <= 15 && $2 <= 15 && $3 >= 240))) exit 1; n++}
+        END {exit n != 24}'
+    then pass "a cut (yellow -> blue) is not blended"
+    else fail "a cut (yellow -> blue) is not blended"; echo "    got: $CUT"; cat "$CLIPS/last.log"; fi
+    # Real interpolation happens: on the moving clip some output frames (nv12 md5) match no
+    # input frame, so a filter that only repeated frames cannot pass the cut test above.
+    "$FF" -hide_banner -nostdin -v error -i "$AI" -vf format=nv12 -f framemd5 - 2> "$CLIPS/last.log" \
+        | awk -F', *' '!/^#/ {print $NF}' > "$CLIPS/ai_in.md5"
+    gpu_ff -i "$AI" -an -vf "format=nv12,$AIF" -f framemd5 - 2>> "$CLIPS/last.log" \
+        | awk -F', *' '!/^#/ {print $NF}' > "$CLIPS/ai_out.md5"
+    NEW=$(grep -c -v -x -F -f "$CLIPS/ai_in.md5" "$CLIPS/ai_out.md5" || true)
+    if [ -s "$CLIPS/ai_in.md5" ] && [ "${NEW:-0}" -gt 0 ]
+    then pass "interpolation makes new frames ($NEW of $(wc -l < "$CLIPS/ai_out.md5") differ from every input frame)"
+    else fail "interpolation makes new frames"; cat "$CLIPS/last.log"; fi
+fi
 
 echo "Vulkan frames:"
 # hwupload -> gpufx -> hwdownload runs on FFmpeg's own Vulkan device, frames never leave
