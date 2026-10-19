@@ -623,6 +623,50 @@ int gpufx_ai_interp_process_videotoolbox(GpufxAiInterp *ai, const GpufxVtFrame *
                                          const GpufxVtFrame *outs, uint32_t nb_outputs,
                                          const float *times);
 
+/*
+ * Super resolution with a gpufx-nn package (or multi-scale bundle) whose io.json has kind
+ * "super_resolution" (Real-ESRGAN, docs/NN_MODEL_FORMAT.md), on the GPU frames above. Same
+ * frames, devices and synchronisation as gpufx_ai_interp_*.
+ *
+ * Each process call converts input to RGBA, runs the model on it in tiles and writes the result
+ * into out, which must be scale times the input's size on each axis (any supported format; the
+ * input is only read). Frames of a new size are fine: the tiles are laid out again for them.
+ */
+typedef struct GpufxAiUpscale GpufxAiUpscale;
+
+/* GPUFX_AI_PRECISION_*: the arithmetic of the convolutions. */
+#define GPUFX_AI_PRECISION_AUTO 0 /* f16 where the device has it, else f32 */
+#define GPUFX_AI_PRECISION_F32  1
+
+/*
+ * Checks that model exists; the model (the variant of scale, for a bundle) is loaded by
+ * gpufx_ai_upscale_use_*, which fails when the package has no such scale (the error lists the
+ * scales it has). tile: largest tile side in input pixels, 0 picks the fewest tiles that fit
+ * the device's buffer limits.
+ */
+GpufxAiUpscale *gpufx_ai_upscale_open(const char *model, uint32_t scale, uint32_t tile, int precision);
+void gpufx_ai_upscale_free(GpufxAiUpscale *ai);
+/* The device the model runs on and its precision, "" before gpufx_ai_upscale_use_*, NULL when ai is NULL. */
+const char *gpufx_ai_upscale_device(const GpufxAiUpscale *ai);
+
+/* Load the model on the caller's device (once; a later call with the same device is free). */
+int gpufx_ai_upscale_use_vulkan(GpufxAiUpscale *ai, const GpufxVulkanDevice *dev);
+int gpufx_ai_upscale_use_d3d12(GpufxAiUpscale *ai, const GpufxD3D12Device *dev);
+int gpufx_ai_upscale_use_d3d11(GpufxAiUpscale *ai, const GpufxD3D11Device *dev);
+int gpufx_ai_upscale_use_videotoolbox(GpufxAiUpscale *ai);
+
+/*
+ * As gpufx_effect_process_vulkan() and the others with one input and one output; the
+ * semaphore values, layouts and fence values of input and out are updated the same way.
+ */
+int gpufx_ai_upscale_process_vulkan(GpufxAiUpscale *ai, GpufxVulkanFrame *input, GpufxVulkanFrame *out);
+int gpufx_ai_upscale_process_d3d12(GpufxAiUpscale *ai, GpufxD3D12Frame *input, GpufxD3D12Frame *out);
+/* The caller holds the immediate context's lock. */
+int gpufx_ai_upscale_process_d3d11(GpufxAiUpscale *ai, const GpufxD3D11Frame *input,
+                                   const GpufxD3D11Frame *out);
+int gpufx_ai_upscale_process_videotoolbox(GpufxAiUpscale *ai, const GpufxVtFrame *input,
+                                          const GpufxVtFrame *out);
+
 #ifdef __cplusplus
 }
 #endif

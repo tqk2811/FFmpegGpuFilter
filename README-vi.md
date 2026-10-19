@@ -143,6 +143,40 @@ D3D12 shader của model cần DXC (`dxcompiler.dll`); lần chạy đầu phả
 filter chưa được chạy (xem [hạn chế](docs/LIMITATIONS-vi.md)). Đã đo: Windows với RTX 4060 Laptop, Vulkan khoảng
 45 ms mỗi frame 1080p; D3D12/D3D11 chậm hơn Vulkan khoảng 1,7 lần (nên dùng Vulkan).
 
+## Tăng độ phân giải bằng AI (`gpufx_ai_upscale`)
+
+`gpufx_ai_upscale` phóng to từng frame bằng một model [super resolution](docs/Glossary-vi.md#L23) (Real-ESRGAN, đã chuyển
+sang gói gpufx-nn) chạy trên GPU qua libgpufx, trên cùng loại frame GPU và device như `gpufx`. Đầu ra lớn gấp `scale`
+lần input theo mỗi chiều, cùng pixel format với input:
+
+```sh
+# Anime 1080p -> 4K trên Vulkan
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
+# Video quay thật x4 trên D3D12 (Windows; cần dxcompiler.dll, có sẵn trong bin/)
+ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+```
+
+| Option | Mặc định | Ý nghĩa |
+|---|---|---|
+| `model` | (bắt buộc) | đường dẫn gói hoặc bundle `super_resolution`: `models/realesr-animevideov3.zip` (anime, scale 2, 3, 4) hoặc `models/realesr-general-x4v3.zip` (nội dung thường, scale 4) |
+| `scale` | 2 | kích thước đầu ra / input theo mỗi chiều; gói phải có scale này (lỗi sẽ liệt kê các scale gói có) |
+| `tile` | 0 | cạnh [tile](docs/Glossary-vi.md#L35) lớn nhất tính bằng pixel input; 0 thì chọn ít tile nhất vừa giới hạn buffer của GPU. Các tile chồng lên nhau đúng bằng vùng ngữ cảnh của model nên kết quả không phụ thuộc cách chia (không có đường nối) |
+| `precision` | `auto` | `auto`: tích chập f16 nếu GPU hỗ trợ (khoảng 57 dB so với bản tham chiếu f32), không thì f32; `f32`: f32 toàn bộ (chậm hơn) |
+
+Input phải là frame GPU (Vulkan, D3D12, D3D11 hoặc VideoToolbox) dạng nv12, p010le, rgba hoặc rgba64le; mỗi frame đi
+qua RGBA 8-bit (đầu vào và đầu ra của model), alpha không được giữ. Frame đầu ra có frames context riêng, lớn gấp
+`scale` lần. Đổi kích thước giữa luồng (`-reinit_filter 0`) thì frame đầu ra theo kích thước mới.
+
+Model không nằm trong git: bundle win64/linux64 kèm sẵn trong `models/` (cùng license), hoặc tự tải và chuyển đổi bằng
+`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/models/`). Trên D3D12 shader cần DXC, như
+`gpufx_ai_framerate`.
+
+**Không chạy realtime:** trên RTX 4060 Laptop một frame 1080p ở x2 (realesr-animevideov3) mất khoảng 480-510 ms trên
+D3D11/D3D12 (f16) và khoảng 690 ms trên Vulkan (f32: device Vulkan do FFmpeg tạo không bật f16), nên chỉ hợp để encode
+offline. Đường VideoToolbox chưa từng chạy trên máy Mac.
+
 ## Yêu cầu phần cứng và hệ điều hành
 
 - **Windows**: Windows 10 64-bit trở lên. D3D12: feature level 11_0, resource binding tier 2 (NVIDIA Kepler+,

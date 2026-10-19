@@ -1,6 +1,6 @@
 /*
  * Frame description helpers shared by the gpufx filters that hand GPU frames to libgpufx
- * (gpufx, gpufx_ai_framerate): colour properties and Vulkan frames.
+ * (gpufx, gpufx_ai_framerate, gpufx_ai_upscale): colour properties and Vulkan frames.
  *
  * This file is part of FFmpeg.
  *

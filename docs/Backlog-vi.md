@@ -30,6 +30,18 @@
 - **Vì sao**: giảm chi phí mỗi frame, tránh TDR, chọn tile chính xác hơn.
 - **Ngày ghi**: 2026-10-19
 
+### [Vừa] `gpufx_ai_framerate`: không giữ frames context input mới khi đổi kích thước giữa luồng
+- **Vấn đề**: filter chỉ giữ frames context của input đầu tiên (`in_frames`), trong khi libgpufx giữ wrapper ảnh của mọi input. Upstream tạo pool mới khi đổi kích thước thì pool đó có thể bị giải phóng trước model lúc đóng graph. `gpufx_ai_upscale` đã sửa bằng cách giữ thêm ref (`holds_frames`).
+- **Vị trí**: [vf_gpufx_ai_framerate.c](../ffmpeg/vf_gpufx_ai_framerate.c) (`in_frames`, `filter_frame`)
+- **Vì sao**: tránh dùng ảnh đã giải phóng khi đóng graph.
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] `gpufx_ai_upscale`: f16 trên Vulkan, copy RGBA thừa, pool cũ giữ tới cuối
+- **Vấn đề**: (1) device Vulkan do FFmpeg tạo không có `SHADER_F16` nên `auto` chạy f32 (~690 ms/frame 1080p x2, D3D f16 ~480-510 ms); cần xem FFmpeg bật thiếu tính năng 16-bit nào. (2) input RGBA vẫn qua một lần convert sang texture trung gian. (3) mỗi lần đổi kích thước giữ thêm pool output cũ tới `uninit`; nên cho libgpufx bỏ wrapper cũ. (4) `test-bundle.sh` so PSNR "inf" theo chuỗi.
+- **Vị trí**: [vf_gpufx_ai_upscale.c](../ffmpeg/vf_gpufx_ai_upscale.c), [frames.rs](../crates/gpufx-core/src/nn/frames.rs), [test-bundle.sh](../scripts/test-bundle.sh)
+- **Vì sao**: Vulkan nhanh hơn ~30% nếu có f16; bớt bộ nhớ khi nối nhiều clip.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] `gpufx_ai_framerate`: cặp chuyển cảnh vẫn chạy RIFE
 - **Vấn đề**: cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
 - **Vị trí**: [frames.rs:300](../crates/gpufx-core/src/nn/frames.rs#L300) (`self.interp.encode`), [frames.rs:325](../crates/gpufx-core/src/nn/frames.rs#L325) (`encode_scene`), [scene_ssim.wgsl](../crates/gpufx-core/src/nn/scene_ssim.wgsl)

@@ -1,15 +1,18 @@
-//! Frame interpolation on the frames of the GPU frame APIs (FFmpeg's Vulkan, D3D12, D3D11 and VideoToolbox
+//! Frame interpolation and super resolution on the frames of the GPU frame APIs (FFmpeg's Vulkan, D3D12, D3D11 and VideoToolbox
 //! frames), through the same imports as an effect graph (`stage.rs`).
 //!
 //! Each call takes the next source frame and the frames to make between the previous source frame and it, at
 //! the times given by [`InterpFrames::set_times`]. The source frame is converted to RGBA once and kept on the
 //! GPU, so the next call interpolates from it: the caller holds no frame. With a scene threshold, a pair of
 //! frames that differ too much (a cut) is not interpolated: each frame in between is the nearer source frame.
+//!
+//! [`UpscaleFrames`] (super resolution) converts each frame to RGBA, runs a [`FrameUpscale`] on it and converts
+//! the result into the output frame, `scale` times larger.
 
 use std::sync::Arc;
 
 use super::kernels::{compute_pipeline, storage_entry, uniform_entry, PARAM_SLOT};
-use super::{FrameInterp, NnModel};
+use super::{FrameInterp, FrameUpscale, NnModel, UpscaleOptions};
 use crate::convert::{GpuOutputSlot, InputKey, InputSlot};
 use crate::frame::GpuFrame;
 use crate::runtime::{FrameInfo, GpuContext};
@@ -401,6 +404,173 @@ impl GpuStage for InterpFrames {
         match inputs {
             [input] => self.encode(input, outs, enc),
             _ => Err(Error::Frame(format!("frame interpolation takes one input frame, got {}", inputs.len()))),
+        }
+    }
+}
+
+/// The source frame of [`UpscaleFrames`] converted to RGBA, and the upscaled RGBA frame converted into the output.
+struct UpscaleTarget {
+    w: u32,
+    h: u32,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    slot: GpuOutputSlot,
+}
+
+/// Super resolution as a stage of the GPU frame APIs: input 0 is a frame, the one output the frame
+/// [`FrameUpscale::scale`] times larger, of any format the frames convert to and from.
+pub struct UpscaleFrames {
+    up: FrameUpscale,
+    ctx: Arc<GpuContext>,
+    interop: Interop,
+    source: Option<Source>,
+    key: Option<InputKey>,
+    target: Option<UpscaleTarget>,
+}
+
+impl UpscaleFrames {
+    /// Loads the `super_resolution` package (or bundle variant) of `scale` at `path` on `ctx`.
+    pub fn open(ctx: Arc<GpuContext>, path: impl AsRef<std::path::Path>, scale: u32, options: UpscaleOptions) -> Result<Self, Error> {
+        let up = FrameUpscale::open(ctx.clone(), path, scale, options)?;
+        Ok(Self::new(ctx, up))
+    }
+
+    /// Runs an already made [`FrameUpscale`] on `ctx` (its model's context).
+    pub fn new(ctx: Arc<GpuContext>, up: FrameUpscale) -> Self {
+        UpscaleFrames { up, ctx, interop: Interop::default(), source: None, key: None, target: None }
+    }
+
+    pub fn context(&self) -> &Arc<GpuContext> {
+        &self.ctx
+    }
+
+    /// The output is `scale` times the input on each axis.
+    pub fn scale(&self) -> u32 {
+        self.up.scale()
+    }
+
+    pub fn upscale(&self) -> &FrameUpscale {
+        &self.up
+    }
+
+    /// Encodes one frame already on the GPU (wgpu textures) into `out`. For callers that hold no FFmpeg frames,
+    /// and tests.
+    pub fn encode_frames(&mut self, input: &GpuFrame, out: &GpuFrame, enc: &mut wgpu::CommandEncoder) -> Result<(), Error> {
+        self.encode(input, std::slice::from_ref(out), enc)
+    }
+
+    /// Runs on Vulkan frames (see [`crate::EffectGraph::process_vulkan`]).
+    ///
+    /// # Safety
+    /// As for [`crate::EffectGraph::process_vulkan`].
+    #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
+    pub unsafe fn process_vulkan(
+        &mut self,
+        input: &mut crate::vulkan::VulkanFrame,
+        out: &mut crate::vulkan::VulkanFrame,
+    ) -> Result<(), Error> {
+        crate::vulkan::process_vulkan(self, std::slice::from_mut(input), std::slice::from_mut(out), None)
+    }
+
+    /// Runs on D3D12 frames (see [`crate::EffectGraph::process_d3d12`]).
+    ///
+    /// # Safety
+    /// As for [`crate::EffectGraph::process_d3d12`].
+    #[cfg(windows)]
+    pub unsafe fn process_d3d12(&mut self, input: &mut crate::d3d12::D3d12Frame, out: &mut crate::d3d12::D3d12Frame) -> Result<(), Error> {
+        crate::d3d12::process_d3d12(self, std::slice::from_mut(input), std::slice::from_mut(out), None)
+    }
+
+    /// Runs on D3D11 frames (see [`crate::EffectGraph::process_d3d11`]).
+    ///
+    /// # Safety
+    /// As for [`crate::EffectGraph::process_d3d11`].
+    #[cfg(windows)]
+    pub unsafe fn process_d3d11(&mut self, input: &crate::d3d12::D3d11Frame, out: &crate::d3d12::D3d11Frame) -> Result<(), Error> {
+        crate::d3d12::process_d3d11(self, std::slice::from_ref(input), std::slice::from_ref(out), None)
+    }
+
+    /// Runs on VideoToolbox frames (see [`crate::EffectGraph::process_videotoolbox`]).
+    ///
+    /// # Safety
+    /// As for [`crate::EffectGraph::process_videotoolbox`].
+    #[cfg(target_vendor = "apple")]
+    pub unsafe fn process_videotoolbox(
+        &mut self,
+        input: &crate::videotoolbox::VtFrame,
+        out: &crate::videotoolbox::VtFrame,
+    ) -> Result<(), Error> {
+        crate::videotoolbox::process_videotoolbox(self, std::slice::from_ref(input), std::slice::from_ref(out), None)
+    }
+
+    fn encode(&mut self, input: &GpuFrame, outs: &[GpuFrame], enc: &mut wgpu::CommandEncoder) -> Result<(), Error> {
+        let ctx = self.ctx.clone();
+        let (device, queue, conv) = (&ctx.device, &ctx.queue, &ctx.conv);
+        let [out] = outs else {
+            return Err(Error::Frame(format!("super resolution makes one output frame, got {}", outs.len())));
+        };
+        input.check("input", false)?;
+        out.check("output", true)?;
+        let (w, h) = (input.width, input.height);
+        let sc = self.up.scale() as u64;
+        if (out.width as u64, out.height as u64) != (w as u64 * sc, h as u64 * sc) {
+            return Err(Error::Frame(format!(
+                "the output is {}x{}, a {w}x{h} frame upscales to {}x{}",
+                out.width,
+                out.height,
+                w as u64 * sc,
+                h as u64 * sc
+            )));
+        }
+        let (ow, oh) = (out.width, out.height);
+        let key = InputKey { format: input.format, width: w, height: h, direct: false, gpu: true };
+        if self.key != Some(key) {
+            let tex = texture(device, w, h, "gpufx nn upscale source");
+            let view = tex.create_view(&Default::default());
+            self.source = Some(Source { slot: InputSlot::new(device, conv, key, false, vec![tex], None), view });
+            self.key = Some(key);
+        }
+        if self.target.as_ref().is_none_or(|t| (t.w, t.h) != (ow, oh)) {
+            let texture = texture(device, ow, oh, "gpufx nn upscaled frame");
+            let view = texture.create_view(&Default::default());
+            self.target = Some(UpscaleTarget { w: ow, h: oh, texture, view, slot: GpuOutputSlot::new(device, out.format, ow, oh) });
+        }
+        let src = self.source.as_mut().expect("made");
+        src.slot.use_gpu_frame(device, queue, conv, &input.planes, &input.color);
+        {
+            let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("gpufx nn source"), timestamp_writes: None });
+            src.slot.encode(conv, &mut cpass);
+        }
+        let t = self.target.as_mut().expect("made");
+        self.up.encode(enc, &src.view, &t.view, w, h)?;
+        if t.slot.key != (out.format, ow, oh) {
+            t.slot = GpuOutputSlot::new(device, out.format, ow, oh);
+        }
+        t.slot.bind(device, queue, conv, &t.texture, &out.planes, &out.color)?;
+        let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("gpufx nn out"), timestamp_writes: None });
+        t.slot.encode(conv, &mut cpass)
+    }
+}
+
+impl GpuStage for UpscaleFrames {
+    fn context(&self) -> &Arc<GpuContext> {
+        &self.ctx
+    }
+
+    fn interop(&mut self) -> &mut Interop {
+        &mut self.interop
+    }
+
+    fn encode_gpu(
+        &mut self,
+        inputs: &[GpuFrame],
+        outs: &[GpuFrame],
+        _info: Option<&FrameInfo>,
+        enc: &mut wgpu::CommandEncoder,
+    ) -> Result<(), Error> {
+        match inputs {
+            [input] => self.encode(input, outs, enc),
+            _ => Err(Error::Frame(format!("super resolution takes one input frame, got {}", inputs.len()))),
         }
     }
 }

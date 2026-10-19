@@ -7,7 +7,7 @@ mod common;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpufx_core::nn::{FrameInterp, FrameUpscale, InterpFrames, NnModel, Precision, UpscaleOptions};
+use gpufx_core::nn::{FrameInterp, FrameUpscale, InterpFrames, NnModel, Precision, UpscaleFrames, UpscaleOptions};
 use gpufx_core::{ColorInfo, GpuContext, GpuFrame, Image, Matrix, PixelFormat, Range};
 use gpufx_nnconv::reference::{Reference, Tensor};
 
@@ -1074,4 +1074,104 @@ fn upscale_size_limits_are_errors() {
     let up = FrameUpscale::new(Arc::new(model), opts).unwrap();
     let e = up.layout_for(4096, 4096).expect_err("forced tile over the budget").to_string();
     assert!(e.contains("do not fit"), "{e}");
+}
+
+// ---- UpscaleFrames (the stage behind the gpufx_ai_upscale filter) ----
+
+fn rgba_frame(ctx: &GpuContext, w: u32, h: u32, usage: wgpu::TextureUsages, data: Option<&[u8]>) -> GpuFrame {
+    let tex = rgba_texture(ctx, w, h, usage | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC);
+    if let Some(data) = data {
+        ctx.queue().write_texture(
+            tex.as_image_copy(),
+            data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+    }
+    let color = ColorInfo { matrix: Matrix::Bt709, range: Range::Full, ..Default::default() };
+    GpuFrame { format: PixelFormat::Rgba, width: w, height: h, planes: vec![tex], color }
+}
+
+/// The RGBA8 pixels of a frame, tightly packed.
+fn read_rgba(ctx: &GpuContext, f: &GpuFrame) -> Vec<u8> {
+    let (w, h) = (f.width, f.height);
+    let row = (w * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let buf = ctx.device().create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (row * h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        f.planes[0].as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    ctx.queue().submit([enc.finish()]);
+    buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    ctx.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let data = buf.slice(..).get_mapped_range().unwrap().to_vec();
+    (0..h as usize).flat_map(|y| data[y * row as usize..][..w as usize * 4].to_vec()).collect()
+}
+
+/// One frame through `UpscaleFrames` (RGBA in, RGBA out).
+fn upscale_frame(ctx: &Arc<GpuContext>, uf: &mut UpscaleFrames, rgba: &[u8], w: u32, h: u32) -> Result<Vec<u8>, gpufx_core::Error> {
+    let s = uf.scale();
+    let input = rgba_frame(ctx, w, h, wgpu::TextureUsages::TEXTURE_BINDING, Some(rgba));
+    let out = rgba_frame(ctx, w * s, h * s, wgpu::TextureUsages::STORAGE_BINDING, None);
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    uf.encode_frames(&input, &out, &mut enc)?;
+    ctx.queue().submit([enc.finish()]);
+    Ok(read_rgba(ctx, &out))
+}
+
+/// The frame stage gives what `FrameUpscale::upscale` gives on the same RGBA pixels, also after a size change, and
+/// refuses an output of the wrong size.
+#[test]
+fn upscale_frames_equal_frame_upscale() {
+    let Some(ctx) = gpu() else { return };
+    let m = sr_model(false);
+    let mut direct = upscaler(&ctx, &m, Some(8));
+    let mut uf = UpscaleFrames::new(ctx.clone(), upscaler(&ctx, &m, Some(8)));
+    let s = uf.scale();
+    for (wd, ht) in [(23u32, 11u32), (17, 9), (23, 11)] {
+        let rgba = rgba_of(&random_rgb(&mut Rng(wd as u64), wd, ht));
+        let want = direct.upscale(&view(&rgba, wd, ht)).unwrap();
+        let got = upscale_frame(&ctx, &mut uf, &rgba, wd, ht).unwrap();
+        assert_eq!(got.len(), (wd * s * ht * s * 4) as usize);
+        assert!(got == want, "{wd}x{ht}: {} values differ", got.iter().zip(&want).filter(|(a, b)| a != b).count());
+    }
+    let input = rgba_frame(&ctx, 8, 8, wgpu::TextureUsages::TEXTURE_BINDING, None);
+    let out = rgba_frame(&ctx, 8 * s, 8 * s + 1, wgpu::TextureUsages::STORAGE_BINDING, None);
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    let e = uf.encode_frames(&input, &out, &mut enc).expect_err("output of the wrong size").to_string();
+    assert!(e.contains("upscales to"), "{e}");
+}
+
+/// Real-ESRGAN through the frame stage against the CPU reference (as `realesrgan_matches_the_cpu_reference`, the
+/// same image): the RGBA conversions in and out of the stage keep the pixels.
+#[test]
+#[ignore = "needs build/models/realesr-animevideov3.zip and build/sr-test.png"]
+fn realesrgan_frames_match_the_cpu_reference() {
+    let Some(ctx) = gpu() else { return };
+    let img_path = std::env::var("GPUFX_SR_IMAGE").map(std::path::PathBuf::from).unwrap_or_else(|_| repo_path("build/sr-test.png"));
+    let img = image::open(&img_path).unwrap_or_else(|e| panic!("{}: {e}", img_path.display())).to_rgb8();
+    let (wd, ht) = img.dimensions();
+    let rgba = rgba_of(img.as_raw());
+    let path = repo_path("build/models/realesr-animevideov3.zip");
+    let cpu = Reference::load_variant(&path, Some(2)).unwrap();
+    let frame = gpufx_nnconv::frames::Rgb8 { w: wd as usize, h: ht as usize, data: img.as_raw().clone() };
+    let want = gpufx_nnconv::frames::upscale(&cpu, &frame).unwrap();
+    let want = image::RgbaImage::from_raw(want.w as u32, want.h as u32, rgba_of(&want.data)).unwrap();
+    for precision in [Precision::F32, Precision::Auto] {
+        let mut uf = UpscaleFrames::open(ctx.clone(), &path, 2, UpscaleOptions { precision, ..Default::default() }).unwrap();
+        let db = psnr_rgb(&upscale_frame(&ctx, &mut uf, &rgba, wd, ht).unwrap(), &want);
+        let f16 = uf.upscale().model().uses_f16();
+        eprintln!("frames x2 {}: {db:.2} dB against the CPU reference on {}", if f16 { "f16" } else { "f32" }, ctx.description());
+        assert!(db >= if f16 { 45.0 } else { 50.0 }, "{db:.2} dB");
+    }
 }

@@ -63,6 +63,17 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 - **Hạn chế:** D3D12 và D3D11 chậm hơn Vulkan khoảng 1,7 lần trên cùng GPU (RTX 4060 Laptop, 1080p: Vulkan khoảng
   45 ms mỗi frame, 4K khoảng 174 ms); nên dùng Vulkan.
 
+## Tăng độ phân giải bằng AI (`gpufx_ai_upscale`)
+
+- **Chưa test:** đường VideoToolbox chưa từng chạy. Vulkan, D3D12 và D3D11 khớp bản tham chiếu CPU trong bundle win64
+  (97,5 dB f32, 57,9 dB f16); linux64 mới chạy trên lavapipe.
+- **Hạn chế:** không realtime: một frame 1080p x2 mất khoảng 480-510 ms trên D3D11/D3D12 (f16) và khoảng 690 ms trên
+  Vulkan, RTX 4060 Laptop.
+- **Hạn chế:** trên device Vulkan do FFmpeg tạo, `precision=auto` chạy f32: device đó không bật các tính năng 16-bit mà
+  wgpu cần cho f16.
+- **Hạn chế:** frame đi qua RGBA 8-bit (đầu vào và đầu ra của model): input 10-bit mất phần bit thêm, alpha không
+  được giữ.
+
 ## Định dạng, màu, alpha, HDR
 
 - **Hạn chế:** GPU chỉ chuyển `nv12`, `p010le`, `yuv420p`/`422p`/`444p` (cả bản `10le`), `yuva420p`/`444p`, `rgba`,

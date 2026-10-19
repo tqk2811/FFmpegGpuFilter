@@ -472,6 +472,7 @@ static int config_output(AVFilterLink *outlink)
     return 0;
 }
 
+#if CONFIG_D3D12VA || CONFIG_D3D11VA || CONFIG_VIDEOTOOLBOX
 static const char *frame_color(AVFilterContext *ctx, const AVFrame *f, GpufxColor *c)
 {
     AVHWFramesContext *fc = (AVHWFramesContext *)f->hw_frames_ctx->data;
@@ -483,6 +484,7 @@ static const char *frame_color(AVFilterContext *ctx, const AVFrame *f, GpufxColo
                av_get_pix_fmt_name(fc->sw_format), av_color_space_name(f->colorspace));
     return name;
 }
+#endif
 
 #if CONFIG_VULKAN
 static int run_vulkan(AVFilterContext *ctx, AVFrame *in, int n)

@@ -615,6 +615,38 @@ else
     else fail "interpolation makes new frames"; cat "$CLIPS/last.log"; fi
 fi
 
+echo "super resolution (gpufx_ai_upscale):"
+# The anime model x2 (the bundle's models/realesr-animevideov3.zip, scales 2, 3, 4) on a 320x180 clip.
+AIU="gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip"
+if ! grep -qw gpufx_ai_upscale "$CLIPS/filters.txt"; then
+    echo "  skip  this bundle has no gpufx_ai_upscale"
+elif [ ! -f models/realesr-animevideov3.zip ] || [ ! -f models/realesr-general-x4v3.zip ]; then
+    echo "  skip  this bundle has no models/realesr-animevideov3.zip and realesr-general-x4v3.zip"
+else
+    # Output size: one 320x180 frame x2 as rgb24 is 640x360x3 bytes; x3 is 960x540x3.
+    for s in 2 3; do
+        BYTES=$(gpu_ff -i "$A" -frames:v 1 -an -vf "format=nv12,$AIU:scale=$s,hwdownload,format=nv12,format=rgb24" \
+            -f rawvideo - 2> "$CLIPS/last.log" | wc -c | tr -d ' ')
+        if [ "$BYTES" = $((320 * s * 180 * s * 3)) ]; then pass "x$s: 320x180 -> $((320 * s))x$((180 * s))"
+        else fail "x$s: 320x180 -> $((320 * s))x$((180 * s)) (got $BYTES bytes)"; cat "$CLIPS/last.log"; fi
+    done
+    # The result looks like the input: PSNR against a bicubic x2 of the same frames well above noise
+    # (Real-ESRGAN sharpens, so not near identical). Both precisions, and rgba frames.
+    for v in "nv12:auto" "nv12:f32" "rgba:auto"; do
+        f=${v%%:*} p=${v#*:}
+        DB=$(gpu_ff -v info -i "$A" -frames:v 5 -an -filter_complex \
+            "[0]format=$f,split[a][b];[a]$AIU:precision=$p,hwdownload,format=$f,format=yuv444p[u];[b]scale=640:360:flags=bicubic,format=yuv444p[r];[u][r]psnr" \
+            -f null - 2>&1 | sed -n 's/.*PSNR .* average:\([0-9.inf]*\).*/\1/p' | tail -n 1)
+        if [ -n "$DB" ] && below 25 "$DB"; then pass "$f, precision=$p: close to a bicubic x2 ($DB dB)"
+        else fail "$f, precision=$p: close to a bicubic x2 (got ${DB:-no} dB, want > 25)"; fi
+    done
+    # 320x180 then 300x180 (-reinit_filter 0): the filter makes output frames of the new size itself.
+    ai_flow "size change mid-stream" 20 800 -reinit_filter 0 -f concat -safe 0 -i "$R" -vf "format=nv12,$AIU,hwdownload,format=nv12"
+    rejects "a scale the package does not have" "available: 4" -i "$A" -frames:v 1 \
+        -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=2,hwdownload,format=nv12" -f null -
+    NODEV=1 rejects "model is required" "model is required" -i "$A" -frames:v 1 -vf "gpufx_ai_upscale" -f null -
+fi
+
 echo "Vulkan frames:"
 # hwupload -> gpufx -> hwdownload runs on FFmpeg's own Vulkan device, frames never leave
 # the GPU in between, and must give exactly the pixels of software frames gpufx uploads.
