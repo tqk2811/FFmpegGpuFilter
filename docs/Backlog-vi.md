@@ -18,16 +18,10 @@
 - **Vì sao**: nhân đôi 24 fps 1080p cần dưới ~42 ms để chạy thời gian thực. Hướng: tính f16 (`SHADER_F16`, có đường lùi f32) hoặc conv kiểu GEMM nạp đôi bộ đệm; có thể bỏ các biến môi trường chỉnh tham số `GPUFX_NN_CONV`/`GPUFX_NN_MINWG` khi chốt cấu hình.
 - **Ngày ghi**: 2026-10-19
 
-### [Thấp] `gpufx_ai_framerate`: cặp tĩnh và cặp chuyển cảnh vẫn chạy RIFE
-- **Vấn đề**: cặp frame tĩnh (gần như giống hệt) và cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
+### [Thấp] `gpufx_ai_framerate`: cặp chuyển cảnh vẫn chạy RIFE
+- **Vấn đề**: cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
 - **Vị trí**: [frames.rs:306](../crates/gpufx-core/src/nn/frames.rs#L306) (`self.interp.encode`), [frames.rs:335](../crates/gpufx-core/src/nn/frames.rs#L335) (`encode_scene`), [scene_decide.wgsl](../crates/gpufx-core/src/nn/scene_decide.wgsl)
-- **Vì sao**: anime 12 fps lặp frame nhiều, cảnh tĩnh dài; bỏ RIFE ở các cặp này tiết kiệm ~45 ms/frame 1080p. Hướng: chạy pass scene trước RIFE và dispatch RIFE bằng indirect dispatch (số workgroup 0 khi `cut != 0`), cần plan nn hỗ trợ dispatch indirect.
-- **Ngày ghi**: 2026-10-19
-
-### [Vừa] `gpufx_ai_framerate`: phát hiện cặp tĩnh lấy mẫu thưa, chuyển động rất nhỏ có thể bị bỏ sót
-- **Vấn đề**: phát hiện cặp tĩnh lấy mẫu mỗi `step` pixel (step=2 ở 1080p, 3 ở 4K) và một tile mẫu 16x16 phủ 16*step pixel, nên chuyển động rất nhỏ bị pha loãng hoặc lọt khỏi mẫu, cặp bị coi là tĩnh và lặp frame nguồn.
-- **Vị trí**: [frames.rs:340](../crates/gpufx-core/src/nn/frames.rs#L340) (`step`)
-- **Vì sao**: nội suy bị bỏ qua nhầm ở cảnh gần như tĩnh nhưng có chi tiết nhỏ chuyển động. Hướng: giới hạn kích thước tile theo pixel (không theo số mẫu) hoặc thêm pass tile độ phân giải đầy đủ; thêm test độ phân giải cao.
+- **Vì sao**: video nhiều chuyển cảnh; bỏ RIFE ở các cặp này tiết kiệm ~45 ms/frame 1080p. Hướng: chạy pass scene trước RIFE và dispatch RIFE bằng indirect dispatch (số workgroup 0 khi `cut != 0`), cần plan nn hỗ trợ dispatch indirect.
 - **Ngày ghi**: 2026-10-19
 
 ### [Thấp] `gpufx_ai_framerate`: mất một frame ở chỗ nối khi đổi kích thước (graph reinit)
@@ -36,8 +30,8 @@
 - **Vì sao**: đầu ra thiếu một frame quanh điểm đổi kích thước; cần xác nhận nguyên nhân rồi dùng thời điểm kết thúc của frame cuối khi nhận EOF.
 - **Ngày ghi**: 2026-10-19
 
-### [Thấp] `gpufx_ai_framerate`: FFI không trả cờ chuyển cảnh/cặp tĩnh về C
-- **Vấn đề**: filter C đếm `nb_interp` cho mọi frame gửi đi theo nhánh nội suy, kể cả khi GPU đã thay nó bằng frame nguồn (chuyển cảnh, cặp tĩnh); log thống kê cuối và side data không phản ánh đúng.
+### [Thấp] `gpufx_ai_framerate`: FFI không trả cờ chuyển cảnh về C
+- **Vấn đề**: filter C đếm `nb_interp` cho mọi frame gửi đi theo nhánh nội suy, kể cả khi GPU đã thay nó bằng frame nguồn (chuyển cảnh); log thống kê cuối và side data không phản ánh đúng.
 - **Vị trí**: [vf_gpufx_ai_framerate.c:804](../ffmpeg/vf_gpufx_ai_framerate.c#L804) (`nb_interp++`), [ai.rs](../crates/gpufx-ffi/src/ai.rs)
 - **Vì sao**: cần để thống kê đúng và để C có thể gửi lại chính frame nguồn (không copy) cho cặp đó; phải đọc `state.cut` về CPU (một lần map nhỏ, có thể trễ một frame để khỏi chặn pipeline).
 - **Ngày ghi**: 2026-10-19

@@ -883,7 +883,7 @@ static int activate(AVFilterContext *ctx)
 static const AVOption gpufx_ai_framerate_options[] = {
     { "model",   "frame interpolation package (gpufx-nn, io.json kind frame_interp), e.g. models/rife-v4.6.zip", OFFSET(model), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
     { "fps",     "output frame rate; default: twice the input's", OFFSET(fps), AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, INT_MAX, FLAGS },
-    { "scene",   "scene change threshold (0-100) under which pairs are interpolated; 0: never detect cuts (static pairs are still repeated)", OFFSET(scene), AV_OPT_TYPE_DOUBLE, { .dbl = 20 }, 0, 100, FLAGS },
+    { "scene",   "scene change threshold (0-100) under which pairs are interpolated; 0: never detect cuts (always interpolate)", OFFSET(scene), AV_OPT_TYPE_DOUBLE, { .dbl = 20 }, 0, 100, FLAGS },
     { "max_gap", "pairs further apart than this many input frame durations are repeated, not interpolated", OFFSET(max_gap), AV_OPT_TYPE_DOUBLE, { .dbl = 2.0 }, 1, 100, FLAGS },
     { NULL }
 };

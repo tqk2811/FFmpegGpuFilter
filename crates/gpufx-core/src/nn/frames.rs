@@ -5,7 +5,6 @@
 //! the times given by [`InterpFrames::set_times`]. The source frame is converted to RGBA once and kept on the
 //! GPU, so the next call interpolates from it: the caller holds no frame. With a scene threshold, a pair of
 //! frames that differ too much (a cut) is not interpolated: each frame in between is the nearer source frame.
-//! A pair of nearly identical frames (a still scene, a duplicated frame) is not interpolated either.
 
 use std::sync::Arc;
 
@@ -305,8 +304,7 @@ impl InterpFrames {
             for (k, &t) in self.times.iter().enumerate().filter(|(_, t)| **t < 1.0) {
                 self.interp.encode(enc, prev_view, cur_view, &self.between[k].view, w, h, t)?;
             }
-            // Scored even without a scene threshold: a static pair repeats its source frame too.
-            if self.have_prev {
+            if self.have_prev && self.threshold > 0.0 {
                 self.encode_scene(w, h, prev, next, enc);
             }
             for ((b, out), &t) in self.between.iter_mut().zip(outs).zip(&self.times) {
@@ -331,7 +329,7 @@ impl InterpFrames {
         Ok(())
     }
 
-    /// The scene check of the pair and, on a cut or a static pair, the nearer source frame over every frame in between.
+    /// The scene check of the pair and, on a cut, the nearer source frame over every frame in between.
     fn encode_scene(&mut self, w: u32, h: u32, prev: usize, next: usize, enc: &mut wgpu::CommandEncoder) {
         let device = &self.ctx.device;
         let n = self.times.len();
@@ -382,13 +380,8 @@ impl InterpFrames {
                 })
             })
             .collect();
-        // The sum and the largest tile restart for every pair; the previous difference only after a discontinuity.
-        if s.fresh {
-            enc.clear_buffer(&s.state, 0, None);
-        } else {
-            enc.clear_buffer(&s.state, 0, Some(4));
-            enc.clear_buffer(&s.state, 12, Some(4));
-        }
+        // The sum restarts for every pair; the previous difference only after a discontinuity.
+        enc.clear_buffer(&s.state, 0, if s.fresh { None } else { Some(4) });
         s.fresh = false;
         let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("gpufx nn scene"), timestamp_writes: None });
         cpass.set_bind_group(0, &groups[0], &[]);
