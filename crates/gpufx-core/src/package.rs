@@ -60,6 +60,16 @@ impl Package {
     }
 }
 
+/// Every file of a `.zip` or a directory, by normalised path, within the package limits; for
+/// other kinds of packages (`crate::nn`) that share the zip/directory handling.
+pub(crate) fn read_files(path: &Path) -> Result<HashMap<String, Vec<u8>>, Error> {
+    if path.is_dir() {
+        read_dir(path)
+    } else {
+        read_zip(&std::fs::read(path)?)
+    }
+}
+
 fn normalize(path: &str) -> String {
     path.replace('\\', "/").trim_start_matches("./").to_string()
 }

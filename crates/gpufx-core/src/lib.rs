@@ -13,6 +13,7 @@ pub mod graph;
 mod lru;
 pub mod manifest;
 mod mips;
+pub mod nn;
 pub mod package;
 pub mod params;
 mod pool;
