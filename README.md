@@ -126,8 +126,8 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
 | Option | Default | Meaning |
 |---|---|---|
 | `model` | (required) | path of a `frame_interp` package, e.g. `models/rife-v4.6.zip` |
-| `fps` | twice the input's | output frame rate; any rate, not only multiples |
-| `scene` | 8.2 | scene change threshold (0-100, scored like FFmpeg's `framerate`); a pair scoring at least this is not interpolated (the nearer frame is repeated); 0 interpolates every pair |
+| `fps` | twice the input's | output frame rate, a number or fraction (`30`, `24000/1001`; named rates such as `ntsc` are not accepted); any rate, not only multiples |
+| `scene` | 20 | scene change threshold (0-100, scored like FFmpeg's `framerate`); a pair scoring at least this is not interpolated (the nearer frame is repeated); 0 never detects a cut, so only near-identical pairs are repeated. A pair of near-identical frames (a still scene, a duplicated frame) always repeats the source frame |
 | `max_gap` | 2 | a pair further apart than this many input frame durations (a gap in a VFR stream) is not interpolated |
 
 The output is a constant rate grid: a grid point between two source frames is interpolated at the matching time,
@@ -141,6 +141,10 @@ The model is not in git: the win64/linux64 bundles ship it in `models/` (with it
 with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (pinned URLs and sha256, written to `build/models/`).
 On D3D12 the model's shaders need DXC (`dxcompiler.dll`); the first run compiles them (set `GPUFX_SHADER_CACHE` to
 keep them).
+
+**Untested:** the VideoToolbox (macOS) path of `gpufx_ai_framerate` has never run on a Mac, and the linux64 bundle
+of the filter has not been run (see [limitations](docs/LIMITATIONS.md)). Measured so far: Windows with an RTX 4060
+Laptop, Vulkan about 45 ms per 1080p frame; D3D12/D3D11 about 1.7x slower than Vulkan (prefer Vulkan).
 
 ## Hardware and OS requirements
 

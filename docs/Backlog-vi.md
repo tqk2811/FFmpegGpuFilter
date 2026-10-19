@@ -18,6 +18,48 @@
 - **Vì sao**: nhân đôi 24 fps 1080p cần dưới ~42 ms để chạy thời gian thực. Hướng: tính f16 (`SHADER_F16`, có đường lùi f32) hoặc conv kiểu GEMM nạp đôi bộ đệm; có thể bỏ các biến môi trường chỉnh tham số `GPUFX_NN_CONV`/`GPUFX_NN_MINWG` khi chốt cấu hình.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] `gpufx_ai_framerate`: cặp tĩnh và cặp chuyển cảnh vẫn chạy RIFE
+- **Vấn đề**: cặp frame tĩnh (gần như giống hệt) và cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
+- **Vị trí**: [frames.rs:306](../crates/gpufx-core/src/nn/frames.rs#L306) (`self.interp.encode`), [frames.rs:335](../crates/gpufx-core/src/nn/frames.rs#L335) (`encode_scene`), [scene_decide.wgsl](../crates/gpufx-core/src/nn/scene_decide.wgsl)
+- **Vì sao**: anime 12 fps lặp frame nhiều, cảnh tĩnh dài; bỏ RIFE ở các cặp này tiết kiệm ~45 ms/frame 1080p. Hướng: chạy pass scene trước RIFE và dispatch RIFE bằng indirect dispatch (số workgroup 0 khi `cut != 0`), cần plan nn hỗ trợ dispatch indirect.
+- **Ngày ghi**: 2026-10-19
+
+### [Vừa] `gpufx_ai_framerate`: phát hiện cặp tĩnh lấy mẫu thưa, chuyển động rất nhỏ có thể bị bỏ sót
+- **Vấn đề**: phát hiện cặp tĩnh lấy mẫu mỗi `step` pixel (step=2 ở 1080p, 3 ở 4K) và một tile mẫu 16x16 phủ 16*step pixel, nên chuyển động rất nhỏ bị pha loãng hoặc lọt khỏi mẫu, cặp bị coi là tĩnh và lặp frame nguồn.
+- **Vị trí**: [frames.rs:340](../crates/gpufx-core/src/nn/frames.rs#L340) (`step`)
+- **Vì sao**: nội suy bị bỏ qua nhầm ở cảnh gần như tĩnh nhưng có chi tiết nhỏ chuyển động. Hướng: giới hạn kích thước tile theo pixel (không theo số mẫu) hoặc thêm pass tile độ phân giải đầy đủ; thêm test độ phân giải cao.
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] `gpufx_ai_framerate`: mất một frame ở chỗ nối khi đổi kích thước (graph reinit)
+- **Vấn đề**: khi FFmpeg khởi tạo lại filter graph lúc đổi kích thước (mặc định, không có `-reinit_filter 0`) mất một frame ở chỗ nối; nghi do EOF của graph cũ mang pts của frame cuối thay vì thời điểm kết thúc của nó.
+- **Vị trí**: [vf_gpufx_ai_framerate.c](../ffmpeg/vf_gpufx_ai_framerate.c) (xử lý EOF)
+- **Vì sao**: đầu ra thiếu một frame quanh điểm đổi kích thước; cần xác nhận nguyên nhân rồi dùng thời điểm kết thúc của frame cuối khi nhận EOF.
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] `gpufx_ai_framerate`: FFI không trả cờ chuyển cảnh/cặp tĩnh về C
+- **Vấn đề**: filter C đếm `nb_interp` cho mọi frame gửi đi theo nhánh nội suy, kể cả khi GPU đã thay nó bằng frame nguồn (chuyển cảnh, cặp tĩnh); log thống kê cuối và side data không phản ánh đúng.
+- **Vị trí**: [vf_gpufx_ai_framerate.c:804](../ffmpeg/vf_gpufx_ai_framerate.c#L804) (`nb_interp++`), [ai.rs](../crates/gpufx-ffi/src/ai.rs)
+- **Vì sao**: cần để thống kê đúng và để C có thể gửi lại chính frame nguồn (không copy) cho cặp đó; phải đọc `state.cut` về CPU (một lần map nhỏ, có thể trễ một frame để khỏi chặn pipeline).
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] `gpufx_ai_framerate`: chưa có pool frame đầu ra riêng
+- **Vấn đề**: khi thiết bị cho phép, frame đầu ra lấy từ pool của input; pool cố định cỡ (`initial_pool_size`) chỉ được cảnh báo, có thể cạn khi tỉ lệ fps cao hoặc `max_gap` lớn.
+- **Vị trí**: [vf_gpufx_ai_framerate.c:456](../ffmpeg/vf_gpufx_ai_framerate.c#L456), [vf_gpufx_ai_framerate.c:342](../ffmpeg/vf_gpufx_ai_framerate.c#L342) (`own_out`)
+- **Vì sao**: một hwframes context riêng cho đầu ra (cỡ theo `max_out`) bỏ được phụ thuộc vào pool của filter phía trước.
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] `gpufx_ai_framerate`: `max_gap` tính theo frame rate khai báo, sai với VFR
+- **Vấn đề**: `in_step` lấy từ `frame_rate` của link vào; stream VFR (hoặc frame rate khai báo sai) làm ngưỡng khoảng trống `max_gap * in_step` lệch, cặp bình thường có thể bị coi là khoảng trống hoặc ngược lại.
+- **Vị trí**: [vf_gpufx_ai_framerate.c:453](../ffmpeg/vf_gpufx_ai_framerate.c#L453), [vf_gpufx_ai_framerate.c:753](../ffmpeg/vf_gpufx_ai_framerate.c#L753)
+- **Vì sao**: nên đo `dt` thực (vd trung vị vài cặp gần nhất) làm đơn vị cho `max_gap`.
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] `gpufx_ai_framerate`: D3D12 chậm hơn Vulkan ~1,7 lần, chưa profile
+- **Vấn đề**: cùng máy, RIFE qua D3D12 chậm khoảng 1,7 lần so với Vulkan; chưa đo từng pass (conv, warp, chuyển đổi frame, đồng bộ fence) để biết chậm ở đâu.
+- **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs), [frames.rs](../crates/gpufx-core/src/nn/frames.rs) (`process_d3d12`)
+- **Vì sao**: D3D12 là đường mặc định khi dùng `d3d12va` trên Windows; cần timestamp query theo pass để quyết định tối ưu.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] Hiệu ứng CapCut đợt 4: các finding review để sau
 - **Vấn đề**:
   - heat-flash lấy mẫu glow trên lưới cố định 240 texel nhưng đọc thẳng texture `bright` full-res, nên ở 1080p/4K các tap cách nhau 9–18 px, highlight nhỏ có thể nhấp nháy.
