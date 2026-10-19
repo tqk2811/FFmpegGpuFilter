@@ -146,6 +146,41 @@ keep them).
 of the filter has not been run (see [limitations](docs/LIMITATIONS.md)). Measured so far: Windows with an RTX 4060
 Laptop, Vulkan about 45 ms per 1080p frame; D3D12/D3D11 about 1.7x slower than Vulkan (prefer Vulkan).
 
+## Super resolution (`gpufx_ai_upscale`)
+
+`gpufx_ai_upscale` upscales each frame with a neural super resolution model (Real-ESRGAN, converted to a gpufx-nn
+package) run on the GPU by libgpufx, on the same GPU frames and devices as `gpufx`. The output is `scale` times the
+input on each axis, in the input's pixel format:
+
+```sh
+# Anime 1080p -> 4K on Vulkan
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
+# Live action x4 on D3D12 (Windows; needs dxcompiler.dll, shipped in bin/)
+ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `model` | (required) | path of a `super_resolution` package or bundle: `models/realesr-animevideov3.zip` (anime, scales 2, 3, 4) or `models/realesr-general-x4v3.zip` (general content, scale 4) |
+| `scale` | 2 | output size / input size on each axis; the package must have it (the error lists the scales it has) |
+| `tile` | 0 | largest tile side in input pixels; 0 picks the fewest tiles that fit the GPU's buffer limits. Tiles overlap by the model's context, so the result does not depend on the tiling (no seams) |
+| `precision` | `auto` | `auto`: f16 convolutions where the GPU has them (about 57 dB against the f32 reference), else f32; `f32`: f32 everywhere (slower) |
+
+The input must be GPU frames (Vulkan, D3D12, D3D11 or VideoToolbox) of nv12, p010le, rgba or rgba64le; each frame
+goes through 8-bit RGBA (the model's input and output), and alpha is not kept. The output frames have a frames context
+of their own, scale times larger. A size change in the middle of a stream (`-reinit_filter 0`) gives output frames of
+the new size.
+
+The models are not in git: the win64/linux64 bundles ship them in `models/` (with their licenses), or fetch and convert
+them with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/models/`). On D3D12 the shaders need
+DXC, as for `gpufx_ai_framerate`.
+
+**Not real time:** on an RTX 4060 Laptop a 1080p frame at x2 (realesr-animevideov3) takes about 480-510 ms on D3D11/D3D12
+(f16) and about 690 ms on Vulkan (f32: the Vulkan device FFmpeg creates does not enable f16), so this is for offline
+encodes. The VideoToolbox path has never run on a Mac.
+
 ## Hardware and OS requirements
 
 - **Windows**: Windows 10 64-bit or later. D3D12: feature level 11_0, resource binding tier 2 (NVIDIA Kepler+,

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Adds the gpufx filters (gpufx, gpufx_upload, gpufx_download, gpufx_ai_framerate) to an FFmpeg source tree
+# Adds the gpufx filters (gpufx, gpufx_upload, gpufx_download, gpufx_ai_framerate,
+# gpufx_ai_upscale) to an FFmpeg source tree
 # (tested with the external/FFmpeg submodule, n9.0-2-g03d9533176, and 9.1-dev).
 # build.sh and build-prebuilt.sh run it.
 #   ffmpeg/integrate.sh /path/to/FFmpeg
@@ -18,6 +19,7 @@ cp "$HERE/vf_gpufx_transfer.c" libavfilter/vf_gpufx_transfer.c
 cp "$HERE/vf_gpufx_vk.h" libavfilter/vf_gpufx_vk.h
 cp "$HERE/vf_gpufx_frames.h" libavfilter/vf_gpufx_frames.h
 cp "$HERE/vf_gpufx_ai_framerate.c" libavfilter/vf_gpufx_ai_framerate.c
+cp "$HERE/vf_gpufx_ai_upscale.c" libavfilter/vf_gpufx_ai_upscale.c
 
 # Patches to FFmpeg itself (patches/*.patch, made with diff -u from the tree root):
 # D3D11/D3D12 frames of every DXGI format that has a software pixel format (rgba, bgra,
@@ -89,10 +91,26 @@ if ! grep -q ff_vf_gpufx_ai_framerate libavfilter/allfilters.c; then
     sed -i.bak 's/^\(extern const FFFilter ff_vf_gpufx;\)$/\1\
 extern const FFFilter ff_vf_gpufx_ai_framerate;/' libavfilter/allfilters.c
 fi
+# gpufx_ai_upscale: super resolution with a gpufx-nn model, through libgpufx.
+if ! grep -q gpufx_ai_upscale_filter_deps configure; then
+    sed -i.bak 's/^\(gpufx_filter_deps=.*\)$/\1\
+gpufx_ai_upscale_filter_deps="libgpufx"/' configure
+    rm -f configure.bak
+    grep -q gpufx_ai_upscale_filter_deps configure || { echo "patching configure failed" >&2; exit 1; }
+fi
+if ! grep -q CONFIG_GPUFX_AI_UPSCALE_FILTER libavfilter/Makefile; then
+    sed -i.bak 's/^\(OBJS-$(CONFIG_GPUFX_FILTER) .*\)$/\1\
+OBJS-$(CONFIG_GPUFX_AI_UPSCALE_FILTER)       += vf_gpufx_ai_upscale.o/' libavfilter/Makefile
+fi
+if ! grep -q ff_vf_gpufx_ai_upscale libavfilter/allfilters.c; then
+    sed -i.bak 's/^\(extern const FFFilter ff_vf_gpufx;\)$/\1\
+extern const FFFilter ff_vf_gpufx_ai_upscale;/' libavfilter/allfilters.c
+fi
 rm -f libavfilter/Makefile.bak libavfilter/allfilters.c.bak
 grep -q CONFIG_GPUFX_FILTER libavfilter/Makefile && grep -q CONFIG_GPUFX_UPLOAD_FILTER libavfilter/Makefile &&
     grep -q CONFIG_GPUFX_AI_FRAMERATE_FILTER libavfilter/Makefile &&
     grep -q ff_vf_gpufx_ai_framerate libavfilter/allfilters.c &&
+    grep -q CONFIG_GPUFX_AI_UPSCALE_FILTER libavfilter/Makefile && grep -q ff_vf_gpufx_ai_upscale libavfilter/allfilters.c &&
     grep -q 'ff_vf_gpufx;' libavfilter/allfilters.c && grep -q ff_vf_gpufx_upload libavfilter/allfilters.c \
     || { echo "patching libavfilter failed" >&2; exit 1; }
 echo "gpufx filters added; configure FFmpeg with --enable-libgpufx (gpufx_upload/download need --enable-vulkan)"

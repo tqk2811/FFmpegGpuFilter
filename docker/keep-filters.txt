@@ -91,6 +91,7 @@ afade
 pan
 atempo
 
-# The effect filter, and frame interpolation with a gpufx-nn model
+# The effect filter, and frame interpolation and super resolution with gpufx-nn models
 gpufx
 gpufx_ai_framerate
+gpufx_ai_upscale

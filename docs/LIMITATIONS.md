@@ -64,6 +64,17 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 - **Limitation:** D3D12 and D3D11 are about 1.7x slower than Vulkan on the same GPU (RTX 4060 Laptop, 1080p: Vulkan
   about 45 ms per frame, 4K about 174 ms); prefer Vulkan.
 
+## Super resolution (`gpufx_ai_upscale`)
+
+- **Untested:** the VideoToolbox path has never run. Vulkan, D3D12 and D3D11 match the CPU reference in the win64
+  bundle (97.5 dB f32, 57.9 dB f16); linux64 was tested on lavapipe only.
+- **Limitation:** not real time: a 1080p frame x2 takes about 480-510 ms on D3D11/D3D12 (f16) and about 690 ms on
+  Vulkan on an RTX 4060 Laptop.
+- **Limitation:** on the Vulkan device FFmpeg creates, `precision=auto` runs f32: that device does not enable the
+  16-bit features wgpu needs for f16.
+- **Limitation:** frames go through 8-bit RGBA (the model's input and output): 10-bit input loses its extra bits and
+  alpha is not kept.
+
 ## Formats, color, alpha, HDR
 
 - **Limitation:** the GPU converts `nv12`, `p010le`, `yuv420p`/`422p`/`444p` (and their `10le` forms),
