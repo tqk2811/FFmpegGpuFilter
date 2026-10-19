@@ -279,7 +279,7 @@ TRANSITIONS="wipe-transition crossfade slide-transition circle-reveal clock-wipe
 for e in "$FX"/capcut/*.zip; do TRANSITIONS="$TRANSITIONS $(basename "$e" .zip)"; done
 echo "single input effects (audio stream kept, GPU frames into the null muxer):"
 for e in "$FX"/*/*.zip; do
-    case " $TRANSITIONS overlay fit " in *" $(basename "$e" .zip) "*) continue ;; esac
+    case " $TRANSITIONS overlay fit hstack vstack " in *" $(basename "$e" .zip) "*) continue ;; esac
     # shellcheck disable=SC2086
     ok "$(basename "$e" .zip)" -i "$A" -vf "gpufx=graph=$e" $NULL
 done
@@ -290,6 +290,10 @@ for e in $TRANSITIONS; do
 done
 # shellcheck disable=SC2086
 ok "overlay (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/overlay.zip=border=2'" -an $NULL
+# shellcheck disable=SC2086
+ok "hstack of 3 inputs" -i "$A" -i "$A" -i "$A" -filter_complex "[0][1][2]gpufx=graph='[0][1][2]$FX/ffmpeg/hstack.zip'" -an $NULL
+# shellcheck disable=SC2086
+ok "vstack" -i "$A" -i "$A" -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/vstack.zip'" -an $NULL
 for m in 0 1 2 3; do
     # shellcheck disable=SC2086
     ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/slideshow/fit.zip=mode=$m'" -an $NULL

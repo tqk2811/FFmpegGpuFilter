@@ -1,0 +1,22 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.hstack",
+  "name": "Horizontal Stack",
+  "version": "1.0.0",
+  "description": "Places the inputs side by side, left to right, like FFmpeg's hstack.",
+  "inputs": [
+    {
+      "name": "src",
+      "description": "Videos to stack, all of the same height",
+      "repeat": { "default": 2, "min": 2, "max": 16 }
+    }
+  ],
+  "output": {
+    "size": "hstack"
+  },
+  "passes": [
+    {
+      "shader": "shaders/hstack.wgsl"
+    }
+  ]
+}

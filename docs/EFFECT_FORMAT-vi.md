@@ -34,12 +34,12 @@ scripts/pack-effects.sh --check -o out my-fx    # biên dịch shader trên GPU 
 
 | Trường | Kiểu | Bắt buộc | Ý nghĩa |
 |--------|------|----------|---------|
-| `api` | số | không (1) | Phiên bản định dạng. Cần `2` cho texture mảng, `mipmaps`, `premultiply` và tham số `expr`; gói không dùng các trường này giữ `1` và chạy như cũ. Runtime cũ hơn gói sẽ báo `unsupported manifest api 2` |
+| `api` | số | không (1) | Phiên bản định dạng. Cần `2` cho texture mảng, `mipmaps`, `premultiply`, tham số `expr`, input `repeat` và `output.size` khác `first`; gói không dùng các trường này giữ `1` và chạy như cũ. Runtime cũ hơn gói sẽ báo `unsupported manifest api 2` |
 | `id` | chuỗi | có | Định danh dạng reverse-DNS |
 | `name` | chuỗi | có | Tên hiển thị |
 | `version`, `description` | chuỗi | không | |
 | `inputs` | mảng | không (`[{"name":"src"}]`) | Các video input, theo thứ tự pad của filter, kèm quy tắc (xem bên dưới) |
-| `output` | `{formats}` | không (`rgba` và mọi format chuyển trên GPU) | Pixel format output được phép |
+| `output` | `{formats, size}` | không (`rgba` và mọi format chuyển trên GPU; kích thước input đầu) | Pixel format output được phép và kích thước output |
 | `params` | mảng | không | Tham số, xem bên dưới |
 | `textures` | mảng | không | Ảnh PNG đi kèm (LUT, mask, sprite), xem [Texture](#texture) |
 | `passes` | mảng | có | Các pass compute, chạy theo thứ tự |
@@ -64,6 +64,7 @@ Mỗi phần tử `inputs`:
 | `width`, `height` | không giới hạn | `{ "min": 16, "max": 4096, "multiple_of": 2 }`, mỗi trường đều tuỳ chọn |
 | `same_size` | `false` | Kích thước phải bằng input đầu tiên (không dùng cho input đầu) |
 | `mipmaps` | `false` | (api 2) Texture của input có đủ chuỗi mip, sinh trên GPU mỗi frame, cho shader thu nhỏ ảnh nhiều (`textureSampleLevel(src, smp, uv, lod)`); xem [Mipmap](#mipmap) |
+| `repeat` | không có | (api 2, chỉ input cuối, chỉ WGSL) `{ "default": 2, "min": 2, "max": 16 }`: input đại diện cho số pad thay đổi được, xem [Số input thay đổi được](#số-input-thay-đổi-được) |
 
 `output.formats`: danh sách pixel format output được phép, theo thứ tự ưu tiên. Không có `output` thì
 danh sách là `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`, `yuv444p`, `yuv420p10le`,
@@ -73,6 +74,19 @@ phía sau nhận format có alpha. **Hiệu ứng tạo ra alpha nên khai báo 
 `["rgba", "yuva420p"]`). FFmpeg
 chọn một format trong danh sách khi nối filter; filter phía sau đòi format ngoài danh sách
 thì FFmpeg tự chèn bộ chuyển đổi sau `gpufx`.
+
+`output.size` (api 2): `first` (mặc định) — output có kích thước input đầu; `hstack` — mọi input phải cao
+bằng input đầu, chiều rộng output là tổng chiều rộng; `vstack` — mọi input phải rộng bằng input đầu, chiều
+cao output là tổng chiều cao. Lệch là lỗi giống `same_size` (khi cấu hình và khi kích thước frame đổi):
+
+```
+unsupported: input `src1` of `Horizontal Stack`: height 240 must equal the first input's (180) to stack side by side
+```
+
+Khi đó output có thể lớn hơn mọi input, tối đa bằng cạnh texture lớn nhất của GPU
+(`max_texture_dimension_2d`, từ 8192 trở lên trên GPU desktop); lớn hơn là lỗi. Hiệu ứng phía sau trong chain
+hoặc graph thấy kích thước đã ghép, và filter FFmpeg đặt kích thước đó cho output link (frame rate và aspect
+ratio vẫn lấy từ input đầu).
 
 ```json
 "inputs": [
@@ -91,7 +105,7 @@ Cách áp dụng:
   Muốn chạy thì đổi format trước bằng `format=yuv420p,gpufx=...`. Kích thước được kiểm tra
   khi cấu hình và mỗi khi kích thước frame đổi. Tên format sai chính tả cũng là lỗi.
 - **Chuỗi và đồ thị** (`graph='a|b'`, `graph='...'`): mỗi hiệu ứng được kiểm tại chỗ của nó. Hiệu ứng
-  đọc hiệu ứng khác thấy kích thước của hiệu ứng đó (kích thước input đầu của nó) và format đầu tiên
+  đọc hiệu ứng khác thấy kích thước của hiệu ứng đó (kích thước input đầu của nó, hoặc kích thước đã ghép khi có `output.size`) và format đầu tiên
   trong `output.formats` của nó mà hiệu ứng đọc nhận; input pad được nhiều hiệu ứng đọc phải có
   format mà tất cả đều nhận. Vì vậy `same_size` cũng áp dụng giữa hai nhánh của đồ thị.
 - **`gpufx run`:** format lấy từ PNG (`rgba`, `rgb24`, `gray`, `ya8`, bản 16-bit là
@@ -126,9 +140,31 @@ Mỗi phần tử `passes`:
 | `inputs` | mọi input rồi mọi texture | Texture pass này đọc: tên input, texture, hoặc output của pass trước |
 | `output` | `out` | Tên texture pass này ghi. Pass cuối là kết quả |
 
-Output có kích thước bằng input đầu tiên. Tên input/texture/param phải là định danh hợp lệ,
+Output có kích thước bằng input đầu tiên, trừ khi `output.size` quy định khác. Tên input/texture/param phải là định danh hợp lệ,
 không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `smp`.
 Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`graph='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
+
+### Số input thay đổi được
+
+Input có `repeat` (api 2) phải là input cuối. Nó nở thành các pad tên `<name>0`, `<name>1`...
+(`src0`, `src1` với input `src`), mỗi label mà node của graph đọc là một pad
+(`[0][1][2]hstack.zip[out]` có 3 input, như `hstack` của FFmpeg nhận mọi input nối vào), hoặc `default` pad
+khi node không ghi label input nào (chain, `graph='hstack.zip'`), với `min <= N <= max` (`max` tối đa 16, `min`
+tối thiểu 1). Các trường khác của input (`formats`, `width`, `height`, `mipmaps`, `same_size`) áp cho mọi pad.
+Gói được biên dịch cho đúng số đó; số input pad của filter `gpufx` vẫn suy ra từ graph như mọi khi. Danh sách `inputs` của pass có
+tên input này thì đọc mọi pad của nó. `gpufx pack --precompile` chỉ biên dịch sẵn cho số `default`; số khác thì
+biên dịch shader lúc nạp graph.
+
+Shader không biết trước tên pad, nên prelude của gói có input `repeat` khai báo thêm (trên các input của
+hiệu ứng mà pass đọc, theo thứ tự pad):
+
+```wgsl
+fn gpufx_input_count() -> u32                       // số input
+fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions của input i (0 khi ngoài khoảng)
+fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad của input i ở mức 0 (0 khi ngoài khoảng)
+```
+
+Xem `examples/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
 
 ## Viết shader WGSL
 
@@ -340,6 +376,7 @@ Các ví dụ nằm trong ba thư mục nhóm dưới `examples/effects/`: `ffmp
 | `examples/effects/ffmpeg/fade` | Fade về một màu |
 | `examples/effects/ffmpeg/chroma-key` | Phông xanh → alpha; **quy tắc** `formats` input, output `rgba`/`yuva420p`/`yuva444p` |
 | `examples/effects/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
+| `examples/effects/ffmpeg/hstack`, `examples/effects/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `output.size` `hstack`/`vstack`, output lớn hơn input |
 | `examples/effects/ffmpeg/crossfade`, `examples/effects/ffmpeg/slide-transition`, `examples/effects/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
 | `examples/effects/ffmpeg/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
 | `examples/effects/slideshow/collapse`, `examples/effects/slideshow/expand` | Clip đầu thu vào giữa / clip sau nở ra từ giữa: theo chiều ngang, chiều dọc, hộp, hình tròn (`mode`) |

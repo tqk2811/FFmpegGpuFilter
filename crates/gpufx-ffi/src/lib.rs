@@ -531,6 +531,28 @@ pub unsafe extern "C" fn gpufx_effect_output_source(fx: *const GpufxEffect, outp
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn gpufx_effect_output_size(
+    fx: *const GpufxEffect,
+    output: u32,
+    streams: *const GpufxStreamInfo,
+    count: u32,
+    width: *mut u32,
+    height: *mut u32,
+) -> c_int {
+    guard(-1, || {
+        let fx = fx.as_ref().ok_or("effect is NULL")?;
+        if streams.is_null() || count == 0 || width.is_null() || height.is_null() {
+            return Err("streams, width and height must not be NULL".into());
+        }
+        let pads: Vec<(u32, u32)> = std::slice::from_raw_parts(streams, count as usize).iter().map(|s| (s.width, s.height)).collect();
+        let (w, h) = fx.graph.output_size(output as usize, &pads).map_err(|e| e.to_string())?;
+        *width = w;
+        *height = h;
+        Ok(0)
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn gpufx_effect_output_pad_format_count(fx: *const GpufxEffect, output: u32) -> u32 {
     fx.as_ref().and_then(|fx| fx.output_formats.get(output as usize)).map_or(0, |f| f.len() as u32)
 }

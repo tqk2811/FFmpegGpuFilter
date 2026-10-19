@@ -2015,7 +2015,7 @@ static void drop_outputs(GpufxContext *s)
 
 /*
  * One event of the inputs: every output gets a frame, all made in one GPU submission and
- * sent together. Output k has the size of input s->source[k]; the timing and the other
+ * sent together. Output k has the size of its link (config_output); the timing and the other
  * properties come from input 0, which drives the events.
  */
 static int process_frame(FFFrameSync *fs)
@@ -2407,8 +2407,9 @@ static int config_inputs(AVFilterContext *ctx)
 }
 
 /*
- * Output k has the size, aspect ratio and frame rate of its source input (the first
- * input of the effect writing it); frames come at input 0's events.
+ * Output k has the aspect ratio and frame rate of its source input (the first input of
+ * the effect writing it) and, unless an effect stacks its inputs (hstack/vstack), its
+ * size; frames come at input 0's events.
  */
 static int config_output(AVFilterLink *outlink)
 {
@@ -2422,8 +2423,25 @@ static int config_output(AVFilterLink *outlink)
     if (!s->configured && (ret = config_inputs(ctx)) < 0)
         return ret;
 
-    outlink->w = inlink->w;
-    outlink->h = inlink->h;
+    {
+        /* The source input's size, or the stacked size of hstack/vstack effects. */
+        GpufxStreamInfo *streams = av_calloc(s->nb_inputs, sizeof(*streams));
+        uint32_t w = 0, h = 0;
+
+        if (!streams)
+            return AVERROR(ENOMEM);
+        for (unsigned i = 0; i < s->nb_inputs; i++)
+            streams[i] = (GpufxStreamInfo){ NULL, ctx->inputs[i]->w, ctx->inputs[i]->h };
+        ret = gpufx_effect_output_size(s->fx, FF_OUTLINK_IDX(outlink), streams, s->nb_inputs, &w, &h);
+        av_free(streams);
+        if (ret < 0 || w > INT_MAX || h > INT_MAX) {
+            av_log(ctx, AV_LOG_ERROR, "Output '%s': %s\n", ctx->output_pads[FF_OUTLINK_IDX(outlink)].name,
+                   ret < 0 ? gpufx_last_error() : "size out of range");
+            return AVERROR(EINVAL);
+        }
+        outlink->w = w;
+        outlink->h = h;
+    }
     outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
     ol->frame_rate = il->frame_rate;
     /* The output link takes input 0's side data; drop what the new pixels invalidate. */

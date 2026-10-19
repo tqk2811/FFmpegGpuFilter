@@ -579,7 +579,8 @@ impl Effect {
     }
 
     /// Runs every pass on `inputs` (one per manifest input) and writes the RGBA result
-    /// into `out`, which must have the size of `inputs[0]`.
+    /// into `out`, which must have the output size (the size of `inputs[0]`
+    /// unless the manifest `output.size` stacks the inputs).
     /// Fails with [`Error::Unsupported`] when the input sizes break the manifest rules.
     pub fn process(&mut self, inputs: &[Image], out: ImageMut, info: &FrameInfo) -> Result<(), Error> {
         let frames: Vec<Frame> = inputs.iter().map(|&i| i.into()).collect();
@@ -771,6 +772,29 @@ fn glsl_with_prelude(params: &ParamBlock, inputs: &[String], arrays: &[bool], us
     s
 }
 
+/// WGSL helpers of a package with a repeated input, over the effect inputs a pass binds
+/// (in manifest order): `gpufx_input_count()`, `gpufx_input_size(i)` and
+/// `gpufx_input_load(i, p)` (level 0 texel), so a shader loops over however many there are.
+fn input_helpers(pkg: &Package, bound: &[String]) -> String {
+    if !pkg.has_repeated_input() {
+        return String::new();
+    }
+    let names: Vec<&str> = pkg.manifest.inputs.iter().map(|i| i.name.as_str()).filter(|n| bound.iter().any(|b| b == n)).collect();
+    let mut s = String::from("// ---- gpufx repeated input helpers ----\n");
+    s.push_str(&format!("fn gpufx_input_count() -> u32 {{ return {}u; }}\n", names.len()));
+    s.push_str("fn gpufx_input_size(i: u32) -> vec2u {\n    switch i {\n");
+    for (k, n) in names.iter().enumerate() {
+        s.push_str(&format!("        case {k}u: {{ return textureDimensions({n}); }}\n"));
+    }
+    s.push_str("        default: { return vec2u(0u); }\n    }\n}\n");
+    s.push_str("fn gpufx_input_load(i: u32, p: vec2i) -> vec4f {\n    switch i {\n");
+    for (k, n) in names.iter().enumerate() {
+        s.push_str(&format!("        case {k}u: {{ return textureLoad({n}, p, 0); }}\n"));
+    }
+    s.push_str("        default: { return vec4f(0.0); }\n    }\n}\n");
+    s
+}
+
 fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usize, def: &PassDef, deep: bool) -> Result<Pass, Error> {
     let inputs: Vec<String> = match &def.inputs {
         Some(v) => v.clone(),
@@ -779,7 +803,7 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
     let arrays: Vec<bool> = inputs.iter().map(|n| pkg.manifest.textures.iter().any(|t| t.name == *n && t.is_array())).collect();
     let (module, source) = match def.language() {
         ShaderLanguage::Wgsl => {
-            let source = format!("{}{}", prelude(params, &inputs, &arrays, deep), pkg.text(&def.shader)?);
+            let source = format!("{}{}", prelude(params, &inputs, &arrays, deep) + &input_helpers(pkg, &inputs), pkg.text(&def.shader)?);
             let module = naga::front::wgsl::parse_str(&source)
                 .map_err(|e| Error::Shader(format!("{}: {}", def.shader, e.emit_to_string(&source))))?;
             (module, source)

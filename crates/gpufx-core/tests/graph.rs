@@ -579,3 +579,104 @@ fn inline_option_mistakes_are_explained() {
         .unwrap_or_default();
     assert!(got.contains("effect `invert.zip` has no parameter `strength`"), "{got}");
 }
+
+/// A `w`x`h` frame whose pixels name their input `k` and position.
+fn tagged(k: u32, w: u32, h: u32) -> Vec<u8> {
+    (0..w * h).flat_map(|i| [(k * 60 + 10) as u8, (i % w * 9) as u8, (i / w * 9) as u8, 255]).collect()
+}
+
+fn stack(ctx: &Arc<GpuContext>, text: &str, sizes: &[(u32, u32)]) -> (Vec<u8>, (u32, u32)) {
+    let mut g = graph(ctx, text).unwrap();
+    assert_eq!(g.input_count(), sizes.len(), "{text}");
+    let (w, h) = g.output_size(0, sizes).unwrap();
+    let frames: Vec<Vec<u8>> = sizes.iter().enumerate().map(|(k, &(fw, fh))| tagged(k as u32, fw, fh)).collect();
+    let imgs: Vec<Image> =
+        frames.iter().zip(sizes).map(|(d, &(fw, fh))| Image { data: d, width: fw, height: fh, stride: fw * 4 }).collect();
+    let streams: Vec<StreamInfo> = sizes.iter().map(|&(width, height)| StreamInfo { format: Some("rgba"), width, height }).collect();
+    g.check_inputs(&streams).unwrap();
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    g.process(&imgs, vec![ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }], &FrameInfo::new(0.0, 0)).unwrap();
+    (out, (w, h))
+}
+
+#[test]
+fn hstack_and_vstack_place_any_number_of_inputs_side_by_side() {
+    let Some(ctx) = gpu() else { return };
+    // Three labels give hstack three inputs, widths 5 + 7 + 3: each output row is the input rows in turn.
+    let sizes = [(5, 9), (7, 9), (3, 9)];
+    let (out, size) = stack(&ctx, "[0][1][2]hstack.zip[out]", &sizes);
+    assert_eq!(size, (15, 9));
+    let frames: Vec<Vec<u8>> = sizes.iter().enumerate().map(|(k, &(w, h))| tagged(k as u32, w, h)).collect();
+    let want: Vec<u8> = (0..9usize)
+        .flat_map(|y| frames.iter().zip(&sizes).flat_map(move |(f, &(w, _))| f[y * w as usize * 4..(y + 1) * w as usize * 4].to_vec()))
+        .collect();
+    assert_eq!(out, want);
+
+    // vstack with its default 2 inputs, heights 4 + 2: the frames one after the other.
+    let sizes = [(6, 4), (6, 2)];
+    let (out, size) = stack(&ctx, "vstack.zip", &sizes);
+    assert_eq!(size, (6, 6));
+    assert_eq!(out, [tagged(0, 6, 4), tagged(1, 6, 2)].concat());
+}
+
+#[test]
+fn effects_after_a_stack_see_the_stacked_size() {
+    let Some(ctx) = gpu() else { return };
+    let sizes = [(5, 3), (4, 3)];
+    let (stacked, size) = stack(&ctx, "hstack.zip", &sizes);
+    assert_eq!(size, (9, 3));
+    let (out, size) = stack(&ctx, "[0][1]hstack.zip[s]; [s]invert.zip[out]", &sizes);
+    assert_eq!(size, (9, 3));
+    let (out2, _) = stack(&ctx, "hstack.zip|invert.zip", &sizes);
+    assert_eq!(out, out2, "a chain and a graph agree");
+    let mut fx = effect(&ctx, "invert");
+    let mut want = vec![0u8; stacked.len()];
+    fx.process(
+        &[Image { data: &stacked, width: 9, height: 3, stride: 36 }],
+        ImageMut { data: &mut want, width: 9, height: 3, stride: 36 },
+        &FrameInfo::new(0.0, 0),
+    )
+    .unwrap();
+    assert_eq!(out, want);
+}
+
+#[test]
+fn stack_mistakes_are_explained() {
+    let Some(ctx) = gpu() else { return };
+    let err = |text: &str| graph(&ctx, text).err().map(|e| e.to_string()).unwrap_or_default();
+    let many: String = (0..17).map(|i| format!("[{i}]")).collect();
+    for (text, want) in [
+        ("[0]hstack.zip[o]".to_string(), "`hstack` reads 1 labels: manifest: effect `Horizontal Stack` takes 2 to 16 inputs, got 1"),
+        (format!("{many}vstack.zip[o]"), "takes 2 to 16 inputs, got 17"),
+    ] {
+        let got = err(&text);
+        assert!(got.contains(want), "{text}: {got}");
+    }
+    // Unlabelled, a stack takes its default 2 inputs.
+    assert_eq!(graph(&ctx, "hstack.zip").unwrap().input_count(), 2);
+
+    let mut g = graph(&ctx, "hstack.zip").unwrap();
+    let rgba = |width, height| StreamInfo { format: Some("rgba"), width, height };
+    let e = g.check_inputs(&[rgba(4, 3), rgba(4, 2)]).unwrap_err().to_string();
+    assert!(e.contains("input `src1` of `Horizontal Stack`: height 2 must equal the first input's (3)"), "{e}");
+    assert!(g.output_size(0, &[(4, 3), (4, 2)]).is_err());
+    let v = graph(&ctx, "vstack.zip").unwrap();
+    let e = v.check_inputs(&[rgba(4, 3), rgba(5, 3)]).unwrap_err().to_string();
+    assert!(e.contains("width 5 must equal the first input's (4)"), "{e}");
+    // Wider than the GPU allows.
+    let max = ctx.device().limits().max_texture_dimension_2d;
+    let e = g.output_size(0, &[(max, 2), (1, 2)]).unwrap_err().to_string();
+    assert!(e.contains("at most"), "{e}");
+    // A frame of the wrong size is refused when it comes.
+    let (a, b) = (tagged(0, 4, 3), tagged(1, 4, 2));
+    let mut out = vec![0u8; 8 * 3 * 4];
+    let e = g
+        .process(
+            &[Image { data: &a, width: 4, height: 3, stride: 16 }, Image { data: &b, width: 4, height: 2, stride: 16 }],
+            vec![ImageMut { data: &mut out, width: 8, height: 3, stride: 32 }],
+            &FrameInfo::new(0.0, 0),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("must equal the first input's"), "{e}");
+}

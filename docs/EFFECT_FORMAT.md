@@ -34,12 +34,12 @@ scripts/pack-effects.sh --check -o out my-fx    # compile the shaders on the GPU
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `api` | number | no (1) | Format version. `2` is needed for texture arrays, `mipmaps`, `premultiply` and `expr` parameters; packages without those keep `1` and run as before. A runtime older than the package says `unsupported manifest api 2` |
+| `api` | number | no (1) | Format version. `2` is needed for texture arrays, `mipmaps`, `premultiply`, `expr` parameters, a `repeat` input and an `output.size` other than `first`; packages without those keep `1` and run as before. A runtime older than the package says `unsupported manifest api 2` |
 | `id` | string | yes | Identifier in reverse-DNS form |
 | `name` | string | yes | Display name |
 | `version`, `description` | string | no | |
 | `inputs` | array | no (`[{"name":"src"}]`) | The video inputs, in the filter's pad order, with their rules (see below) |
-| `output` | `{formats}` | no (`rgba` and every format converted on the GPU) | Allowed output pixel formats |
+| `output` | `{formats, size}` | no (`rgba` and every format converted on the GPU; the size of the first input) | Allowed output pixel formats and the output size |
 | `params` | array | no | Parameters, see below |
 | `textures` | array | no | Bundled PNG images (LUT, mask, sprites), see [Textures](#textures) |
 | `passes` | array | yes | The compute passes, run in order |
@@ -64,6 +64,7 @@ Each element of `inputs`:
 | `width`, `height` | unrestricted | `{ "min": 16, "max": 4096, "multiple_of": 2 }`, each field is optional |
 | `same_size` | `false` | The size must equal the first input (not for the first input itself) |
 | `mipmaps` | `false` | (api 2) The input texture gets a full mip chain, made on the GPU every frame, for shaders that shrink it a lot (`textureSampleLevel(src, smp, uv, lod)`); see [Mipmaps](#mipmaps) |
+| `repeat` | none | (api 2, last input only, WGSL only) `{ "default": 2, "min": 2, "max": 16 }`: the input stands for a variable number of pads, see [Variable number of inputs](#variable-number-of-inputs) |
 
 `output.formats`: the allowed output pixel formats, in order of preference. Without `output` the list is
 `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`, `yuv444p`, `yuv420p10le`, `yuv422p10le`,
@@ -73,6 +74,20 @@ takes an alpha format. **An effect that produces alpha should declare `output.fo
 `["rgba", "yuva420p"]`). FFmpeg
 picks one format from the list when linking filters; if a downstream filter demands a format outside the list,
 FFmpeg inserts a converter after `gpufx`.
+
+`output.size` (api 2): `first` (default) — the output has the size of the first input; `hstack` — every
+input must have the height of the first, the output width is the sum of the widths; `vstack` — every input
+must have the width of the first, the output height is the sum of the heights. A mismatch is an error like
+`same_size` (at configuration and when the frame size changes):
+
+```
+unsupported: input `src1` of `Horizontal Stack`: height 240 must equal the first input's (180) to stack side by side
+```
+
+The output may then be larger than every input, up to the GPU's largest texture side
+(`max_texture_dimension_2d`, 8192 or more on desktop GPUs); a larger output is an error. Downstream effects of a
+chain or graph see the stacked size, and the FFmpeg filter gives its output link that size (frame rate and
+aspect ratio still come from the first input).
 
 ```json
 "inputs": [
@@ -91,7 +106,8 @@ How the rules apply:
   To make it work, change the format first with `format=yuv420p,gpufx=...`. The size is checked
   at configuration and whenever the frame size changes. A misspelled format name is also an error.
 - **Chains and graphs** (`graph='a|b'`, `graph='...'`): every effect is checked where it sits. An effect
-  reading another sees that effect's size (the size of its first input) and the first format of its
+  reading another sees that effect's size (the size of its first input, or the stacked size with
+  `output.size`) and the first format of its
   `output.formats` that the reader accepts; an input pad read by several effects must have a format
   all of them accept. `same_size` therefore also holds between two branches of a graph.
 - **`gpufx run`:** the format comes from the PNG (`rgba`, `rgb24`, `gray`, `ya8`, and the 16-bit versions
@@ -126,9 +142,31 @@ Each element of `passes`:
 | `inputs` | every input, then every texture | Textures this pass reads: input names, textures, or the output of a previous pass |
 | `output` | `out` | Name of the texture this pass writes. The last pass is the result |
 
-The output has the same size as the first input. Input/texture/param names must be valid identifiers,
+The output has the same size as the first input unless `output.size` says otherwise. Input/texture/param names must be valid identifiers,
 must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `smp`.
 A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
+
+### Variable number of inputs
+
+An input with `repeat` (api 2) must be the last one. It expands into pads named `<name>0`, `<name>1`...
+(`src0`, `src1` for an input `src`), one per label the graph node reads
+(`[0][1][2]hstack.zip[out]` has 3 inputs, as FFmpeg's `hstack` takes its connected inputs), or `default` of
+them when the node names no input labels (a chain, `graph='hstack.zip'`), with `min <= N <= max` (`max` at most 16, `min`
+at least 1). The other fields of the input (`formats`, `width`, `height`, `mipmaps`, `same_size`) apply to every
+pad. The package is compiled for that count; the number of input pads of the `gpufx` filter follows from the graph as always. A pass `inputs` list that
+names the input reads all its pads. `gpufx pack --precompile` compiles the `default` count only; another count compiles
+its shaders when the graph loads.
+
+The shader cannot know the pad names in advance, so the prelude of a package with a `repeat` input also declares
+(over the effect inputs the pass reads, in pad order):
+
+```wgsl
+fn gpufx_input_count() -> u32                       // number of inputs
+fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions of input i (0 when out of range)
+fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad of input i at level 0 (0 when out of range)
+```
+
+See `examples/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
 
 ## Writing WGSL shaders
 
@@ -346,6 +384,7 @@ The examples live in three group folders under `examples/effects/`: `ffmpeg/` (e
 | `examples/effects/ffmpeg/chroma-key` | Green screen → alpha; input `formats` **rules**, output `rgba`/`yuva420p`/`yuva444p` |
 | `examples/effects/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
 | `examples/effects/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
+| `examples/effects/ffmpeg/hstack`, `examples/effects/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and `output.size` `hstack`/`vstack`, an output larger than the inputs |
 | `examples/effects/ffmpeg/crossfade`, `examples/effects/ffmpeg/slide-transition`, `examples/effects/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
 | `examples/effects/ffmpeg/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
 | `examples/effects/slideshow/collapse`, `examples/effects/slideshow/expand` | The first clip shrinks into the center / the second clip grows out of the center: horizontal, vertical, box, circle (`mode`) |
