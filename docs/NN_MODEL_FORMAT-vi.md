@@ -65,6 +65,8 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 | `resize` | `mode` (`nearest bilinear bicubic`), `scale` [h,w] hoặc `size` [h,w], `align_corners` | kích thước ra là `floor(in * scale)` hoặc `size` |
 | `pixel_shuffle` | `factor` | `out[c][y*r+i][x*r+j] = in[c*r*r + i*r + j][y][x]` (thứ tự PyTorch) |
 | `warp` | `variant` (`rife`) | input `[image, flow]`, flow có 2 channel |
+| `prelu` | `slope` (blob f32) | `x >= 0 ? x : slope[c] * x`; `slope.count` là số channel, hoặc 1 khi mọi channel dùng chung một slope |
+| `clip` | `min`, `max` | `clamp(x, min, max)` (Clip của ncnn; thiếu cận nào thì lấy giới hạn của f32) |
 
 `activation` của conv là `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}` hoặc `{"type":"sigmoid"}`,
 áp sau khi cộng bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
@@ -95,14 +97,53 @@ Ngữ nghĩa các op:
 `timestep` là plane một channel điền giá trị thời gian trong (0, 1); frame được pad lên bội số của
 `pad_multiple`, chạy, rồi output được crop và clamp.
 
+Bản của Real-ESRGAN (`models/realesr-*/io-x<N>.json`):
+
+```json
+{ "kind": "super_resolution", "family": "realesr", "inputs": { "image": "data" }, "output": "output",
+  "scale": 2, "color": "rgb", "range": [0, 1], "pad_multiple": 1, "pad_mode": "reflect",
+  "output_clamp": [0, 1], "tile_pad": 10 }
+```
+
+Output lớn gấp `scale` lần input theo mỗi trục. `pad_mode` `reflect` lấy đối xứng không lặp pixel viền
+(reflect-101, giống cách ncnn và realesrgan-ncnn-vulkan pad); không có `pad_mode` thì lặp pixel viền. `tile_pad` là
+phần lề (tính theo pixel input) thêm quanh mỗi tile: trong frame thì chồng lên tile bên cạnh, ở viền frame thì pad
+theo `pad_mode`; `scale * tile_pad` pixel output tương ứng bị cắt bỏ.
+
+## Bundle (nhiều scale trong một package)
+
+```
+gpufx-nnconv bundle --variant <dir>=<pkg.zip|dir> [--variant ...] \n                    [--license <file>] [--readme <file>] [--name <name>] -o <out.zip|out_dir>
+```
+
+Bundle chứa nhiều biến thể của cùng một họ model, lúc chạy chọn theo scale. Thư mục gốc có `package.json`,
+`LICENSE` và `README.md` (nếu có) và mỗi biến thể một thư mục chứa package thường (`model.json`, `weights.bin`,
+`io.json`):
+
+```json
+{ "format": "gpufx-nn-bundle", "version": 1, "name": "realesr-animevideov3", "kind": "super_resolution",
+  "variants": [ { "scale": 2, "dir": "x2" }, { "scale": 3, "dir": "x3" }, { "scale": 4, "dir": "x4" } ] }
+```
+
+`kind` và `scale` của từng biến thể đọc từ `io.json` của nó; mọi biến thể phải cùng kind, khác scale và tên thư
+mục là tên đơn. Package không có `package.json` là package một model (RIFE). `source.json` của model có thể liệt
+kê nhiều biến thể; script fetch convert từng cái rồi gộp thành bundle.
+
 ## Chưa hỗ trợ (converter báo lỗi)
 
 Weights quantized (tag khác fp16 và f32), grouped convolution, `Crop` khác một khoảng channel, `Concat` và `Crop`
 theo trục khác channel, `PixelShuffle` mode khác 0, output size cố định của deconvolution, padding SAME, activation
-trong convolution ngoài none/relu/leaky relu/sigmoid, mọi loại layer không có trong bảng.
+trong convolution ngoài none/relu/leaky relu/sigmoid, tham số `PReLU` ngoài `num_slope`, mọi loại layer không có
+trong bảng.
 
 ## Đối chiếu
 
 `gpufx-nnconv run-ref` chạy package bằng bộ thực thi tham chiếu CPU (`src/reference.rs`, f32). Với RIFE v4.6 trên
 khung hình thật, kết quả khớp rife-ncnn-vulkan 20221029 (GPU lưu fp16) ở 60 đến 66 dB PSNR, xác nhận layout
 deconvolution, quy tắc resize, `warp` và thứ tự op.
+
+`gpufx-nnconv run-ref --model <pkg> --input <in.png> [--scale N] -o <out.png>` upscale một ảnh bằng package
+`super_resolution` (`--scale` chọn biến thể của bundle). So với realesrgan-ncnn-vulkan 20220424, các biến thể x2,
+x3, x4 của realesr-animevideov3 khớp ở 58.0, 57.9 và 58.4 dB, realesr-general-x4v3 ở 56.2 dB (model này không có
+trong bản release ncnn; so với cùng weights chạy bằng ncnn), xác nhận `prelu`, `clip`, `resize` bicubic và cách pad
+reflect.

@@ -130,6 +130,8 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 arity(layer, 2, 1)?;
                 OpParams::Warp(WarpParams { variant: "rife" })
             }
+            "PReLU" => OpParams::Prelu(prelu(layer, &mut cx)?),
+            "Clip" => OpParams::Clip(clip(layer)?),
             other => return fail(format!("layer '{}': unsupported layer type '{other}'", layer.name)),
         };
         if !produced.insert(output.clone()) {
@@ -222,6 +224,13 @@ impl Context<'_> {
 
     fn read_bias(&mut self, layer: &Layer, count: usize) -> Result<BlobRef> {
         let data = self.take(layer, count * 4, count * 4)?.to_vec();
+        Ok(self.push(&data, count, Dtype::F32))
+    }
+
+    /// ncnn `ModelBin::load(n, 1)`: `n` raw f32, no type tag (PReLU slopes).
+    fn read_f32_raw(&mut self, layer: &Layer, count: usize) -> Result<BlobRef> {
+        let bytes = count.checked_mul(4).ok_or_else(|| layer.err("slope count overflows"))?;
+        let data = self.take(layer, bytes, bytes)?.to_vec();
         Ok(self.push(&data, count, Dtype::F32))
     }
 }
@@ -421,6 +430,31 @@ fn interp(layer: &Layer) -> Result<ResizeParams> {
     Ok(ResizeParams { mode, scale, size, align_corners })
 }
 
+fn prelu(layer: &Layer, cx: &mut Context) -> Result<PreluParams> {
+    let p = &layer.params;
+    p.expect_only(&[0]).map_err(|e| layer.err(e))?;
+    arity(layer, 1, 1)?;
+    // ncnn PReLU: param 0 is num_slope; the slopes are num_slope raw f32 (ModelBin type 1, no tag).
+    let count = uint(p, 0, 0, layer)? as usize;
+    if count == 0 {
+        return Err(layer.err("num_slope must be positive"));
+    }
+    let slope = cx.read_f32_raw(layer, count)?;
+    Ok(PreluParams { slope })
+}
+
+fn clip(layer: &Layer) -> Result<ClipParams> {
+    let p = &layer.params;
+    p.expect_only(&[0, 1]).map_err(|e| layer.err(e))?;
+    arity(layer, 1, 1)?;
+    let min = p.float(0, f32::MIN).map_err(|e| layer.err(e))?;
+    let max = p.float(1, f32::MAX).map_err(|e| layer.err(e))?;
+    if min > max {
+        return Err(layer.err("min is greater than max"));
+    }
+    Ok(ClipParams { min, max })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,5 +546,27 @@ Sigmoid sg 1 1 out0 out1
         b.extend([1, 0, 2, 0, 3, 0, 0, 0]); // 3 halves, 2 bytes of padding
         let c = convert_ncnn(param, &b, "t").unwrap();
         assert_eq!(c.weights, [1, 0, 2, 0, 3, 0]);
+    }
+
+    #[test]
+    fn converts_prelu_and_clip() {
+        // Input -> PReLU (2 slopes, raw f32) -> Clip
+        let param = "7767517\n3 3\nInput in0 0 1 in0\nPReLU p 1 1 in0 a 0=2\nClip c 1 1 a out0 0=0.0 1=1.0\n";
+        let mut bin = Vec::new();
+        bin.extend(0.1f32.to_le_bytes());
+        bin.extend(0.2f32.to_le_bytes());
+        let c = convert_ncnn(param, &bin, "t").unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&c.model).unwrap()).unwrap();
+        let ops = v["ops"].as_array().unwrap();
+        assert_eq!(ops[0]["op"], "prelu");
+        assert_eq!(ops[0]["slope"], serde_json::json!({"offset": 0, "count": 2, "dtype": "f32"}));
+        assert_eq!(ops[1], serde_json::json!({"op": "clip", "name": "c", "inputs": ["a"], "output": "out0", "min": 0.0, "max": 1.0}));
+        // the slopes are stored as raw f32, no tag
+        assert_eq!(f32::from_le_bytes(c.weights[..4].try_into().unwrap()), 0.1);
+        assert_eq!(f32::from_le_bytes(c.weights[4..8].try_into().unwrap()), 0.2);
+
+        // an unknown PReLU parameter still fails
+        let bad = "7767517\n2 2\nInput in0 0 1 in0\nPReLU p 1 1 in0 out0 0=2 9=1\n";
+        assert!(convert_ncnn(bad, &bin, "t").unwrap_err().0.contains("unsupported parameter"));
     }
 }

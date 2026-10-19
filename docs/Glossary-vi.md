@@ -19,3 +19,19 @@ Peak Signal-to-Noise Ratio, đo bằng dB: độ giống nhau từng pixel giữ
 ## SSIM
 
 Structural Similarity Index, 0..1 (1 = giống hệt): so độ sáng trung bình, độ tương phản và cấu trúc theo từng ô nhỏ, gần với cảm nhận mắt hơn PSNR.
+
+## Super-resolution
+
+Upscale ảnh/video bằng mạng neural: model đoán chi tiết mới thay vì chỉ nội suy pixel như bilinear/lanczos. Model được train cho một hệ số cố định (x2, x3, x4); đầu vào `C x H x W` cho ra `C x sH x sW`.
+
+## PReLU
+
+Parametric ReLU: `x >= 0 ? x : a_c * x`, hệ số âm `a_c` học được, mỗi kênh một giá trị (khác leaky ReLU dùng chung một hệ số cố định). Layer `PReLU` của ncnn lưu `a` thành một blob `num_slope` phần tử.
+
+## Pixel shuffle
+
+Phép đổi chỗ phần tử để tăng độ phân giải: tensor `C·r² x H x W` thành `C x rH x rW`, mỗi nhóm `r²` kênh trải ra thành một ô `r x r` pixel. Là bước upscale cuối của các model super-resolution nhỏ (ESPCN, SRVGGNet).
+
+## Tile
+
+Cắt ảnh thành các ô (tile) để chạy model từng ô một, khi tensor trung gian của cả frame quá lớn so với VRAM hoặc giới hạn binding buffer. Mỗi tile được nới thêm một viền overlap; output chỉ giữ phần giữa tile để không lộ đường nối, vì pixel ở mép tile thiếu ngữ cảnh của vùng bên cạnh.

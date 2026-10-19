@@ -65,6 +65,8 @@ parameters of its kind. Unknown ncnn layer types or parameters make the converte
 | `resize` | `mode` (`nearest bilinear bicubic`), `scale` [h,w] or `size` [h,w], `align_corners` | output size is `floor(in * scale)` or `size` |
 | `pixel_shuffle` | `factor` | `out[c][y*r+i][x*r+j] = in[c*r*r + i*r + j][y][x]` (PyTorch order) |
 | `warp` | `variant` (`rife`) | inputs `[image, flow]`, flow has 2 channels |
+| `prelu` | `slope` (f32 blob) | `x >= 0 ? x : slope[c] * x`; `slope.count` is the channel count, or 1 for one shared slope |
+| `clip` | `min`, `max` | `clamp(x, min, max)` (ncnn Clip; a missing bound is the f32 limit) |
 
 `activation` of a conv is `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}` or `{"type":"sigmoid"}`,
 applied after the bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
@@ -95,15 +97,53 @@ Op semantics:
 `timestep` is a one-channel plane filled with the time in (0, 1); the frames are padded to a multiple of
 `pad_multiple`, run, and the output is cropped and clamped.
 
+The Real-ESRGAN ones (`models/realesr-*/io-x<N>.json`) are:
+
+```json
+{ "kind": "super_resolution", "family": "realesr", "inputs": { "image": "data" }, "output": "output",
+  "scale": 2, "color": "rgb", "range": [0, 1], "pad_multiple": 1, "pad_mode": "reflect",
+  "output_clamp": [0, 1], "tile_pad": 10 }
+```
+
+The output is `scale` times the input on each axis. `pad_mode` `reflect` mirrors without repeating the edge pixel
+(reflect-101, as ncnn and realesrgan-ncnn-vulkan pad); without `pad_mode` the edge pixel is repeated. `tile_pad` is
+the margin in input pixels added around each tile: inside the frame it overlaps the next tile, at the frame border it
+is padded with `pad_mode`; its `scale * tile_pad` output pixels are cut.
+
+## Bundles (several scales in one package)
+
+```
+gpufx-nnconv bundle --variant <dir>=<pkg.zip|dir> [--variant ...] \n                    [--license <file>] [--readme <file>] [--name <name>] -o <out.zip|out_dir>
+```
+
+A bundle holds several variants of one model family, picked at run time by scale. Its root has `package.json`,
+`LICENSE` and `README.md` (when given) and one directory per variant holding a normal package (`model.json`,
+`weights.bin`, `io.json`):
+
+```json
+{ "format": "gpufx-nn-bundle", "version": 1, "name": "realesr-animevideov3", "kind": "super_resolution",
+  "variants": [ { "scale": 2, "dir": "x2" }, { "scale": 3, "dir": "x3" }, { "scale": 4, "dir": "x4" } ] }
+```
+
+Each variant's `kind` and `scale` are read from its `io.json`; all variants must share the kind and have distinct
+scales and simple directory names. A package without `package.json` is a single model package (RIFE).
+`source.json` of a model may list several variants; the fetch scripts convert each and bundle them.
+
 ## Not supported (converter fails)
 
 Quantized weights (tags other than fp16 and f32), grouped convolution, `Crop` other than one channel range,
 `Concat` and `Crop` on axes other than channels, `PixelShuffle` mode other than 0, fixed deconvolution output
-size, SAME padding, activation types other than none, relu, leaky relu and sigmoid inside a convolution, any
-layer type not in the table.
+size, SAME padding, activation types other than none, relu, leaky relu and sigmoid inside a convolution, `PReLU`
+parameters other than `num_slope`, any layer type not in the table.
 
 ## Verification
 
 `gpufx-nnconv run-ref` runs a package with the CPU reference executor (`src/reference.rs`, f32). On RIFE v4.6 with
 real frames it matches rife-ncnn-vulkan 20221029 (fp16 storage on the GPU) at 60 to 66 dB PSNR, which confirms the
 deconvolution layout, the resize rule, `warp` and the op order.
+
+`gpufx-nnconv run-ref --model <pkg> --input <in.png> [--scale N] -o <out.png>` upscales an image with a
+`super_resolution` package (`--scale` picks a bundle variant). Against realesrgan-ncnn-vulkan 20220424 the
+realesr-animevideov3 x2, x3 and x4 variants match at 58.0, 57.9 and 58.4 dB, realesr-general-x4v3 at 56.2 dB
+(that model is not in the ncnn release; compared with the same weights run by ncnn), which confirms `prelu`,
+`clip`, bicubic `resize` and the reflect padding.

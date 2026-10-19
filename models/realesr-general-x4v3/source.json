@@ -1,0 +1,14 @@
+{
+  "license_url": "https://raw.githubusercontent.com/xinntao/Real-ESRGAN/a4abfb2979a7bbff3f69f58f58ae324608821e27/LICENSE",
+  "sha256_license": "4a699ec4863d96a91fc265948a0c90033f7e8735d515524dcf3444736406e0c2",
+  "variants": [
+    {
+      "dir": "x4",
+      "io": "io-x4.json",
+      "url_param": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-generalv3-x4.param",
+      "sha256_param": "c39f063276971559c79dfdcb2586430191d5c1e7cd005f35a50e6305f74560a0",
+      "url_bin": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-generalv3-x4.bin",
+      "sha256_bin": "bfdfaebf0b26be9442faa30b8cec617fe04a808ae2aa3616ece85b92d81ae0ce"
+    }
+  ]
+}

@@ -18,6 +18,12 @@
 - **Vì sao**: nhân đôi 24 fps 1080p cần dưới ~42 ms để chạy thời gian thực. Hướng: tính f16 (`SHADER_F16`, có đường lùi f32) hoặc conv kiểu GEMM nạp đôi bộ đệm; có thể bỏ các biến môi trường chỉnh tham số `GPUFX_NN_CONV`/`GPUFX_NN_MINWG` khi chốt cấu hình.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] gpufx-nnconv: các finding review bước 1 của AI upscale để sau
+- **Vấn đề**: (1) bundle realesr-animevideov3 lưu 3 bản `weights.bin` giống hệt nhau (x2/x3/x4 cùng sha256), zip to gấp ~3 lần; nên cho biến thể trỏ chung một file weights trong khi format còn pre-release. (2) `fetch-models.sh` đọc `source.json` bằng awk, chỉ chạy đúng khi mỗi key một dòng. (3) converter chưa đối chiếu `num_slope` của PReLU với số channel; runtime GPU phải tự kiểm để khỏi đọc quá blob. (4) reference CPU chạy cả frame, không có chế độ chia tile để làm mẫu đối chiếu cho tile ở runtime GPU. (5) `run-ref` nhận cả `--input` lẫn `--frame0` mà không báo lỗi.
+- **Vị trí**: [bundle.rs](../crates/gpufx-nnconv/src/bundle.rs), [fetch-models.sh](../scripts/fetch-models.sh), [convert.rs](../crates/gpufx-nnconv/src/convert.rs), [frames.rs](../crates/gpufx-nnconv/src/frames.rs), [main.rs](../crates/gpufx-nnconv/src/main.rs)
+- **Vì sao**: giảm dung lượng gói, script bền hơn, bắt model hỏng sớm, có mẫu đúng để test tile.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] `gpufx_ai_framerate`: cặp chuyển cảnh vẫn chạy RIFE
 - **Vấn đề**: cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
 - **Vị trí**: [frames.rs:300](../crates/gpufx-core/src/nn/frames.rs#L300) (`self.interp.encode`), [frames.rs:325](../crates/gpufx-core/src/nn/frames.rs#L325) (`encode_scene`), [scene_ssim.wgsl](../crates/gpufx-core/src/nn/scene_ssim.wgsl)

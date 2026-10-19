@@ -52,6 +52,8 @@ pub enum OpParams {
     Resize(ResizeParams),
     PixelShuffle(PixelShuffleParams),
     Warp(WarpParams),
+    Prelu(PreluParams),
+    Clip(ClipParams),
 }
 
 impl Op {
@@ -73,6 +75,8 @@ impl OpParams {
             OpParams::Resize(_) => "resize",
             OpParams::PixelShuffle(_) => "pixel_shuffle",
             OpParams::Warp(_) => "warp",
+            OpParams::Prelu(_) => "prelu",
+            OpParams::Clip(_) => "clip",
         }
     }
 }
@@ -199,4 +203,16 @@ pub struct PixelShuffleParams {
 #[derive(Serialize, Debug)]
 pub struct WarpParams {
     pub variant: &'static str,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PreluParams {
+    /// Per-channel negative slope; `count` is the number of channels, or 1 when the slope is shared.
+    pub slope: BlobRef,
+}
+
+#[derive(Serialize, Debug)]
+pub struct ClipParams {
+    pub min: f32,
+    pub max: f32,
 }

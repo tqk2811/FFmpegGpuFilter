@@ -149,6 +149,8 @@ enum Kind {
     Resize { mode: Mode, scale: Option<[f32; 2]>, size: Option<[usize; 2]>, align_corners: bool },
     PixelShuffle(usize),
     Warp,
+    Prelu { slope: Vec<f32> },
+    Clip { min: f32, max: f32 },
 }
 
 struct RefOp {
@@ -334,13 +336,37 @@ fn parse_op(o: &Value, weights: &[u8]) -> Result<RefOp> {
         }
         "pixel_shuffle" => Kind::PixelShuffle(usize_of(o, "factor")?),
         "warp" => Kind::Warp,
+        "prelu" => Kind::Prelu { slope: blob(get(o, "slope")?, weights)? },
+        "clip" => Kind::Clip {
+            min: get(o, "min")?.as_f64().ok_or_else(|| crate::Error("\"min\" must be a number".into()))? as f32,
+            max: get(o, "max")?.as_f64().ok_or_else(|| crate::Error("\"max\" must be a number".into()))? as f32,
+        },
         k => return fail(format!("unknown op \"{k}\"")),
     };
     Ok(RefOp { name, inputs, output, kind })
 }
 
 impl Reference {
-    /// Loads a package from a directory or a `.zip`.
+    /// Loads a single-model package from a directory or a `.zip`, or a bundle variant by `scale`.
+    /// For a bundle, `scale` picks the variant; `None` on a bundle fails. For a single package, `scale`
+    /// is ignored.
+    pub fn load_variant(path: &Path, scale: Option<u64>) -> Result<Self> {
+        if let Some(manifest) = crate::bundle::read_manifest(path)? {
+            let variants =
+                manifest.get("variants").and_then(Value::as_array).ok_or_else(|| crate::Error("bundle has no variants".into()))?;
+            let want = scale.ok_or_else(|| crate::Error("the model is a bundle; a scale must be chosen".into()))?;
+            let dir = variants
+                .iter()
+                .find(|v| v.get("scale").and_then(Value::as_u64) == Some(want))
+                .and_then(|v| v.get("dir").and_then(Value::as_str))
+                .ok_or_else(|| crate::Error(format!("bundle has no variant with scale {want}")))?;
+            let files = crate::bundle::VariantFiles::load_from_bundle(path, dir)?;
+            return Self::from_parts(&files.model_json, &files.weights, Some(&files.io_json));
+        }
+        Self::load(path)
+    }
+
+    /// Loads a single-model package from a directory or a `.zip`.
     pub fn load(path: &Path) -> Result<Self> {
         if path.is_dir() {
             let read = |n: &str| std::fs::read(path.join(n));
@@ -500,7 +526,30 @@ fn exec(kind: &Kind, args: &[&Tensor]) -> Result<Tensor> {
             [image, flow] => warp(image, flow),
             _ => fail("warp needs [image, flow]"),
         },
+        Kind::Prelu { slope } => prelu(one(args)?, slope),
+        Kind::Clip { min, max } => {
+            let x = one(args)?;
+            Ok(Tensor::new(x.c, x.h, x.w, x.data.iter().map(|&v| v.clamp(*min, *max)).collect()))
+        }
     }
+}
+
+/// ncnn PReLU: `y = x >= 0 ? x : slope[c] * x`, with a shared slope when `slope.len() == 1`.
+fn prelu(x: &Tensor, slope: &[f32]) -> Result<Tensor> {
+    if slope.len() != 1 && slope.len() != x.c {
+        return fail(format!("prelu slope has {} values, expected 1 or {}", slope.len(), x.c));
+    }
+    let p = x.plane_len();
+    let mut out = x.clone();
+    for c in 0..x.c {
+        let s = if slope.len() == 1 { slope[0] } else { slope[c] };
+        for v in &mut out.data[c * p..(c + 1) * p] {
+            if *v < 0.0 {
+                *v *= s;
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn conv_out(i: usize, pad_a: usize, pad_b: usize, k: usize, dil: usize, stride: usize) -> Result<usize> {
@@ -982,6 +1031,49 @@ mod tests {
         assert_eq!((y.c, y.h, y.w), (2, 2, 4));
         // c0: i=0,j=0 -> in ch 0 = [0,1]; i=0,j=1 -> ch 1 = [2,3]; i=1,j=0 -> ch 2 = [4,5]; i=1,j=1 -> ch 3 = [6,7]
         assert_eq!(&y.data[..8], [0., 2., 1., 3., 4., 6., 5., 7.]);
+    }
+
+    #[test]
+    fn prelu_per_channel_and_shared() {
+        // two channels, per-channel slopes 0.1 and 0.5; positives pass through
+        let x = t(2, 1, 2, &[-2., 3., -4., 5.]);
+        let y = prelu(&x, &[0.1, 0.5]).unwrap();
+        assert_eq!(y.data, [-0.2, 3.0, -2.0, 5.0]);
+        // a shared slope applies to every channel
+        let y = prelu(&x, &[0.25]).unwrap();
+        assert_eq!(y.data, [-0.5, 3.0, -1.0, 5.0]);
+        // a slope count that is neither 1 nor the channel count fails
+        assert!(prelu(&x, &[0.1, 0.2, 0.3]).is_err());
+        // exec path
+        let out = exec(&Kind::Prelu { slope: vec![0.5] }, &[&x]).unwrap();
+        assert_eq!(out.data, [-1.0, 3.0, -2.0, 5.0]);
+    }
+
+    #[test]
+    fn clip_min_max() {
+        let x = t(1, 1, 4, &[-1., 0.25, 0.5, 2.]);
+        let y = exec(&Kind::Clip { min: 0.0, max: 1.0 }, &[&x]).unwrap();
+        assert_eq!(y.data, [0.0, 0.25, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn resize_bicubic_scale_matches_ncnn() {
+        // bicubic upscale of a 1x4 row by 2x; ncnn A = -0.75, half-pixel centres, border clamped.
+        let x = t(1, 1, 4, &[0., 1., 2., 3.]);
+        let up = resize(&x, Mode::Bicubic, Some([1.0, 2.0]), None, false).unwrap();
+        assert_eq!((up.h, up.w), (1, 8));
+        // reference values computed from the ncnn bicubic coefficient formula
+        let want = [-0.10546875, 0.19140625, 0.66796875, 1.296875, 1.703125, 2.3320313, 2.8085938, 3.1054688];
+        for (g, w) in up.data.iter().zip(want) {
+            assert!((g - w).abs() < 1e-4, "{:?}", up.data);
+        }
+        // bicubic downscale by 0.5 (as the animevideov3 x2 tail does); ratio is in/out, not 1/scale
+        let down = resize(&x, Mode::Bicubic, Some([1.0, 0.5]), None, false).unwrap();
+        assert_eq!((down.h, down.w), (1, 2));
+        let want = [0.40625, 2.59375];
+        for (g, w) in down.data.iter().zip(want) {
+            assert!((g - w).abs() < 1e-4, "{:?}", down.data);
+        }
     }
 
     #[test]

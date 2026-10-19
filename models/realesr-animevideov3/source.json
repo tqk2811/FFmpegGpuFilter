@@ -1,0 +1,30 @@
+{
+  "license_url": "https://raw.githubusercontent.com/xinntao/Real-ESRGAN/a4abfb2979a7bbff3f69f58f58ae324608821e27/LICENSE",
+  "sha256_license": "4a699ec4863d96a91fc265948a0c90033f7e8735d515524dcf3444736406e0c2",
+  "variants": [
+    {
+      "dir": "x2",
+      "io": "io-x2.json",
+      "url_param": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-animevideov3-x2.param",
+      "sha256_param": "b88ff4f00ebf019a7fdac17fdd45a7fd3665d37509efc5baf2e4da2e24420a04",
+      "url_bin": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-animevideov3-x2.bin",
+      "sha256_bin": "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d"
+    },
+    {
+      "dir": "x3",
+      "io": "io-x3.json",
+      "url_param": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-animevideov3-x3.param",
+      "sha256_param": "d1a5755008791d09b57e3425fc9dd0bd26b00fdf79c606210bc0e693f8230881",
+      "url_bin": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-animevideov3-x3.bin",
+      "sha256_bin": "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d"
+    },
+    {
+      "dir": "x4",
+      "io": "io-x4.json",
+      "url_param": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-animevideov3-x4.param",
+      "sha256_param": "850a248e7c14c27e5bd8cf7265113a9441036a7db63963bb8aa5169d788a435e",
+      "url_bin": "https://raw.githubusercontent.com/k4yt3x/video2x/7db9c18d6278bbad9c3eda0e4e4ae210f9a688eb/models/realesrgan/realesr-animevideov3-x4.bin",
+      "sha256_bin": "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d"
+    }
+  ]
+}
