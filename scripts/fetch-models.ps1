@@ -8,6 +8,7 @@
 # A source.json with a "variants" array is a multi-scale bundle: each variant has a dir, io, url_param,
 # sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/models/<name>.zip.
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package.
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Bin = '',
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Names

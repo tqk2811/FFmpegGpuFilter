@@ -869,6 +869,25 @@ mod tests {
         assert_eq!(robust.robust_buffer_access2, 0, "extension struct absent from the chain");
     }
 
+    /// wgpu exposes SHADER_F16 only with shaderFloat16 and 16-bit storage access: on FFmpeg's device they read as
+    /// FFmpeg enabled them, not as the driver supports them.
+    #[test]
+    fn f16_features_follow_the_enabled_ones() {
+        let mut v11 = vk::PhysicalDeviceVulkan11Features::default().storage_buffer16_bit_access(true);
+        let mut v12 = vk::PhysicalDeviceVulkan12Features::default();
+        let chain = vk::PhysicalDeviceFeatures2::default().push_next(&mut v11).push_next(&mut v12);
+        let en = unsafe { Enabled::read(&chain as *const _ as *const c_void, &[]) };
+        let mut f16 = vk::PhysicalDeviceShaderFloat16Int8Features::default().shader_float16(true);
+        let mut storage = vk::PhysicalDevice16BitStorageFeatures::default()
+            .storage_buffer16_bit_access(true)
+            .uniform_and_storage_buffer16_bit_access(true);
+        let mut out = vk::PhysicalDeviceFeatures2::default().push_next(&mut f16).push_next(&mut storage);
+        unsafe { en.mask(&mut out) };
+        assert_eq!(f16.shader_float16, 0, "not enabled by FFmpeg");
+        assert_eq!(storage.storage_buffer16_bit_access, 1);
+        assert_eq!(storage.uniform_and_storage_buffer16_bit_access, 0);
+    }
+
     /// The bool count of every struct matches ash's layout (no trailing padding read).
     #[test]
     fn bool_counts_fit_the_structs() {

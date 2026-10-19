@@ -119,12 +119,23 @@ const COMMON: &str = "
 @group(0) @binding(4) var<storage, read> wf: array<f32>;
 @group(0) @binding(5) var<storage, read_write> dst: array<f32>;
 
-// 0 none, 1 relu, 2 leaky relu, 3 sigmoid
-fn act(v: vec4f, kind: u32, slope: f32) -> vec4f {
+// The activation of output channels co..co + 4: 0 none, 1 relu, 2 leaky relu (slope a), 3 sigmoid, 4 prelu
+// (slopes at wf[soff + c], one shared slope when sn == 1), 5 clip to [a, b].
+fn act(v: vec4f, kind: u32, a: f32, b: f32, soff: u32, sn: u32, co: u32) -> vec4f {
     switch kind {
         case 1u: { return max(v, vec4f(0.0)); }
-        case 2u: { return select(slope * v, v, v >= vec4f(0.0)); }
+        case 2u: { return select(a * v, v, v >= vec4f(0.0)); }
         case 3u: { return 1.0 / (1.0 + exp(-v)); }
+        case 4u: {
+            var s = vec4f(wf[soff]);
+            if (sn != 1u) {
+                // channels past the last (cout not a multiple of 4) are not written: read the last slope
+                let l = sn - 1u;
+                s = vec4f(wf[soff + min(co, l)], wf[soff + min(co + 1u, l)], wf[soff + min(co + 2u, l)], wf[soff + min(co + 3u, l)]);
+            }
+            return select(s * v, v, v >= vec4f(0.0));
+        }
+        case 5u: { return clamp(v, vec4f(a), vec4f(b)); }
         default: { return v; }
     }
 }
@@ -150,6 +161,12 @@ struct P {
     post_act: u32,
     pre_slope: f32,
     post_slope: f32,
+    pre_b: f32,
+    post_b: f32,
+    pre_soff: u32,
+    pre_sn: u32,
+    post_soff: u32,
+    post_sn: u32,
 }
 ";
 
@@ -162,31 +179,39 @@ fn epilogue(out: &mut String, acc: &str, co: &str, pix: &str) {
         out,
         "            var v = {acc} + vec4f(wf[p.b_off + co], wf[p.b_off + co + 1u], wf[p.b_off + co + 2u], wf[p.b_off + co + 3u]);"
     );
-    let _ = writeln!(out, "            v = act(v, p.pre_act, p.pre_slope);");
+    let _ = writeln!(out, "            v = act(v, p.pre_act, p.pre_slope, p.pre_b, p.pre_soff, p.pre_sn, co);");
     let _ = writeln!(out, "            let o = p.out_off + co * plane + {pix};");
     let _ = writeln!(out, "            if (p.has_res != 0u) {{");
     let _ = writeln!(out, "                let r = p.res_off + co * plane + {pix};");
     let _ = writeln!(out, "                v += vec4f(src1[r], src1[r + plane], src1[r + 2u * plane], src1[r + 3u * plane]);");
     let _ = writeln!(out, "            }}");
-    let _ = writeln!(out, "            v = act(v, p.post_act, p.post_slope);");
+    let _ = writeln!(out, "            v = act(v, p.post_act, p.post_slope, p.post_b, p.post_soff, p.post_sn, co);");
     let _ = writeln!(out, "            for (var j = 0u; j < 4u; j++) {{");
     let _ = writeln!(out, "                if (co + j < p.cout) {{ dst[o + j * plane] = v[j]; }}");
     let _ = writeln!(out, "            }}");
     let _ = writeln!(out, "        }}");
 }
 
-pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig) -> String {
+/// With `f16`, the input tile, the weights in workgroup memory and the accumulators are `f16` (WGSL `enable f16`,
+/// the device needs `SHADER_F16`; the input is clamped to the f16 range); bias, activations and the residual stay
+/// `f32`. Accumulating in f32 costs ~55% more time on an RTX 4060 for ~10 dB, so the f16 path assumes the partial
+/// sums stay well below 65504 (models on [0, 1] images such as Real-ESRGAN).
+pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig, f16: bool) -> String {
     let (th, tw) = c.tile(s);
     let k = s.kh * s.kw;
     let ocb4 = c.ocb / 4;
     let nt = c.tx * c.ty;
     let tile_len = c.cic * th * tw;
     let wlen = c.cic * k * ocb4;
+    let (ht, hv) = if f16 { ("f16", "vec4<f16>") } else { ("f32", "vec4f") };
     let mut o = String::new();
+    if f16 {
+        o.push_str("enable f16;\n");
+    }
     o.push_str(CONV_PARAMS);
     o.push_str(COMMON);
-    let _ = writeln!(o, "var<workgroup> tile: array<f32, {tile_len}>;");
-    let _ = writeln!(o, "var<workgroup> wt: array<vec4f, {wlen}>;");
+    let _ = writeln!(o, "var<workgroup> tile: array<{ht}, {tile_len}>;");
+    let _ = writeln!(o, "var<workgroup> wt: array<{hv}, {wlen}>;");
     let _ = writeln!(o, "@compute @workgroup_size({}, {})", c.tx, c.ty);
     o.push_str(
         "fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) lid: vec3u, @builtin(local_invocation_index) li: u32) {\n",
@@ -199,7 +224,7 @@ pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig) -> String {
     o.push_str("    let iplane = p.ih * p.iw;\n");
     for a in 0..ocb4 {
         for q in 0..c.px {
-            let _ = writeln!(o, "    var a{a}_{q} = vec4f(0.0);");
+            let _ = writeln!(o, "    var a{a}_{q} = {hv}(0.0);");
         }
     }
     let _ = writeln!(o, "    for (var ci0 = 0u; ci0 < p.cin; ci0 += {}u) {{", c.cic);
@@ -213,14 +238,19 @@ pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig) -> String {
     o.push_str("            if (ci0 + ch < p.cin && gx >= 0 && gy >= 0 && gx < i32(p.iw) && gy < i32(p.ih)) {\n");
     o.push_str("                v = src0[p.in_off + (ci0 + ch) * iplane + u32(gy) * p.iw + u32(gx)];\n");
     o.push_str("            }\n");
-    o.push_str("            tile[i] = v;\n");
+    if f16 {
+        // beyond the f16 range the value would become infinite
+        o.push_str("            tile[i] = f16(clamp(v, -65504.0, 65504.0));\n");
+    } else {
+        o.push_str("            tile[i] = v;\n");
+    }
     o.push_str("        }\n");
     let _ = writeln!(o, "        let wbase = p.w_off + (cob * p.cin + ci0) * {}u;", k * ocb4);
     let _ = writeln!(o, "        let wvalid = min({}u, p.cin - ci0) * {}u;", c.cic, k * ocb4);
     let _ = writeln!(o, "        for (var i = li; i < {wlen}u; i += {nt}u) {{");
     o.push_str("            var w = vec4f(0.0);\n");
     o.push_str("            if (i < wvalid) { w = wv[wbase + i]; }\n");
-    o.push_str("            wt[i] = w;\n");
+    let _ = writeln!(o, "            wt[i] = {hv}(w);");
     o.push_str("        }\n");
     o.push_str("        workgroupBarrier();\n");
     let _ = writeln!(o, "        for (var ch = 0u; ch < {}u; ch++) {{", c.cic);
@@ -236,7 +266,7 @@ pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig) -> String {
             for a in 0..ocb4 {
                 let _ = writeln!(o, "            let w{kk}_{a} = wt[wb + {}u];", kk * ocb4 + a);
                 for q in 0..c.px {
-                    let _ = writeln!(o, "            a{a}_{q} = fma(w{kk}_{a}, vec4f(x{kk}_{q}), a{a}_{q});");
+                    let _ = writeln!(o, "            a{a}_{q} = fma(w{kk}_{a}, {hv}(x{kk}_{q}), a{a}_{q});");
                 }
             }
         }
@@ -250,7 +280,7 @@ pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig) -> String {
         let _ = writeln!(o, "    let px{q} = ox0 + lid.x + {}u;", q * c.tx);
         let _ = writeln!(o, "    if (px{q} < p.ow) {{");
         for a in 0..ocb4 {
-            epilogue(&mut o, &format!("a{a}_{q}"), &format!("cob * {}u + {}u", c.ocb, a * 4), &format!("oy * p.ow + px{q}"));
+            epilogue(&mut o, &format!("vec4f(a{a}_{q})"), &format!("cob * {}u + {}u", c.ocb, a * 4), &format!("oy * p.ow + px{q}"));
         }
         o.push_str("    }\n");
     }
@@ -408,6 +438,8 @@ pub(crate) struct Kernels {
     pub layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     cache: Option<Arc<ShaderCache>>,
+    /// Convolutions compute in f16 (see [`conv_source`]).
+    pub f16: bool,
     pipelines: std::sync::Mutex<HashMap<Kernel, wgpu::ComputePipeline>>,
 }
 
@@ -461,14 +493,14 @@ pub(crate) fn compute_pipeline(
 }
 
 impl Kernels {
-    pub fn new(device: &wgpu::Device, cache: Option<Arc<ShaderCache>>) -> Self {
+    pub fn new(device: &wgpu::Device, cache: Option<Arc<ShaderCache>>, f16: bool) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx nn"), entries: &ENTRIES });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gpufx nn"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        Kernels { layout, pipeline_layout, cache, pipelines: Default::default() }
+        Kernels { layout, pipeline_layout, cache, f16, pipelines: Default::default() }
     }
 
     /// The pipeline of `kernel`, compiled on first use.
@@ -481,7 +513,7 @@ impl Kernels {
                     Kernel::Fixed(Fixed::Resize) => ("gpufx nn resize", include_str!("resize.wgsl").to_string()),
                     Kernel::Fixed(Fixed::Warp) => ("gpufx nn warp", include_str!("warp.wgsl").to_string()),
                     Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
-                    Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c)),
+                    Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
                     Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
                 };
                 compute_pipeline(device, self.cache.as_deref(), label, &self.pipeline_layout, &ENTRIES, source)
@@ -496,7 +528,7 @@ mod tests {
 
     fn parse(src: &str) {
         let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{}\n{src}", e.emit_to_string(src)));
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::SHADER_FLOAT16)
             .validate(&module)
             .unwrap_or_else(|e| panic!("{e:?}"));
     }
@@ -506,12 +538,20 @@ mod tests {
         for (k, s) in [(3, 1), (3, 2), (1, 1), (5, 1), (7, 2)] {
             let shape = ConvShape { kh: k, kw: k, sh: s, sw: s, dh: 1, dw: 1 };
             let c = ConvConfig::any(&shape).unwrap();
-            parse(&conv_source(&shape, &c));
+            parse(&conv_source(&shape, &c, false));
+            parse(&conv_source(&shape, &c, true));
             for r in 0..s {
                 parse(&deconv_source(&shape, r, (r + 1) % s));
             }
         }
-        for src in [include_str!("ew.wgsl"), include_str!("resize.wgsl"), include_str!("warp.wgsl"), include_str!("pixel_shuffle.wgsl")] {
+        for src in [
+            include_str!("ew.wgsl"),
+            include_str!("resize.wgsl"),
+            include_str!("warp.wgsl"),
+            include_str!("pixel_shuffle.wgsl"),
+            include_str!("upscale_in.wgsl"),
+            include_str!("upscale_out.wgsl"),
+        ] {
             parse(src);
         }
     }

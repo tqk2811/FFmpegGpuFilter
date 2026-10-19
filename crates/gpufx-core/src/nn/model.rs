@@ -109,13 +109,35 @@ pub enum OpKind {
     Conv2d(ConvParams),
     Deconv2d(ConvParams),
     Activation(Activation),
-    Binary { kind: BinaryKind, scalar: Option<f32> },
-    Eltwise { kind: EltwiseKind, coeffs: Option<Vec<f32>> },
+    Binary {
+        kind: BinaryKind,
+        scalar: Option<f32>,
+    },
+    Eltwise {
+        kind: EltwiseKind,
+        coeffs: Option<Vec<f32>>,
+    },
     Concat,
-    Slice { start: u32, end: Option<u32> },
-    Resize { mode: ResizeMode, scale: Option<[f32; 2]>, size: Option<[u32; 2]>, align_corners: bool },
+    Slice {
+        start: u32,
+        end: Option<u32>,
+    },
+    Resize {
+        mode: ResizeMode,
+        scale: Option<[f32; 2]>,
+        size: Option<[u32; 2]>,
+        align_corners: bool,
+    },
     PixelShuffle(u32),
     Warp,
+    /// `x >= 0 ? x : slope[c] * x`, `slope.count` channels or 1 shared slope.
+    Prelu {
+        slope: BlobRef,
+    },
+    Clip {
+        min: f32,
+        max: f32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +222,22 @@ fn parse_op(raw: RawOp) -> Result<Op, Error> {
                 return Err(err(format!("unknown warp variant \"{v}\"")));
             }
             OpKind::Warp
+        }
+        "prelu" => {
+            let slope: BlobRef = field(p, "slope")?;
+            if slope.count == 0 {
+                return Err(err("prelu slope is empty"));
+            }
+            OpKind::Prelu { slope }
+        }
+        "clip" => {
+            // a missing bound is the f32 limit (ncnn Clip)
+            let min = field::<Option<f32>>(p, "min")?.unwrap_or(f32::MIN);
+            let max = field::<Option<f32>>(p, "max")?.unwrap_or(f32::MAX);
+            if min.is_nan() || max.is_nan() || min > max {
+                return Err(err(format!("clip [{min}, {max}] is not a range")));
+            }
+            OpKind::Clip { min, max }
         }
         k => return Err(err(format!("unknown op \"{k}\""))),
     };

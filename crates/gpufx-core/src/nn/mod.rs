@@ -1,7 +1,8 @@
 //! gpufx-nn: runs a neural network package (`docs/NN_MODEL_FORMAT.md`) with gpufx's own WGSL compute
 //! shaders. Nothing in here knows a particular model: [`NnModel`] holds the graph and its weights on the GPU,
 //! [`NnPlan`] is that graph laid out for one set of input sizes (tensor buffers, one dispatch list), and
-//! [`FrameInterp`] drives a `frame_interp` package (RIFE) as its `io.json` describes.
+//! [`FrameInterp`] drives a `frame_interp` package (RIFE) as its `io.json` describes, [`FrameUpscale`] a
+//! `super_resolution` package (Real-ESRGAN), in tiles.
 //!
 //! The CPU reference executor of `gpufx-nnconv` (`src/reference.rs`) pins the semantics of every op; the
 //! shaders follow it (same tap rules, same summation order where it matters).
@@ -11,6 +12,7 @@ mod interp;
 mod kernels;
 pub mod model;
 mod plan;
+mod upscale;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -19,11 +21,23 @@ use std::sync::Arc;
 pub use frames::InterpFrames;
 pub use interp::FrameInterp;
 pub use plan::{NnPlan, Profile, TensorView};
+pub use upscale::{FrameUpscale, TileLayout, UpscaleOptions, DEFAULT_TENSOR_BYTES};
 
 use crate::runtime::GpuContext;
 use crate::Error;
 use kernels::{ConvConfig, ConvShape, Fixed, Kernel, Kernels};
 use model::{BlobRef, Dtype, Model, OpKind};
+
+/// The arithmetic of the convolutions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Precision {
+    /// f32 everywhere.
+    #[default]
+    F32,
+    /// Convolutions in f16 (input tile, weights and sums; bias and activations in f32) when the device has
+    /// `SHADER_F16`, else f32. Tensors stay f32. Real-ESRGAN keeps ~55 dB against the f32 CPU reference.
+    Auto,
+}
 
 /// A loaded package: graph, weights uploaded once (as f32, re-laid out for the convolution kernels) and the
 /// pipelines its ops need.
@@ -35,6 +49,8 @@ pub struct NnModel {
     pub(crate) weights: wgpu::Buffer,
     /// Per conv/deconv op index: offset of its weights in `vec4` units and of its bias in `f32` units.
     pub(crate) conv_weights: HashMap<usize, (u32, u32)>,
+    /// Per prelu op index: offset of its slopes in `f32` units and their count.
+    pub(crate) slopes: HashMap<usize, (u32, u32)>,
     pub(crate) kernels: Kernels,
     weight_bytes: u64,
 }
@@ -115,6 +131,34 @@ fn dxc_loads() -> bool {
     false
 }
 
+/// The directory of the variant of `scale` in a bundle's `package.json`, checked to be a simple name.
+fn bundle_variant(package_json: &[u8], scale: Option<u32>) -> Result<String, Error> {
+    let bad = |m: String| Error::Package(format!("package.json: {m}"));
+    let v: serde_json::Value = serde_json::from_slice(package_json).map_err(|e| bad(e.to_string()))?;
+    if v["format"] != "gpufx-nn-bundle" || v["version"] != 1 {
+        return Err(bad("not a gpufx-nn-bundle version 1".into()));
+    }
+    let variants = v["variants"].as_array().filter(|a| !a.is_empty()).ok_or_else(|| bad("no variants".into()))?;
+    let mut scales = Vec::new();
+    for x in variants {
+        let (Some(s), Some(dir)) = (x["scale"].as_u64(), x["dir"].as_str()) else {
+            return Err(bad("a variant needs an integer scale and a dir".into()));
+        };
+        scales.push(s.to_string());
+        if Some(s) == scale.map(u64::from) {
+            if dir.is_empty() || dir == "." || dir == ".." || dir.contains(['/', '\\', ':']) {
+                return Err(bad(format!("variant directory \"{dir}\" must be a simple name")));
+            }
+            return Ok(dir.to_string());
+        }
+    }
+    let list = scales.join(", ");
+    Err(Error::Package(match scale {
+        Some(s) => format!("the bundle has no variant of scale {s} (available: {list})"),
+        None => format!("the model is a bundle: choose a scale (available: {list})"),
+    }))
+}
+
 pub(crate) fn conv_shape(c: &model::ConvParams) -> ConvShape {
     ConvShape { kh: c.kernel[0], kw: c.kernel[1], sh: c.stride[0], sw: c.stride[1], dh: c.dilation[0], dw: c.dilation[1] }
 }
@@ -144,16 +188,39 @@ fn push_conv_weights(blob: &mut Vec<f32>, c: &model::ConvParams, w: &[f32], bias
 }
 
 impl NnModel {
-    /// Loads a package from a `.zip` or a directory (`model.json`, `weights.bin`, optional `io.json`).
+    /// Loads a package from a `.zip` or a directory (`model.json`, `weights.bin`, optional `io.json`), computing in
+    /// f32. A bundle (`package.json` with several variants) needs [`NnModel::load_with`].
     pub fn load(ctx: Arc<GpuContext>, path: impl AsRef<Path>) -> Result<Self, Error> {
-        let files = crate::package::read_files(path.as_ref())?;
-        let get = |n: &str| files.get(n).map(Vec::as_slice);
-        let model = get("model.json").ok_or_else(|| Error::Package("missing model.json".into()))?;
-        let weights = get("weights.bin").ok_or_else(|| Error::Package("missing weights.bin".into()))?;
-        Self::from_parts(ctx, model, weights, get("io.json"))
+        Self::load_with(ctx, path, None, Precision::F32)
     }
 
+    /// Loads a package, or the variant of a bundle of the given `scale` (`docs/NN_MODEL_FORMAT.md`, "Bundles").
+    /// A single model package ignores `scale`; a bundle without one fails, listing its scales.
+    pub fn load_with(ctx: Arc<GpuContext>, path: impl AsRef<Path>, scale: Option<u32>, precision: Precision) -> Result<Self, Error> {
+        let files = crate::package::read_files(path.as_ref())?;
+        let dir = match files.get("package.json") {
+            Some(b) => format!("{}/", bundle_variant(b, scale)?),
+            None => String::new(),
+        };
+        let get = |n: &str| files.get(&format!("{dir}{n}")).map(Vec::as_slice);
+        let model = get("model.json").ok_or_else(|| Error::Package(format!("missing {dir}model.json")))?;
+        let weights = get("weights.bin").ok_or_else(|| Error::Package(format!("missing {dir}weights.bin")))?;
+        Self::from_parts_with(ctx, model, weights, get("io.json"), precision)
+    }
+
+    /// [`NnModel::from_parts_with`] in f32.
     pub fn from_parts(ctx: Arc<GpuContext>, model_json: &[u8], weights: &[u8], io_json: Option<&[u8]>) -> Result<Self, Error> {
+        Self::from_parts_with(ctx, model_json, weights, io_json, Precision::F32)
+    }
+
+    /// A package from the bytes of its files.
+    pub fn from_parts_with(
+        ctx: Arc<GpuContext>,
+        model_json: &[u8],
+        weights: &[u8],
+        io_json: Option<&[u8]>,
+        precision: Precision,
+    ) -> Result<Self, Error> {
         let model = Model::parse(model_json)?;
         let io = match io_json {
             Some(b) => serde_json::from_slice(b).map_err(|e| Error::Package(format!("io.json: {e}")))?,
@@ -161,9 +228,11 @@ impl NnModel {
         };
         check_shader_compiler(&ctx.info)?;
         let device = &ctx.device;
-        let kernels = Kernels::new(device, ctx.shader_cache.clone());
+        let f16 = precision == Precision::Auto && device.features().contains(wgpu::Features::SHADER_F16);
+        let kernels = Kernels::new(device, ctx.shader_cache.clone(), f16);
         let mut blob: Vec<f32> = Vec::new();
         let mut conv_weights = HashMap::new();
+        let mut slopes = HashMap::new();
         for (i, op) in model.ops.iter().enumerate() {
             let fail = |e: Error| Error::Package(format!("op {}: {e}", op.name));
             let kernel = match &op.kind {
@@ -184,6 +253,25 @@ impl NnModel {
                     };
                     conv_weights.insert(i, push_conv_weights(&mut blob, c, &w, &b, ocb));
                     kernel
+                }
+                OpKind::Prelu { slope } => {
+                    // a convolution's output channels are known now; other inputs are checked by the plan
+                    let producer = model.ops[..i].iter().rev().find(|o| op.inputs.first() == Some(&o.output));
+                    if let Some(OpKind::Conv2d(c) | OpKind::Deconv2d(c)) = producer.map(|o| &o.kind) {
+                        if slope.count != 1 && slope.count != c.out_channels as u64 {
+                            return Err(fail(Error::Package(format!(
+                                "prelu slope has {} values, expected 1 or {} (the channels of its input)",
+                                slope.count, c.out_channels
+                            ))));
+                        }
+                    }
+                    let s = read_blob(slope, weights).map_err(fail)?;
+                    let off = blob.len();
+                    blob.extend_from_slice(&s);
+                    // the conv epilogue reads 4 slopes at a time; keep the next weights 16-byte aligned
+                    blob.resize(blob.len().div_ceil(4) * 4, 0.0);
+                    slopes.insert(i, (off as u32, s.len() as u32));
+                    Kernel::Fixed(Fixed::Ew)
                 }
                 OpKind::Resize { .. } => Kernel::Fixed(Fixed::Resize),
                 OpKind::Warp => Kernel::Fixed(Fixed::Warp),
@@ -227,7 +315,7 @@ impl NnModel {
             mapped_at_creation: false,
         });
         ctx.queue.write_buffer(&buffer, 0, &bytes);
-        Ok(NnModel { ctx, model, io, weights: buffer, conv_weights, kernels, weight_bytes: bytes.len() as u64 })
+        Ok(NnModel { ctx, model, io, weights: buffer, conv_weights, slopes, kernels, weight_bytes: bytes.len() as u64 })
     }
 
     pub fn name(&self) -> &str {
@@ -241,6 +329,11 @@ impl NnModel {
 
     pub fn outputs(&self) -> &[String] {
         &self.model.outputs
+    }
+
+    /// Whether the convolutions compute in f16 ([`Precision::Auto`] on a device with `SHADER_F16`).
+    pub fn uses_f16(&self) -> bool {
+        self.kernels.f16
     }
 
     /// Bytes of the weights buffer on the GPU.

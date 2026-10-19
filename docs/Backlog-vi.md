@@ -24,6 +24,12 @@
 - **Vì sao**: giảm dung lượng gói, script bền hơn, bắt model hỏng sớm, có mẫu đúng để test tile.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] `FrameUpscale`: các finding review bước 2 để sau
+- **Vấn đề**: (1) `encode()` tạo lại 2 bind group cho mỗi tile ở mọi frame, dù buffer plan và params không đổi; nên cache nhóm tensor/params, chỉ tạo nhóm texture mỗi frame. (2) cả frame chạy trong một compute pass không submit giữa chừng, 4K x4 trên GPU yếu có thể bị Windows reset driver (TDR); nên chia pass/submit theo lô tile. (3) `bytes_per_pixel` ngoại suy tuyến tính từ một kích thước dò, nên tính đúng tensor lớn nhất bằng `infer_shapes` cho tile đã chọn. (4) `dxil.rs` dò module f16 bằng một lượt validate thừa, nên quét kiểu `F16` trong module. (5) conv f16 cộng dồn bằng f16 (~57 dB so với ~66 dB khi cộng f32, cộng f32 chậm hơn ~55%).
+- **Vị trí**: [upscale.rs](../crates/gpufx-core/src/nn/upscale.rs), [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs), [dxil.rs](../crates/gpufx-core/src/dxil.rs)
+- **Vì sao**: giảm chi phí mỗi frame, tránh TDR, chọn tile chính xác hơn.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] `gpufx_ai_framerate`: cặp chuyển cảnh vẫn chạy RIFE
 - **Vấn đề**: cặp chuyển cảnh được pass scene thay bằng frame nguồn, nhưng RIFE vẫn chạy đủ cho mọi frame ở giữa rồi bị ghi đè; kết quả quyết định nằm trên GPU (`state.cut`) nên CPU không biết để bỏ qua.
 - **Vị trí**: [frames.rs:300](../crates/gpufx-core/src/nn/frames.rs#L300) (`self.interp.encode`), [frames.rs:325](../crates/gpufx-core/src/nn/frames.rs#L325) (`encode_scene`), [scene_ssim.wgsl](../crates/gpufx-core/src/nn/scene_ssim.wgsl)
