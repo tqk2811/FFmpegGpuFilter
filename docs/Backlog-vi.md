@@ -6,6 +6,12 @@
 - **Vì sao**: nên chia slot theo tensor, chia ảnh thành tile, hoặc chạy RIFE ở `scale` 0.5 cho 4K.
 - **Ngày ghi**: 2026-10-19
 
+### [Vừa] Runtime nn: lần chạy đầu trên D3D12 biên dịch DXC ~14 s, `pack --precompile` chưa phủ gói nn
+- **Vấn đề**: không có `GPUFX_SHADER_CACHE` ấm thì RIFE v4.6 trên D3D12 mất khoảng 14 s biên dịch 12 pipeline conv/deconv ở frame đầu (mỗi lớp kích thước mới thêm pipeline); `pack --precompile` không biết tới gói nn. Các `poll(wait_indefinitely)` trong nn vẫn không có timeout.
+- **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs) (`compute_pipeline`), [plan.rs](../crates/gpufx-core/src/nn/plan.rs), [interp.rs](../crates/gpufx-core/src/nn/interp.rs)
+- **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] Runtime nn: conv chiếm ~70% thời gian, 1080p còn 44–46 ms/frame
 - **Vấn đề**: trên RTX 4060 Laptop (Vulkan) RIFE v4.6 1080p mất 44–46 ms/frame, conv khoảng 31 ms; chưa xuống dưới 40 ms.
 - **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs)

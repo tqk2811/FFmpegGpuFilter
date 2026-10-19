@@ -114,40 +114,39 @@ impl FrameInterp {
             return Err(Error::Package(format!("io.json names output \"{}\" the model does not have", io.output)));
         }
         let device = &model.ctx.device;
-        let in_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("gpufx nn frame in"),
-            entries: &[
-                uniform_entry(0),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+        let in_entries = [
+            uniform_entry(0),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
                 },
-                storage_entry(2, false),
-            ],
-        });
-        let out_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("gpufx nn frame out"),
-            entries: &[
-                uniform_entry(0),
-                storage_entry(1, true),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
+                count: None,
+            },
+            storage_entry(2, false),
+        ];
+        let in_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx nn frame in"), entries: &in_entries });
+        let out_entries = [
+            uniform_entry(0),
+            storage_entry(1, true),
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2,
                 },
-            ],
-        });
+                count: None,
+            },
+        ];
+        let out_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx nn frame out"), entries: &out_entries });
+        let cache = model.ctx.shader_cache.as_deref();
         let pl = |l: &wgpu::BindGroupLayout| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("gpufx nn frame"),
@@ -155,8 +154,10 @@ impl FrameInterp {
                 immediate_size: 0,
             })
         };
-        let in_pipeline = compute_pipeline(device, "gpufx nn frame in", &pl(&in_layout), include_str!("frame_in.wgsl").into());
-        let out_pipeline = compute_pipeline(device, "gpufx nn frame out", &pl(&out_layout), include_str!("frame_out.wgsl").into());
+        let in_pipeline =
+            compute_pipeline(device, cache, "gpufx nn frame in", &pl(&in_layout), &in_entries, include_str!("frame_in.wgsl").into());
+        let out_pipeline =
+            compute_pipeline(device, cache, "gpufx nn frame out", &pl(&out_layout), &out_entries, include_str!("frame_out.wgsl").into());
         Ok(FrameInterp { model, io, in_layout, out_layout, in_pipeline, out_pipeline, sized: None })
     }
 

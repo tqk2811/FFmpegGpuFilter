@@ -7,6 +7,9 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::Arc;
+
+use crate::shader_cache::{PipelineDesc, ShaderCache};
 
 /// Bytes of the per-dispatch parameter slot in the uniform buffer.
 pub(crate) const PARAM_SLOT: u64 = 256;
@@ -404,10 +407,11 @@ pub(crate) enum Kernel {
 pub(crate) struct Kernels {
     pub layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
+    cache: Option<Arc<ShaderCache>>,
     pipelines: std::sync::Mutex<HashMap<Kernel, wgpu::ComputePipeline>>,
 }
 
-fn storage(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+const fn storage(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,
@@ -420,7 +424,7 @@ fn storage(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
-pub(crate) fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+pub(crate) const fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,
@@ -433,35 +437,38 @@ pub(crate) fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
+/// The one bind group layout of every op (see the module comment).
+const ENTRIES: [wgpu::BindGroupLayoutEntry; 6] =
+    [uniform_entry(0), storage(1, true), storage(2, true), storage(3, true), storage(4, true), storage(5, false)];
+
 pub(crate) fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     storage(binding, read_only)
 }
 
-pub(crate) fn compute_pipeline(device: &wgpu::Device, label: &str, layout: &wgpu::PipelineLayout, source: String) -> wgpu::ComputePipeline {
-    let module =
-        device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(source.into()) });
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(label),
-        layout: Some(layout),
-        module: &module,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    })
+/// The pipeline of `source` (entry point `main`) through the device's shader cache, so D3D12 keeps the DXIL
+/// of these large shaders on disk when `GPUFX_SHADER_CACHE` is set (DXC takes seconds per convolution).
+pub(crate) fn compute_pipeline(
+    device: &wgpu::Device,
+    cache: Option<&ShaderCache>,
+    label: &str,
+    layout: &wgpu::PipelineLayout,
+    entries: &[wgpu::BindGroupLayoutEntry],
+    source: String,
+) -> wgpu::ComputePipeline {
+    let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{label}: {}", e.emit_to_string(&source)));
+    let desc = PipelineDesc { label, layout, entries, entry: "main" };
+    ShaderCache::compute_pipeline(cache, device, &desc, module, &["nn", "main", &source], None)
 }
 
 impl Kernels {
-    pub fn new(device: &wgpu::Device) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("gpufx nn"),
-            entries: &[uniform_entry(0), storage(1, true), storage(2, true), storage(3, true), storage(4, true), storage(5, false)],
-        });
+    pub fn new(device: &wgpu::Device, cache: Option<Arc<ShaderCache>>) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx nn"), entries: &ENTRIES });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gpufx nn"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        Kernels { layout, pipeline_layout, pipelines: Default::default() }
+        Kernels { layout, pipeline_layout, cache, pipelines: Default::default() }
     }
 
     /// The pipeline of `kernel`, compiled on first use.
@@ -477,7 +484,7 @@ impl Kernels {
                     Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c)),
                     Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
                 };
-                compute_pipeline(device, label, &self.pipeline_layout, source)
+                compute_pipeline(device, self.cache.as_deref(), label, &self.pipeline_layout, &ENTRIES, source)
             })
             .clone()
     }

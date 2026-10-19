@@ -113,12 +113,12 @@ pub struct GpuContext {
     pub(crate) d3d12: Option<crate::d3d12::Shared>,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
-    info: wgpu::AdapterInfo,
+    pub(crate) info: wgpu::AdapterInfo,
     pub(crate) conv: Converter,
     pub(crate) mips: MipGen,
     /// Per-frame textures and buffers shared by every graph on this device (see `pool.rs`).
     pub(crate) pool: crate::pool::Pool,
-    shader_cache: Option<Arc<ShaderCache>>,
+    pub(crate) shader_cache: Option<Arc<ShaderCache>>,
     /// Queue family of a shared Vulkan device (see `vulkan.rs`), `None` for devices
     /// gpufx made itself.
     #[cfg_attr(not(any(windows, all(unix, not(target_vendor = "apple")))), allow(dead_code))]
