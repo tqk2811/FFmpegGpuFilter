@@ -75,6 +75,44 @@ fn read_blob(b: &BlobRef, weights: &[u8]) -> Result<Vec<f32>, Error> {
     })
 }
 
+/// Refuses D3D12 devices that compile WGSL with FXC. wgpu-hal 30 uses DXC when `dxcompiler.dll` loads (its
+/// `Dx12Compiler::Auto`, which gpufx keeps unless `WGPU_DX12_COMPILER` says otherwise) and falls back to FXC.
+/// FXC cannot take the nn shaders: it rejects the barriers of the convolution loops (X3663) and spends many
+/// minutes on one transposed convolution, burning CPU, so a model would seem to hang on load.
+fn check_shader_compiler(info: &wgpu::AdapterInfo) -> Result<(), Error> {
+    if info.backend != wgpu::Backend::Dx12 {
+        return Ok(());
+    }
+    if uses_fxc(std::env::var("WGPU_DX12_COMPILER").ok().as_deref(), dxc_loads) {
+        return Err(Error::Gpu(
+            "gpufx-nn on D3D12 needs DXC: put dxcompiler.dll on the DLL search path (the win64 bundle ships it in \
+             bin/) and do not set WGPU_DX12_COMPILER=fxc; FXC cannot compile the nn shaders"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Whether wgpu compiles with FXC given `WGPU_DX12_COMPILER` (`forced`) and whether `dxcompiler.dll` loads.
+fn uses_fxc(forced: Option<&str>, dxc_loads: impl FnOnce() -> bool) -> bool {
+    match forced.map(str::to_ascii_lowercase).as_deref() {
+        Some("fxc") => true,
+        Some("dxc" | "dynamicdxc" | "staticdxc") => false,
+        // Auto (unset, or a value wgpu ignores): the same DLL lookup as wgpu's.
+        _ => !dxc_loads(),
+    }
+}
+
+#[cfg(windows)]
+fn dxc_loads() -> bool {
+    crate::dxil::DxcCompiler::get().is_some()
+}
+
+#[cfg(not(windows))]
+fn dxc_loads() -> bool {
+    false
+}
+
 pub(crate) fn conv_shape(c: &model::ConvParams) -> ConvShape {
     ConvShape { kh: c.kernel[0], kw: c.kernel[1], sh: c.stride[0], sw: c.stride[1], dh: c.dilation[0], dw: c.dilation[1] }
 }
@@ -119,8 +157,9 @@ impl NnModel {
             Some(b) => serde_json::from_slice(b).map_err(|e| Error::Package(format!("io.json: {e}")))?,
             None => serde_json::Value::Null,
         };
+        check_shader_compiler(&ctx.info)?;
         let device = &ctx.device;
-        let kernels = Kernels::new(device);
+        let kernels = Kernels::new(device, ctx.shader_cache.clone());
         let mut blob: Vec<f32> = Vec::new();
         let mut conv_weights = HashMap::new();
         for (i, op) in model.ops.iter().enumerate() {
@@ -214,5 +253,21 @@ impl NnModel {
     /// Lays the graph out for inputs of the given `C x H x W` shapes (every model input).
     pub fn plan(&self, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, Error> {
         plan::build(self, inputs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uses_fxc;
+
+    /// D3D12 without DXC must be refused up front: FXC hung for minutes on the RIFE deconvolutions.
+    #[test]
+    fn fxc_is_detected_like_wgpu_picks_it() {
+        assert!(uses_fxc(None, || false), "Auto without dxcompiler.dll falls back to FXC");
+        assert!(!uses_fxc(None, || true), "Auto with dxcompiler.dll uses DXC");
+        assert!(uses_fxc(Some("FXC"), || true), "forced FXC, even with the DLL");
+        assert!(!uses_fxc(Some("dxc"), || false));
+        assert!(!uses_fxc(Some("DynamicDxc"), || false));
+        assert!(uses_fxc(Some("bogus"), || false), "a value wgpu ignores is Auto");
     }
 }
