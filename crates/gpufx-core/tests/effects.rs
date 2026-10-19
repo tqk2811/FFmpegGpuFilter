@@ -5,7 +5,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use gpufx_core::{Effect, EffectChain, Error, FrameInfo, GpuContext, Image, ImageMut, Package, StreamInfo};
+use gpufx_core::{Effect, Error, FrameInfo, GpuContext, Image, ImageMut, Package, StreamInfo};
 
 fn examples() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects")
@@ -463,39 +463,39 @@ fn a_chain_runs_like_its_effects_one_after_the_other() {
     let (_, mut vignette) = open(&ctx, "vignette");
     let want = run(&mut vignette, &run(&mut gray, &src));
 
-    let mut chain = EffectChain::new(vec![open(&ctx, "grayscale"), open(&ctx, "vignette")]).unwrap();
+    let mut chain = common::chain(vec![open(&ctx, "grayscale"), open(&ctx, "vignette")]).unwrap();
     let mut out = vec![0u8; src.len()];
-    chain.process(&input, target(&mut out, w, h, w * 4), &info).unwrap();
+    chain.process(&input, vec![target(&mut out, w, h, w * 4)], &info).unwrap();
     // The chain keeps the gray frame in half float instead of rounding it to 8 bits.
     let diff = out.iter().zip(&want).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
     assert!(diff <= 1, "chain differs from two effects by {diff}");
 
     // Inverting twice restores the frame.
-    let mut twice = EffectChain::new(vec![open(&ctx, "invert"), open(&ctx, "invert")]).unwrap();
-    twice.process(&input, target(&mut out, w, h, w * 4), &info).unwrap();
+    let mut twice = common::chain(vec![open(&ctx, "invert"), open(&ctx, "invert")]).unwrap();
+    twice.process(&input, vec![target(&mut out, w, h, w * 4)], &info).unwrap();
     assert_eq!(out, src);
     // The second effect is 1.amount: 0 leaves one inversion.
     twice.set_param_str("1.amount", "0").unwrap();
-    twice.process(&input, target(&mut out, w, h, w * 4), &info).unwrap();
+    twice.process(&input, vec![target(&mut out, w, h, w * 4)], &info).unwrap();
     assert_eq!(out, run(&mut open(&ctx, "invert").1, &src));
 
     // A different frame size rebuilds the textures of every effect.
     let small = gradient(9, 5);
     let mut out_small = vec![0u8; small.len()];
-    twice.process(&[Image { data: &small, width: 9, height: 5, stride: 36 }], target(&mut out_small, 9, 5, 36), &info).unwrap();
+    twice.process(&[Image { data: &small, width: 9, height: 5, stride: 36 }], vec![target(&mut out_small, 9, 5, 36)], &info).unwrap();
     assert_ne!(out_small, small);
     // The output must have the size of the first input.
-    let err = twice.process(&input, target(&mut out_small, 9, 5, 36), &info).unwrap_err();
+    let err = twice.process(&input, vec![target(&mut out_small, 9, 5, 36)], &info).unwrap_err();
     assert!(err.to_string().contains("output is 9x5"), "{err}");
 }
 
 #[test]
 fn chain_parameters_are_named_after_their_package() {
     let Some(ctx) = gpu() else { return };
-    let single = EffectChain::new(vec![open(&ctx, "vignette")]).unwrap();
+    let single = common::chain(vec![open(&ctx, "vignette")]).unwrap();
     assert!(single.param_names().iter().any(|n| n == "strength"));
 
-    let mut chain = EffectChain::new(vec![open(&ctx, "invert"), open(&ctx, "vignette"), open(&ctx, "invert")]).unwrap();
+    let mut chain = common::chain(vec![open(&ctx, "invert"), open(&ctx, "vignette"), open(&ctx, "invert")]).unwrap();
     let names = chain.param_names();
     assert!(names.iter().any(|n| n == "vignette.strength"), "{names:?}");
     // Two packages with one label: only the index tells them apart.
@@ -518,13 +518,13 @@ fn chain_parameters_are_named_after_their_package() {
 fn chain_rules_follow_two_filters_in_a_row() {
     let Some(ctx) = gpu() else { return };
     // Only the first effect may take several inputs.
-    let err = EffectChain::new(vec![open(&ctx, "invert"), open(&ctx, "crossfade")]).err().unwrap().to_string();
+    let err = common::chain(vec![open(&ctx, "invert"), open(&ctx, "crossfade")]).err().unwrap().to_string();
     assert!(err.contains("takes 2 inputs"), "{err}");
-    let mut transition = EffectChain::new(vec![open(&ctx, "crossfade"), open(&ctx, "invert")]).unwrap();
+    let mut transition = common::chain(vec![open(&ctx, "crossfade"), open(&ctx, "invert")]).unwrap();
     let src = gradient(8, 8);
     let img = Image { data: &src, width: 8, height: 8, stride: 32 };
     let mut out = vec![0u8; src.len()];
-    transition.process(&[img, img], target(&mut out, 8, 8, 32), &FrameInfo::new(0.0, 0)).unwrap();
+    transition.process(&[img, img], vec![target(&mut out, 8, 8, 32)], &FrameInfo::new(0.0, 0)).unwrap();
 
     // The format the first effect outputs must be one the next accepts.
     let gray_only = TempPackage::new(
@@ -533,7 +533,7 @@ fn chain_rules_follow_two_filters_in_a_row() {
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
     let gray = || ("gray".to_string(), Effect::new(ctx.clone(), Package::open(&gray_only.0).unwrap()).unwrap());
-    let err = EffectChain::new(vec![open(&ctx, "invert"), gray()]).err().unwrap().to_string();
+    let err = common::chain(vec![open(&ctx, "invert"), gray()]).err().unwrap().to_string();
     assert!(err.contains("`invert` outputs rgba, rgba64le, nv12") && err.contains("but `gray` accepts gray"), "{err}");
     // An effect without output rules may output YUV, as two filters would negotiate.
     let yuv_only = TempPackage::new(
@@ -541,14 +541,11 @@ fn chain_rules_follow_two_filters_in_a_row() {
         r#"{"id":"t.yuv","name":"YUV only","inputs":[{"name":"src","formats":["yuv420p"]}],"passes":[{"shader":"shaders/main.wgsl"}]}"#,
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
-    EffectChain::new(vec![
-        open(&ctx, "invert"),
-        ("yuv".to_string(), Effect::new(ctx.clone(), Package::open(&yuv_only.0).unwrap()).unwrap()),
-    ])
-    .unwrap();
+    common::chain(vec![open(&ctx, "invert"), ("yuv".to_string(), Effect::new(ctx.clone(), Package::open(&yuv_only.0).unwrap()).unwrap())])
+        .unwrap();
     // A gray-only first effect is fine: its input is the chain input. Later effects check
     // their rules against the size of the first input.
-    let chain = EffectChain::new(vec![gray(), open(&ctx, "invert")]).unwrap();
+    let chain = common::chain(vec![gray(), open(&ctx, "invert")]).unwrap();
     let stream = |w| [StreamInfo { format: Some("gray"), width: w, height: 8 }];
     chain.check_inputs(&stream(64)).unwrap();
     assert!(chain.check_inputs(&stream(128)).is_err());
@@ -558,15 +555,18 @@ fn chain_rules_follow_two_filters_in_a_row() {
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
     let narrow = ("narrow".to_string(), Effect::new(ctx.clone(), Package::open(&narrow.0).unwrap()).unwrap());
-    let mut late = EffectChain::new(vec![open(&ctx, "invert"), narrow]).unwrap();
+    let mut late = common::chain(vec![open(&ctx, "invert"), narrow]).unwrap();
     let gray = |w| [StreamInfo { format: Some("gray"), width: w, height: 8 }];
     late.check_inputs(&gray(64)).unwrap();
     let err = late.check_inputs(&gray(128)).unwrap_err().to_string();
     assert!(err.contains("above the maximum 100"), "{err}");
     let wide = gradient(128, 8);
     let mut out = vec![0u8; wide.len()];
-    let err =
-        late.process(&[Image { data: &wide, width: 128, height: 8, stride: 512 }], target(&mut out, 128, 8, 512), &FrameInfo::new(0.0, 0));
+    let err = late.process(
+        &[Image { data: &wide, width: 128, height: 8, stride: 512 }],
+        vec![target(&mut out, 128, 8, 512)],
+        &FrameInfo::new(0.0, 0),
+    );
     assert!(err.is_err());
 }
 
@@ -653,9 +653,9 @@ fn pooled_pass_outputs_do_not_clobber_each_other() {
     for name in names {
         want = run(&mut open(&ctx, name).1, &want);
     }
-    let mut chain = EffectChain::new(names.iter().map(|n| open(&ctx, n)).collect()).unwrap();
+    let mut chain = common::chain(names.iter().map(|n| open(&ctx, n)).collect()).unwrap();
     let mut out = vec![0u8; src.len()];
-    chain.process(&[Image { data: &src, width: w, height: h, stride: w * 4 }], target(&mut out, w, h, w * 4), &info).unwrap();
+    chain.process(&[Image { data: &src, width: w, height: h, stride: w * 4 }], vec![target(&mut out, w, h, w * 4)], &info).unwrap();
     assert_eq!(out, want);
 }
 

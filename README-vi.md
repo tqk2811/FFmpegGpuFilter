@@ -7,11 +7,12 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
 - Filter FFmpeg chạy trên frame **Vulkan, Direct3D 12, Direct3D 11** và **Metal** (macOS) (qua
   [wgpu](https://wgpu.rs)), Windows/Linux/macOS. Không hỗ trợ OpenGL.
 - Tham số là literal hoặc biểu thức theo thời gian; đổi lúc chạy bằng `sendcmd`.
-- Nhiều hiệu ứng trong một filter (`effect='blur.zip|vignette.zip'`): cả chuỗi chạy trong một lần
+- Nhiều hiệu ứng trong một filter (`graph='blur.zip|vignette.zip'`): cả chuỗi chạy trong một lần
   submit GPU, không qua frame trung gian.
 - Cả **đồ thị hiệu ứng** trong một filter (`graph='[0]split[a][b]; [a]blur.zip[x]; [x][b]crossfade.zip[out]'`):
   rẽ nhánh, nhiều input và nhiều output, tất cả trong một lần submit GPU; `split` không chép gì và
-  texture trung gian lấy từ pool.
+  texture trung gian lấy từ pool. `graph` là option duy nhất; có thể bỏ nhãn như filtergraph của FFmpeg
+  (input không nhãn lấy pad input chưa dùng kế tiếp, output không nhãn thành output của graph).
 - Gói khai báo **quy tắc input/output** (pixel format, kích thước, cùng kích thước giữa
   các input); stream không khớp thì báo lỗi rõ ràng thay vì chuyển đổi ngầm.
 - 36 hiệu ứng mẫu: chỉnh màu, đen trắng, sepia, sharpen, pixelate, chroma key,
@@ -39,7 +40,7 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
 # gpufx trả ra frame GPU: đưa cho nó một device (frame CPU ở input nó tự upload) và
 # download trước encoder
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 -i b.mp4 -filter_complex \
-  "[0][1]gpufx=effect='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
+  "[0][1]gpufx=graph='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
 ```
 
 ```sh
@@ -50,16 +51,16 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 ```
 
 Tham số được viết **inline**, ngay sau tên package, giống option của một filter FFmpeg gốc:
-`pkg.zip=key=value:key2=value2`. Dùng được trong `effect=` (kể cả chain: `effect='a.zip=k=1|b.zip'`) và trong
+`pkg.zip=key=value:key2=value2`. Dùng được trong `graph=` (kể cả chain: `graph='a.zip=k=1|b.zip'`) và trong
 mọi node của `graph=`. Key phải có tên, giá trị là hằng số hoặc biểu thức (`t`, `n`, `w`, `h`, `a`, `sar`, `dar`),
 và có hai key dành riêng cho từng instance effect: `enable=<expr>` bật/tắt effect đó theo từng frame, còn
 `bypass=0|auto` chọn input mà nó copy khi đang tắt. Chúng khác với option timeline `enable=` và option `bypass=`
 của chính filter, vốn nằm ngoài chuỗi effect. Key lạ, key cho hai lần, hoặc `bypass` khác `0`/`auto` là lỗi, có
 nêu tên effect và key.
 
-- Bọc cả giá trị `effect=`/`graph=` trong `'...'`. FFmpeg tách option của filter tại `:` *sau khi* đã bỏ các dấu
-  nháy đó, nên phân tách các key inline bằng `&` (`effect='x.zip=a=1&b=2'`, không cần escape ở tầng FFmpeg). Dấu
-  `:` kiểu FFmpeg cũng dùng được nhưng ở đó phải viết `\:` (`effect='x.zip=a=1\:b=2'`); một key thì không cần dấu
+- Bọc cả giá trị `graph=` trong `'...'`. FFmpeg tách option của filter tại `:` *sau khi* đã bỏ các dấu
+  nháy đó, nên phân tách các key inline bằng `&` (`graph='x.zip=a=1&b=2'`, không cần escape ở tầng FFmpeg). Dấu
+  `:` kiểu FFmpeg cũng dùng được nhưng ở đó phải viết `\:` (`graph='x.zip=a=1\:b=2'`); một key thì không cần dấu
   phân tách. Dấu phẩy trong biểu thức vẫn escape `\,` như mọi option của filter.
 - Bên trong chuỗi effect, `\` escape một ký tự trong `\ ' : & ; | = [ ]` (`\&` là `&` nguyên văn trong giá trị; đứng trước ký tự khác thì `\` giữ
   nguyên, nên đường dẫn Windows vẫn dùng được) và `'...'` bọc một giá trị.
@@ -72,7 +73,7 @@ nêu tên effect và key.
 ```sh
 # một chuỗi: gpufx đầu tiên upload, mọi hiệu ứng chạy trên device Vulkan của FFmpeg, download một lần
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx=effect=vignette.zip,gpufx=effect=sepia.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,hwdownload,format=nv12" out.mp4
 # D3D12 (Windows): như trên với -init_hw_device d3d12va=dx -filter_hw_device dx
 ```
 
@@ -80,7 +81,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 # Truyền nhanh hơn (Vulkan): gpufx_upload/gpufx_download chạy copy nối đuôi; out_format=rgba giữ
 # các gpufx rời ở RGBA giữa chúng (filter cuối quay về nv12)
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx=effect=vignette.zip:out_format=rgba,gpufx=effect=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip:out_format=rgba,gpufx=graph=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
 ```
 
 Giống các filter `*_cuda` của FFmpeg, `gpufx` **chỉ trả ra frame GPU** (Vulkan, D3D12, D3D11, hoặc VideoToolbox trên macOS). Input có thể là
@@ -101,7 +102,7 @@ làm hỏng ảnh do host image copy của driver; dùng `gpufx_upload` / `gpufx
 Option `backend` của filter chỉ để thử nghiệm (để mặc định `auto`, tự theo frame); filter từ chối
 `backend=metal` trừ trên macOS (thư viện và CLI `gpufx` vẫn nhận). Trên macOS
 filter chạy trên frame VideoToolbox (nv12, p010le) qua Metal, ví dụ
-`-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=effect=vignette.zip,hwdownload,format=nv12"`;
+`-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12"`;
 đường này chưa chạy trên máy Mac nào (xem bên dưới).
 
 Tài liệu: [thiết kế](docs/DESIGN-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)

@@ -5,9 +5,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use gpufx_core::{
-    ChromaLocation, ColorInfo, Effect, EffectChain, Frame, FrameInfo, FrameMut, GpuContext, Matrix, Package, PixelFormat, Range,
-};
+use gpufx_core::{ChromaLocation, ColorInfo, Effect, Frame, FrameInfo, FrameMut, GpuContext, Matrix, Package, PixelFormat, Range};
 
 fn gpu() -> Option<std::sync::Arc<GpuContext>> {
     static CTX: std::sync::OnceLock<Option<std::sync::Arc<GpuContext>>> = std::sync::OnceLock::new();
@@ -387,7 +385,7 @@ fn encoding_follows_matrix_and_range() {
 #[test]
 fn ten_bit_steps_survive_a_chain() {
     let Some(ctx) = gpu() else { return };
-    let mut chain = EffectChain::new(vec![("a".into(), identity(&ctx, "chain-a")), ("b".into(), identity(&ctx, "chain-b"))]).unwrap();
+    let mut chain = common::chain(vec![("a".into(), identity(&ctx, "chain-a")), ("b".into(), identity(&ctx, "chain-b"))]).unwrap();
     // Every 10-bit luma code from black to white, two pixels each: 8 bits would merge
     // groups of four.
     let (w, h) = (64, 28);
@@ -409,7 +407,7 @@ fn ten_bit_steps_survive_a_chain() {
             strides: out_strides,
             color,
         };
-        chain.process_frames(&[as_frame(&data, strides, PixelFormat::P010, w, h, color)], target, &FrameInfo::new(0.0, 0)).unwrap();
+        chain.process_frames(&[as_frame(&data, strides, PixelFormat::P010, w, h, color)], &mut [target], &FrameInfo::new(0.0, 0)).unwrap();
     }
     let got = Planes::from_bytes(PixelFormat::P010, w, h, &out, out_strides);
     let diff = src.max_diff(&got, 0);
@@ -437,7 +435,7 @@ fn premultiplied_frames_reach_effects_straight() {
 fn convert_bypasses_the_effects() {
     let Some(ctx) = gpu() else { return };
     let invert = Effect::new(ctx.clone(), Package::open(example("invert")).unwrap()).unwrap();
-    let mut chain = EffectChain::new(vec![("invert".into(), invert)]).unwrap();
+    let mut chain = common::chain(vec![("invert".into(), invert)]).unwrap();
     let color = ColorInfo { matrix: Matrix::Bt709, ..Default::default() };
     let src = flat(PixelFormat::Nv12, 235, 128, 128);
     let (data, strides) = src.bytes(0);
@@ -453,11 +451,11 @@ fn convert_bypasses_the_effects() {
             color: ColorInfo::default(),
         }
     }
-    chain.convert(&frame, target(&mut out)).unwrap();
+    chain.convert(std::slice::from_ref(&frame), &mut [target(&mut out)]).unwrap();
     assert_eq!(out[..4], [255, 255, 255, 255]);
-    chain.process_frames(&[frame], target(&mut out), &FrameInfo::new(0.0, 0)).unwrap();
+    chain.process_frames(&[frame], &mut [target(&mut out)], &FrameInfo::new(0.0, 0)).unwrap();
     assert_eq!(out[..4], [0, 0, 0, 255]);
-    chain.convert(&frame, target(&mut out)).unwrap();
+    chain.convert(std::slice::from_ref(&frame), &mut [target(&mut out)]).unwrap();
     assert_eq!(out[..4], [255, 255, 255, 255]);
 }
 
@@ -471,7 +469,7 @@ fn toggling_the_effects_reuses_every_resource() {
     }
     let Ok(ctx) = GpuContext::new(common::backend()) else { return };
     let crossfade = Effect::new(ctx.clone(), Package::open(example("crossfade")).unwrap()).unwrap();
-    let mut chain = EffectChain::new(vec![("crossfade".into(), crossfade), ("b".into(), identity(&ctx, "toggle"))]).unwrap();
+    let mut chain = common::chain(vec![("crossfade".into(), crossfade), ("b".into(), identity(&ctx, "toggle"))]).unwrap();
     let color = ColorInfo { matrix: Matrix::Bt709, ..Default::default() };
     let first = flat(PixelFormat::P010, 250, 409, 960);
     let (a, a_strides) = first.bytes(0);
@@ -485,9 +483,9 @@ fn toggling_the_effects_reuses_every_resource() {
     let mut out = vec![0u8; 4 * 4 * 4];
     let mut counts = Vec::new();
     for _ in 0..3 {
-        chain.process_frames(&inputs, rgba_target(&mut out), &FrameInfo::new(0.0, 0)).unwrap();
+        chain.process_frames(&inputs, &mut [rgba_target(&mut out)], &FrameInfo::new(0.0, 0)).unwrap();
         counts.push(chain.allocations());
-        chain.convert(&inputs[0], rgba_target(&mut out)).unwrap();
+        chain.convert(&inputs[..1], &mut [rgba_target(&mut out)]).unwrap();
         counts.push(chain.allocations());
     }
     // Slots and pool once, then the bind groups of the bypass once.

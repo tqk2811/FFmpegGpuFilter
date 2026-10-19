@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use gpufx_core::{
-    Backend, BypassPad, ChromaLocation, ColorInfo, Effect, EffectChain, EffectGraph, Frame, FrameInfo, FrameMut, GpuContext, Image,
-    ImageMut, Matrix, Package, PixelFormat, Program, Range, StreamInfo,
+    Backend, BypassPad, ChromaLocation, ColorInfo, Effect, EffectGraph, Frame, FrameInfo, FrameMut, GpuContext, Image, ImageMut, Matrix,
+    Package, PixelFormat, Program, Range, StreamInfo,
 };
 
 /// Bumped when the C ABI changes incompatibly. Must match `GPUFX_API_VERSION` in gpufx.h.
@@ -116,9 +116,7 @@ fn program(path: &str, ctx: Arc<GpuContext>) -> Result<Arc<Program>, String> {
 
 /// What an effect was opened from, to open it again on another device.
 enum Spec {
-    Chain(Vec<String>),
-    /// `a.zip=key=value|b.zip`: a chain with inline options.
-    Effects(String),
+    /// A graph description: `a.zip=key=value|b.zip` or `[0][1]crossfade.zip[out]; ...`.
     Graph(String),
 }
 
@@ -364,29 +362,6 @@ fn wrap(graph: EffectGraph, spec: Spec, pending: Backend, name: String) -> *mut 
 /// Opens what `spec` describes on `ctx`, with the name of the effect.
 fn open_spec(spec: &Spec, ctx: &Arc<GpuContext>) -> Result<(EffectGraph, String), String> {
     match spec {
-        Spec::Chain(paths) => {
-            let mut effects = Vec::with_capacity(paths.len());
-            for path in paths {
-                let effect = Effect::from_program(program(path, ctx.clone())?).map_err(|e| format!("{path}: {e}"))?;
-                effects.push((label(path), effect));
-            }
-            let graph = EffectChain::new(effects).map_err(|e| e.to_string())?.into_graph();
-            let names: Vec<&str> = graph.effects().iter().map(|fx| fx.package().manifest.name.as_str()).collect();
-            let name = names.join(" | ");
-            Ok((graph, name))
-        }
-        Spec::Effects(text) => {
-            let graph = EffectChain::parse(text, |path| {
-                let effect = Effect::from_program(program(path, ctx.clone()).map_err(gpufx_core::Error::Package)?)
-                    .map_err(|e| gpufx_core::Error::Package(format!("{path}: {e}")))?;
-                Ok((label(path), effect))
-            })
-            .map_err(|e| e.to_string())?
-            .into_graph();
-            let names: Vec<&str> = graph.effects().iter().map(|fx| fx.package().manifest.name.as_str()).collect();
-            let name = names.join(" | ");
-            Ok((graph, name))
-        }
         Spec::Graph(text) => {
             let graph = EffectGraph::parse(text, |path| {
                 let effect = Effect::from_program(program(path, ctx.clone()).map_err(gpufx_core::Error::Package)?)
@@ -395,7 +370,7 @@ fn open_spec(spec: &Spec, ctx: &Arc<GpuContext>) -> Result<(EffectGraph, String)
             })
             .map_err(|e| e.to_string())?;
             let names: Vec<&str> = graph.effects().iter().map(|fx| fx.package().manifest.name.as_str()).collect();
-            let name = format!("graph of {}", names.join(", "));
+            let name = if graph.is_chain() { names.join(" | ") } else { format!("graph of {}", names.join(", ")) };
             Ok((graph, name))
         }
     }
@@ -439,42 +414,13 @@ fn on_host_device(fx: &GpufxEffect, call: &str) -> Result<(), String> {
     }
 }
 
-unsafe fn open_chain(paths: &[&str], backend: *const c_char) -> Result<*mut GpufxEffect, String> {
-    open(Spec::Chain(paths.iter().map(|p| p.to_string()).collect()), backend)
-}
-
 unsafe fn open_graph(text: &str, backend: *const c_char) -> Result<*mut GpufxEffect, String> {
     open(Spec::Graph(text.to_string()), backend)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn gpufx_effect_open(path: *const c_char, backend: *const c_char) -> *mut GpufxEffect {
-    guard(ptr::null_mut(), || open_chain(&[str_arg(path, "path")?], backend))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn gpufx_effect_open_chain(paths: *const *const c_char, count: u32, backend: *const c_char) -> *mut GpufxEffect {
-    guard(ptr::null_mut(), || {
-        if paths.is_null() || count == 0 {
-            return Err("paths must hold at least one path".into());
-        }
-        let raw = std::slice::from_raw_parts(paths, count as usize);
-        let mut list = Vec::with_capacity(raw.len());
-        for (i, &p) in raw.iter().enumerate() {
-            list.push(str_arg(p, &format!("path {i}"))?);
-        }
-        open_chain(&list, backend)
-    })
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn gpufx_effect_open_graph(graph: *const c_char, backend: *const c_char) -> *mut GpufxEffect {
     guard(ptr::null_mut(), || open_graph(str_arg(graph, "graph")?, backend))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn gpufx_effect_open_effects(effects: *const c_char, backend: *const c_char) -> *mut GpufxEffect {
-    guard(ptr::null_mut(), || open(Spec::Effects(str_arg(effects, "effects")?.to_string()), backend))
 }
 
 #[no_mangle]
@@ -1453,7 +1399,7 @@ mod tests {
 
     fn open(path: &std::path::Path) -> *mut GpufxEffect {
         let path = CString::new(path.to_str().unwrap()).unwrap();
-        unsafe { gpufx_effect_open(path.as_ptr(), ptr::null()) }
+        unsafe { gpufx_effect_open_graph(path.as_ptr(), ptr::null()) }
     }
 
     /// Tests that open effects take this lock: the load counter is process-wide, so the
@@ -1568,10 +1514,9 @@ mod tests {
             return;
         }
         let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects/ffmpeg");
-        let paths: Vec<CString> =
-            ["invert", "vignette"].iter().map(|n| CString::new(examples.join(n).to_str().unwrap()).unwrap()).collect();
-        let ptrs: Vec<*const c_char> = paths.iter().map(|p| p.as_ptr()).collect();
-        let fx = unsafe { gpufx_effect_open_chain(ptrs.as_ptr(), 2, ptr::null()) };
+        let text = ["invert", "vignette"].map(|n| examples.join(n).to_str().unwrap().to_string()).join("|");
+        let text = CString::new(text).unwrap();
+        let fx = unsafe { gpufx_effect_open_graph(text.as_ptr(), ptr::null()) };
         assert!(!fx.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
         let name = |i| unsafe { CStr::from_ptr(gpufx_effect_param_name(fx, i)) }.to_str().unwrap().to_string();
         let find = |n: &str| unsafe { gpufx_effect_find_param(fx, CString::new(n).unwrap().as_ptr()) };
@@ -1730,7 +1675,7 @@ mod tests {
         let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects/ffmpeg");
         let path = |n: &str| examples.join(n).to_str().unwrap().to_string();
         let text = CString::new(format!("{}|{}=strength=0:radius=t/2:enable=gt(t,1)", path("invert"), path("vignette"))).unwrap();
-        let fx = unsafe { gpufx_effect_open_effects(text.as_ptr(), ptr::null()) };
+        let fx = unsafe { gpufx_effect_open_graph(text.as_ptr(), ptr::null()) };
         assert!(!fx.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
         assert_eq!(unsafe { gpufx_effect_option_count(fx) }, 3);
         let option = |i| {
@@ -1753,7 +1698,7 @@ mod tests {
         unsafe { gpufx_effect_free(fx) };
 
         let bad = CString::new(format!("{}=strength=1", path("invert"))).unwrap();
-        assert!(unsafe { gpufx_effect_open_effects(bad.as_ptr(), ptr::null()) }.is_null());
+        assert!(unsafe { gpufx_effect_open_graph(bad.as_ptr(), ptr::null()) }.is_null());
         let msg = unsafe { CStr::from_ptr(gpufx_last_error()) }.to_str().unwrap().to_string();
         assert!(msg.contains("has no parameter `strength`"), "{msg}");
     }

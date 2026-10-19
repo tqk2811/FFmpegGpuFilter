@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::Arc;
 
-use gpufx_core::{Effect, EffectChain, FrameInfo, GpuContext, Image, ImageMut, Package};
+use gpufx_core::{Effect, EffectGraph, FrameInfo, GpuContext, Image, ImageMut, Package};
 
 fn gpu() -> Option<Arc<GpuContext>> {
     static CTX: std::sync::OnceLock<Option<Arc<GpuContext>>> = std::sync::OnceLock::new();
@@ -51,11 +51,11 @@ void main() {
 const W: u32 = 16;
 const H: u32 = 8;
 
-fn red(chain: &mut EffectChain) -> Vec<u8> {
+fn red(chain: &mut EffectGraph) -> Vec<u8> {
     let src = vec![0u8; (W * H * 4) as usize];
     let mut out = vec![0u8; src.len()];
     let input = Image { data: &src, width: W, height: H, stride: W * 4 };
-    chain.process(&[input], ImageMut { data: &mut out, width: W, height: H, stride: W * 4 }, &FrameInfo::new(0.0, 0)).unwrap();
+    chain.process(&[input], vec![ImageMut { data: &mut out, width: W, height: H, stride: W * 4 }], &FrameInfo::new(0.0, 0)).unwrap();
     out[..(W * 4) as usize].chunks(4).map(|p| p[0]).collect()
 }
 
@@ -63,7 +63,7 @@ fn red(chain: &mut EffectChain) -> Vec<u8> {
 fn expressions_are_compiled_into_wgsl_and_glsl() {
     let Some(ctx) = gpu() else { return };
     for glsl in [false, true] {
-        let mut chain = EffectChain::new(vec![("e".into(), open(&ctx, glsl))]).unwrap();
+        let mut chain = common::chain(vec![("e".into(), open(&ctx, glsl))]).unwrap();
         let ramp = red(&mut chain);
         assert!(ramp.windows(2).all(|w| w[0] < w[1]), "glsl {glsl}: default x * gain is a ramp: {ramp:?}");
         // Changed after the first frame: the bound effect gets new pipelines.

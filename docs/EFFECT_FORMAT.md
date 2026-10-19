@@ -90,7 +90,7 @@ How the rules apply:
   `formats` receives the stream's format as is; if it is not in the list, configuring the filter graph fails.
   To make it work, change the format first with `format=yuv420p,gpufx=...`. The size is checked
   at configuration and whenever the frame size changes. A misspelled format name is also an error.
-- **Chains and graphs** (`effect='a|b'`, `graph='...'`): every effect is checked where it sits. An effect
+- **Chains and graphs** (`graph='a|b'`, `graph='...'`): every effect is checked where it sits. An effect
   reading another sees that effect's size (the size of its first input) and the first format of its
   `output.formats` that the reader accepts; an input pad read by several effects must have a format
   all of them accept. `same_size` therefore also holds between two branches of a graph.
@@ -128,7 +128,7 @@ Each element of `passes`:
 
 The output has the same size as the first input. Input/texture/param names must be valid identifiers,
 must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `smp`.
-A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`effect='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
+A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
 
 ## Writing WGSL shaders
 
@@ -295,7 +295,7 @@ effect shrinks a picture a lot (a 4000 px photo in a small box).
 
 ## Expression parameters
 
-An `expr` parameter (api 2) holds a math expression, given as text like any parameter (inline after the package name in `effect=`/`graph=` of the
+An `expr` parameter (api 2) holds a math expression, given as text like any parameter (inline after the package name in `graph=` of the
 filter, `sendcmd`, inline in `gpufx run`), and evaluated on the GPU wherever the shader calls it, for example
 once per particle:
 
@@ -319,8 +319,8 @@ let x = gpufx_expr_path_x(u, p, x0);   // the arguments in the order of `vars`, 
   (`sendcmd`), not every frame. It is compiled when it is set, so a text that does not parse or compile
   is an error there (`sendcmd` reports it) and the last good expression stays; the stream goes on.
   The default expressions use the pipelines shared by every effect opened from the package.
-- On the FFmpeg command line, commas inside the quoted `effect='...'`/`graph='...'` are escaped as for any filter option, and
-  inline keys are separated by `&` (no escaping needed): `effect='x.zip=angle=max(90*u\,0)&speed=2'`. The
+- On the FFmpeg command line, commas inside the quoted `graph='...'`/`graph='...'` are escaped as for any filter option, and
+  inline keys are separated by `&` (no escaping needed): `graph='x.zip=angle=max(90*u\,0)&speed=2'`. The
   FFmpeg-style `:` is also accepted but must be written `\:` there (`...\,0)\:speed=2`). In the effect string
   `\&` is a literal `&` (escapable set: `\ ' : & ; | = [ ]`).
 

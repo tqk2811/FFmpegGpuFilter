@@ -55,7 +55,7 @@ Bằng chứng (FFmpeg `03d9533176`, nv12 / yuv420p 320x180, Intel = `vk:1`):
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:1,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx=effect=vignette.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip,gpufx_download,format=nv12" out.mp4
 ```
 
 Input CPU đưa thẳng vào `gpufx` được `gpufx` tự upload nên cũng không sao, và `hwdownload` sau `gpufx` đọc đúng
@@ -72,7 +72,7 @@ option:
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:1,disable_multiplane=1,linear_images=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,hwupload,gpufx=effect=vignette.zip,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
 ```
 
 Cần cả hai:

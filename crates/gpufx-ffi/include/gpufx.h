@@ -136,80 +136,80 @@ const char *gpufx_format_name(uint32_t index);
 int gpufx_format_supported(const char *format);
 
 /*
- * Opens a package (.zip file or unpacked directory) and compiles its shaders.
- * Effects opened from the same path with the same backend share the compiled package
- * while any of them is open: the file is read again only after all of them are freed.
- * backend: NULL or "auto", "vulkan", "dx12", "metal".
- * Since version 8 no GPU device is made here: shaders are checked on a device with no
- * GPU, limited to the WebGPU default formats. The device comes from gpufx_effect_use_*
- * or the first frame, so a missing GPU is reported there, not by open.
- */
-GpufxEffect *gpufx_effect_open(const char *path, const char *backend);
-
-/*
- * Opens count packages as one chain: each effect takes the output of the one before it,
- * and a frame is uploaded once, runs through every effect in one GPU submission and is
- * read back once. Only the first effect may take more than one input. The functions
- * below then describe the chain: the inputs of the first effect, the output formats of
- * the last, and the parameters of all of them (see gpufx_effect_param_name()).
- * Between two effects the rules are checked against the first output format of one that
- * the next accepts, as two filters in a row would negotiate it, but frames stay RGBA on
- * the GPU: nothing is converted to that format (no chroma subsampling, alpha kept).
- * Fails when no format the previous effect outputs is accepted by the next.
- */
-GpufxEffect *gpufx_effect_open_chain(const char *const *paths, uint32_t count, const char *backend);
-
-/*
- * Since version 5. Opens a graph of effects that runs in one GPU submission:
+ * Opens a graph of effects that runs in one GPU submission. The simplest graph is one
+ * package or a chain of them:
+ *   "vignette.zip"
+ *   "wipe.zip=progress=t/2:angle=45|vignette.zip"
+ * and the general form wires them with labels:
  *   "[0]split[a][b]; [a]blur.zip[ba]; [b]gray.zip|vignette.zip[gb]; [ba][gb]crossfade.zip[out]"
+ * A package is a path (.zip file or unpacked directory). Effects opened from the same
+ * path with the same backend share the compiled package while any of them is open: the
+ * file is read again only after all of them are freed.
+ * backend: NULL or "auto", "vulkan", "dx12", "metal".
+ *
  * Statements are separated by ';'. Each reads labels, runs a node and writes labels.
  * [0], [1]... are the input pads (named "in0", "in1"...); every pad up to the highest
- * must be read. Other labels (letters, digits, '_', '-') are written once and read at most once (split them to read
- * them twice). Labels no statement reads are the output pads, in the order they are
- * written; gpufx_effect_output_name() gives their labels. A node is:
- *   split         one label in, any number out, no copy (the outputs are the input)
+ * must be read. Other labels (letters, digits, '_', '-') are written once and read at
+ * most once (split them to read them twice). Labels no statement reads are the output
+ * pads, in the order they are written; gpufx_effect_output_name() gives their labels.
+ * A node is:
+ *   split         one label in, any number out (two when unlabelled), no copy (the
+ *                 outputs are the input)
  *   null          one label in, one out, no copy
- *   a.zip|b.zip   packages (paths, as for gpufx_effect_open) chained as in
- *                 gpufx_effect_open_chain(): as many labels in as the first package has
- *                 inputs, one out.
+ *   a.zip|b.zip   packages chained: each effect takes the output of the one before it;
+ *                 as many labels in as the first package has inputs, one out. Only the
+ *                 first package may take more than one input.
+ * As in an FFmpeg filtergraph, labels may be left out. A statement without input labels
+ * reads the input pads no label of the graph names, the lowest first (as many as its
+ * first package has inputs, one for split and null): "[0][1]crossfade.zip" and
+ * "crossfade.zip" read the same pads, and in "[1]a.zip[x]; b.zip[y]; ..." b.zip reads
+ * [0]. Unlike ffmpeg -filter_complex, which binds the first unused stream in order,
+ * this looks ahead at later statements too, because a pad may be read only once. A
+ * statement without output labels writes output pads (named "out0", "out1"...,
+ * skipping labels the graph uses; an unlabelled split writes two). On each side the
+ * labels are left out entirely or all given. A graph of one statement without any
+ * label whose node is a package chain (not split or null) is a chain: its input pads are
+ * named after the inputs of the first package's manifest and its one output is
+ * "default", as one FFmpeg filter; any label switches to "in0"... and "out0"... names.
+ * A lone "null" is a valid graph that passes [0] through.
+ *
  * An effect writes the size of its first input. Every input is uploaded once and every
  * output read back once; edges stay on the GPU in pooled textures that are reused once
- * their last reader has run. Cycles, labels read but never written, written twice or
- * read twice, unread pads and wrong label counts fail here; the manifest size and format
- * rules of every node are checked by gpufx_effect_check_inputs().
- * Since version 12 a package takes inline options after its path, as an FFmpeg filter
- * does: "blur.zip=radius=8:enable=gt(t,1)" (see gpufx_effect_open_effects()). Paths
- * holding '[', ']', ';', '|', '=', ':', '\' or '\'' escape them with '\' or are quoted.
- * Inline constant parameter values are applied at open; expression values and the
- * "enable"/"bypass" keys are NOT applied: the caller reads them with
- * gpufx_effect_option_count()/gpufx_effect_option() and applies them itself.
- * Parameters are named as in a chain over all packages of the graph, in statement order;
- * gpufx_effect_find_param() also takes "label.name" where label is the output label of a
- * node ("ba.radius"). The other functions describe the graph: input formats are those
- * every effect reading the pad accepts, gpufx_effect_output_format*() describe output 0.
+ * their last reader has run. Between two effects the rules are checked against the first
+ * output format of one that the next accepts, as two filters in a row would negotiate
+ * it, but frames stay RGBA on the GPU: nothing is converted to that format (no chroma
+ * subsampling, alpha kept). Cycles, labels read but never written, written twice or read
+ * twice, unread pads, wrong label counts and formats no next effect accepts fail here;
+ * the manifest size and format rules of every node are checked by
+ * gpufx_effect_check_inputs().
+ *
+ * Inline options: a package takes named key=value pairs after its path, separated by
+ * ':' (or '&'), as an FFmpeg filter does: "blur.zip=radius=8:enable=gt(t,1)". A key is
+ * a parameter of that package, "enable" (an expression switching the effect, as
+ * gpufx_effect_set_node_enabled() does per frame) or "bypass" ("0" or "auto"). '\'
+ * escapes the next character (one of \ ' : & ; | = [ ]; before any other it is a plain
+ * '\', as in Windows paths) and '...' quotes, so a path or value may hold ':', '|', '=',
+ * '[', ']' or ';'; commas need no escape. An unknown key, a key given twice or a bypass
+ * other than 0/auto fails here. Parameter values that are constants ("0.5", "1,0,0",
+ * "#ff8800") are applied at open; expression values and the "enable"/"bypass" keys are
+ * NOT applied: the library evaluates no expression, so the caller reads every option
+ * back with gpufx_effect_option_count()/gpufx_effect_option() and evaluates the rest
+ * itself.
+ *
+ * Parameters are named over all packages, in statement order (see
+ * gpufx_effect_param_name()); gpufx_effect_find_param() also takes "label.name" where
+ * label is the output label of a node ("ba.radius"). The other functions describe the
+ * graph: input formats are those every effect reading the pad accepts,
+ * gpufx_effect_output_format*() describe output 0.
+ * No GPU device is made here: shaders are checked on a device with no GPU, limited to
+ * the WebGPU default formats. The device comes from gpufx_effect_use_* or the first
+ * frame, so a missing GPU is reported there, not by open.
  */
 GpufxEffect *gpufx_effect_open_graph(const char *graph, const char *backend);
 
 /*
- * Since version 12. Opens a chain written as one string, each package with inline
- * options: "wipe.zip=progress=t/2:angle=45|vignette.zip". Options are named
- * key=value pairs separated by ':': a parameter of that package, "enable" (an
- * expression switching the effect, as gpufx_effect_set_node_enabled() does per frame)
- * or "bypass" ("0" or "auto"). '\' escapes the next character (one of \ ' : ; | = [ ]; before any other it is a
- * plain '\', as in Windows paths) and '...' quotes, so a
- * value may hold ':', '|', '=', '[', ']' or ';'; commas need no escape. An unknown key,
- * a key given twice or a bypass other than 0/auto fails here.
- * Parameter values that are constants ("0.5", "1,0,0", "#ff8800") are applied at open;
- * expression values and the "enable"/"bypass" keys are NOT applied: the library
- * evaluates no expression, so the caller reads every option back with
- * gpufx_effect_option_count()/gpufx_effect_option() and evaluates the rest itself.
- */
-GpufxEffect *gpufx_effect_open_effects(const char *effects, const char *backend);
-
-/*
- * Since version 12. Inline options of an effect opened by gpufx_effect_open_effects() or
- * gpufx_effect_open_graph(), in the order they were written: effect gets the index of
- * the effect (as in "index.name"), key and value strings owned by fx. 0 for others.
+ * Inline options of the effects, in the order they were written: effect gets the index
+ * of the effect (as in "index.name"), key and value strings owned by fx.
  */
 uint32_t gpufx_effect_option_count(const GpufxEffect *fx);
 int gpufx_effect_option(const GpufxEffect *fx, uint32_t index, uint32_t *effect,

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use gpufx_core::manifest::SizeRule;
-use gpufx_core::{parse_effect_item, Backend, Effect, FrameInfo, GpuContext, Image, ImageMut, Package, StreamInfo};
+use gpufx_core::{Backend, Effect, EffectGraph, FrameInfo, GpuContext, Image, ImageMut, Package, StreamInfo};
 
 const USAGE: &str = "\
 usage:
@@ -12,10 +12,13 @@ usage:
   gpufx check <package> [--backend ...]   compile every shader and report errors
   gpufx pack [--precompile] <dir> <out.zip>
              --precompile adds D3D12 shaders, used when GPUFX_TRUST_PRECOMPILED=1
-  gpufx run  <package>[=name=value:name=value...] -i <in.png> [-i <in2.png>...] -o <out.png>
+  gpufx run  <graph> -i <in.png> [-i <in2.png>...] -o <out.png>
              [--backend auto|vulkan|dx12|metal] [--time seconds]
-             parameters are written after the package, as in the FFmpeg filter:
-             gpufx run 'vignette.zip=strength=0.3:color=#ff8800' -i in.png -o out.png";
+             the graph is written as for the FFmpeg filter, with one output: a package
+             with parameters, a chain or a labelled graph:
+             gpufx run 'vignette.zip=strength=0.3:color=#ff8800' -i in.png -o out.png
+             gpufx run 'grayscale.zip|vignette.zip' -i in.png -o out.png
+             gpufx run '[0][1]crossfade.zip=progress=0.5' -i a.png -i b.png -o out.png";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -127,8 +130,7 @@ fn pack(dir: &Path, out: &Path, precompile: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn run(item: &str, args: &[String]) -> Result<(), String> {
-    let (path, params) = parse_effect_item(item).map_err(|e| e.to_string())?;
+fn run(text: &str, args: &[String]) -> Result<(), String> {
     let mut inputs = Vec::new();
     let mut output = None;
     let mut backend = Backend::Auto;
@@ -146,28 +148,44 @@ fn run(item: &str, args: &[String]) -> Result<(), String> {
     }
     let output = output.ok_or_else(|| format!("missing -o\n{USAGE}"))?;
 
-    let pkg = Package::open(&path).map_err(|e| e.to_string())?;
     let ctx = GpuContext::new(backend).map_err(|e| e.to_string())?;
     eprintln!("device: {}", ctx.description());
-    let mut fx = Effect::new(ctx, pkg).map_err(|e| e.to_string())?;
-    for (k, v) in &params {
-        if k == "enable" || k == "bypass" {
-            return Err(format!("{k}= switches effects over time in a chain or graph of the FFmpeg filter; run renders one frame"));
+    let mut graph = EffectGraph::parse(text, |path| {
+        let pkg = Package::open(path)?;
+        let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
+        let label = name.strip_suffix(".zip").or_else(|| name.strip_suffix(".ZIP")).unwrap_or(&name).to_string();
+        Ok((label, Effect::new(ctx.clone(), pkg)?))
+    })
+    .map_err(|e| e.to_string())?;
+    if graph.output_count() != 1 {
+        return Err(format!("the graph has {} outputs ({}); run writes one", graph.output_count(), graph.output_names().join(", ")));
+    }
+    // Constants are set by parse; expression values are set here.
+    let options: Vec<(usize, String, String)> = graph
+        .inline_options()
+        .iter()
+        .enumerate()
+        .flat_map(|(k, list)| list.iter().map(move |(key, value)| (k, key.clone(), value.clone())))
+        .collect();
+    for (k, key, value) in options {
+        if key == "enable" || key == "bypass" {
+            return Err(format!("{key}= switches effects over time in the FFmpeg filter; run renders one frame"));
         }
-        fx.params_mut().set_str(k, v).map_err(|e| format!("{path}: {e}"))?;
+        graph.set_param_str(&format!("{k}.{key}"), &value).map_err(|e| e.to_string())?;
     }
     let decoded: Vec<image::DynamicImage> =
         inputs.iter().map(|p| image::open(p).map_err(|e| format!("{p}: {e}"))).collect::<Result<_, _>>()?;
     let streams: Vec<StreamInfo> =
         decoded.iter().map(|i| StreamInfo { format: pix_fmt(i), width: i.width(), height: i.height() }).collect();
-    fx.package().manifest.check_inputs(&streams).map_err(|e| e.to_string())?;
+    graph.check_inputs(&streams).map_err(|e| e.to_string())?;
     let images: Vec<image::RgbaImage> = decoded.iter().map(|i| i.to_rgba8()).collect();
     let views: Vec<Image> =
         images.iter().map(|i| Image { data: i.as_raw(), width: i.width(), height: i.height(), stride: i.width() * 4 }).collect();
-    let (w, h) = views.first().map(|v| (v.width, v.height)).ok_or("need at least one -i")?;
+    let (w, h) = views.get(graph.output_pad(0)).map(|v| (v.width, v.height)).ok_or("need at least one -i")?;
     let mut out = vec![0u8; (w * h * 4) as usize];
     let start = std::time::Instant::now();
-    fx.process(&views, ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }, &FrameInfo::new(time, 0))
+    graph
+        .process(&views, vec![ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }], &FrameInfo::new(time, 0))
         .map_err(|e| e.to_string())?;
     eprintln!("processed {w}x{h} in {:.1} ms", start.elapsed().as_secs_f64() * 1e3);
     image::RgbaImage::from_raw(w, h, out).expect("sized above").save(&output).map_err(|e| e.to_string())?;

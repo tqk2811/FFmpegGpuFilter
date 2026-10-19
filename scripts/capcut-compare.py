@@ -141,7 +141,7 @@ def main():
 
     win = [r for r in rows if 0 < r["progress"] < 1]
     worst = min(win, key=lambda r: r["psnr"])
-    summary = dict(effect=name, id=o.id, capcut_name=meta["name"], json_duration_us=meta["duration"],
+    summary = dict(graph=name, id=o.id, capcut_name=meta["name"], json_duration_us=meta["duration"],
                    is_overlap=meta["is_overlap"], feed=o.feed, window=[o.start, o.start + o.frames],
                    psnr_ends=ends,
                    psnr_window=round(float(np.mean([r["psnr"] for r in win])), 2),

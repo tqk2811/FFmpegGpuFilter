@@ -90,7 +90,7 @@ Cách áp dụng:
   `formats` nhận nguyên format của stream; khác danh sách thì lỗi khi cấu hình filter graph.
   Muốn chạy thì đổi format trước bằng `format=yuv420p,gpufx=...`. Kích thước được kiểm tra
   khi cấu hình và mỗi khi kích thước frame đổi. Tên format sai chính tả cũng là lỗi.
-- **Chuỗi và đồ thị** (`effect='a|b'`, `graph='...'`): mỗi hiệu ứng được kiểm tại chỗ của nó. Hiệu ứng
+- **Chuỗi và đồ thị** (`graph='a|b'`, `graph='...'`): mỗi hiệu ứng được kiểm tại chỗ của nó. Hiệu ứng
   đọc hiệu ứng khác thấy kích thước của hiệu ứng đó (kích thước input đầu của nó) và format đầu tiên
   trong `output.formats` của nó mà hiệu ứng đọc nhận; input pad được nhiều hiệu ứng đọc phải có
   format mà tất cả đều nhận. Vì vậy `same_size` cũng áp dụng giữa hai nhánh của đồ thị.
@@ -128,7 +128,7 @@ Mỗi phần tử `passes`:
 
 Output có kích thước bằng input đầu tiên. Tên input/texture/param phải là định danh hợp lệ,
 không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `smp`.
-Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`effect='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
+Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`graph='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
 
 ## Viết shader WGSL
 
@@ -292,7 +292,7 @@ nhiều (ảnh 4000 px trong một hộp nhỏ).
 
 ## Tham số biểu thức
 
-Tham số `expr` (api 2) giữ một biểu thức toán, truyền dạng chuỗi như mọi tham số (inline sau tên package trong `effect=`/`graph=` của filter,
+Tham số `expr` (api 2) giữ một biểu thức toán, truyền dạng chuỗi như mọi tham số (inline sau tên package trong `graph=` của filter,
 `sendcmd`, inline trong `gpufx run`), và được tính trên GPU ở chỗ shader gọi nó, ví dụ mỗi hạt một lần:
 
 ```json
@@ -314,8 +314,8 @@ let x = gpufx_expr_path_x(u, p, x0);   // tham số theo thứ tự `vars`, đ�
   đổi mỗi frame. Biểu thức được biên dịch ngay lúc đặt, nên chuỗi parse hay biên dịch lỗi báo lỗi tại đó
   (`sendcmd` báo lại) và giữ biểu thức đúng gần nhất; stream vẫn chạy tiếp. Biểu thức mặc định dùng
   pipeline chung của mọi hiệu ứng mở từ gói.
-- Trên dòng lệnh FFmpeg, dấu phẩy trong `effect='...'`/`graph='...'` phải escape như mọi option của filter, còn
-  các key inline phân tách bằng `&` (không cần escape): `effect='x.zip=angle=max(90*u\,0)&speed=2'`. Dấu `:` kiểu
+- Trên dòng lệnh FFmpeg, dấu phẩy trong `graph='...'`/`graph='...'` phải escape như mọi option của filter, còn
+  các key inline phân tách bằng `&` (không cần escape): `graph='x.zip=angle=max(90*u\,0)&speed=2'`. Dấu `:` kiểu
   FFmpeg cũng được chấp nhận nhưng ở đó phải viết `\:` (`...\,0)\:speed=2`). Trong chuỗi effect, `\&` là `&`
   nguyên văn (tập ký tự escape được: `\ ' : & ; | = [ ]`).
 
