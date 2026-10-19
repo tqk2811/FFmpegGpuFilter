@@ -18,13 +18,14 @@
 extern "C" {
 #endif
 
-#define GPUFX_API_VERSION 12
+#define GPUFX_API_VERSION 13
 
 /* Names of the FFmpeg filters this project adds to libavfilter, for
  * avfilter_get_by_name() or a filter graph string. */
 #define GPUFX_FILTER_NAME          "gpufx"
 #define GPUFX_UPLOAD_FILTER_NAME   "gpufx_upload"
 #define GPUFX_DOWNLOAD_FILTER_NAME "gpufx_download"
+#define GPUFX_AI_FRAMERATE_FILTER_NAME "gpufx_ai_framerate"
 
 typedef struct GpufxEffect GpufxEffect;
 
@@ -566,6 +567,60 @@ typedef struct GpufxVtFrame {
 int gpufx_effect_process_videotoolbox(GpufxEffect *fx, const GpufxVtFrame *inputs, uint32_t nb_inputs,
                                       const GpufxVtFrame *outs, uint32_t nb_outputs,
                                       const GpufxFrameInfo *info);
+
+/*
+ * Since version 13: frame interpolation with a gpufx-nn package whose io.json has kind
+ * "frame_interp" (RIFE v4, docs/NN_MODEL_FORMAT.md), on the GPU frames above. Same frames,
+ * devices and synchronisation as the gpufx_effect_*_vulkan/d3d12/d3d11/videotoolbox calls.
+ *
+ * Each process call takes the next source frame (input) and makes nb_outputs frames
+ * between the previous source frame and it, frame k at time times[k] in (0, 1] (0: the
+ * previous frame, 1: input). A time of 1 copies the source frame into that output. The
+ * source frame is converted to RGBA once and kept on the GPU for the next call, so the
+ * caller need not hold it. Only times below 1 need a previous source frame: on the first
+ * call after open, gpufx_ai_interp_reset() or a change of frame size such outputs fail, so
+ * pass nb_outputs 0 or only times of 1 (the source frame is still taken for the next call). The
+ * outputs have the input's size; the source frames themselves are not written.
+ */
+typedef struct GpufxAiInterp GpufxAiInterp;
+
+/* Checks that model names a file; the model is loaded by gpufx_ai_interp_use_*. */
+GpufxAiInterp *gpufx_ai_interp_open(const char *model);
+void gpufx_ai_interp_free(GpufxAiInterp *ai);
+/* The device the model runs on, "" before gpufx_ai_interp_use_*. */
+const char *gpufx_ai_interp_device(const GpufxAiInterp *ai);
+
+/*
+ * Scene change threshold in percent (0..100) of the luma difference of the pair (scored as
+ * FFmpeg's framerate filter does: min(mean difference, its change from the last pair)): a
+ * pair scoring at least this is a cut, and each frame made is the nearer source frame
+ * instead of an interpolation. 0 (the default) interpolates every pair.
+ */
+int gpufx_ai_interp_set_scene(GpufxAiInterp *ai, double threshold);
+/* Forgets the previous source frame and the scene history (a discontinuity): the next call makes no frame below time 1. */
+void gpufx_ai_interp_reset(GpufxAiInterp *ai);
+
+/* Load the model on the caller's device (once; a later call with the same device is free). */
+int gpufx_ai_interp_use_vulkan(GpufxAiInterp *ai, const GpufxVulkanDevice *dev);
+int gpufx_ai_interp_use_d3d12(GpufxAiInterp *ai, const GpufxD3D12Device *dev);
+int gpufx_ai_interp_use_d3d11(GpufxAiInterp *ai, const GpufxD3D11Device *dev);
+int gpufx_ai_interp_use_videotoolbox(GpufxAiInterp *ai);
+
+/*
+ * As gpufx_effect_process_vulkan() and the others with one input and nb_outputs outputs
+ * (outs may be NULL when nb_outputs is 0); the semaphore values, layouts and fence values
+ * of input and outs are updated the same way.
+ */
+int gpufx_ai_interp_process_vulkan(GpufxAiInterp *ai, GpufxVulkanFrame *input,
+                                   GpufxVulkanFrame *outs, uint32_t nb_outputs, const float *times);
+int gpufx_ai_interp_process_d3d12(GpufxAiInterp *ai, GpufxD3D12Frame *input,
+                                  GpufxD3D12Frame *outs, uint32_t nb_outputs, const float *times);
+/* The caller holds the immediate context's lock. */
+int gpufx_ai_interp_process_d3d11(GpufxAiInterp *ai, const GpufxD3D11Frame *input,
+                                  const GpufxD3D11Frame *outs, uint32_t nb_outputs, const float *times);
+int gpufx_ai_interp_process_videotoolbox(GpufxAiInterp *ai, const GpufxVtFrame *input,
+                                         const GpufxVtFrame *outs, uint32_t nb_outputs,
+                                         const float *times);
 
 #ifdef __cplusplus
 }

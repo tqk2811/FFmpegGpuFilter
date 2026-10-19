@@ -47,6 +47,7 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleExW, GET_MODULE_HANDL
 use crate::frame::{ColorInfo, GpuFrame, PixelFormat};
 use crate::graph::EffectGraph;
 use crate::runtime::{FrameInfo, GpuContext};
+use crate::stage::GpuStage;
 use crate::Error;
 
 /// A D3D12 frame, as `AVD3D12VAFrame` describes it.
@@ -336,320 +337,341 @@ fn plan(output: bool, direct: bool) -> (wgpu::TextureUsages, wgpu::TextureUses) 
 }
 
 impl EffectGraph {
-    /// Runs the graph on D3D12 frames of the device the graph's context shares
-    /// ([`GpuContext::from_d3d12`]), reading and writing the resources in place where
-    /// they allow it (see the module documentation). One submission waits for every
-    /// frame's fence at its value and signals one more; `fence_value` of every frame is
-    /// updated. Returns once the work is submitted; the next call waits until it is done
-    /// (an upload into a frame gpufx still reads would not wait for its fence).
+    /// Runs the graph on D3D12 frames (see `process_d3d12` in this module).
     ///
     /// # Safety
-    /// The resources and fences must be valid objects of that device, the frames in
-    /// `D3D12_RESOURCE_STATE_COMMON` once their fences reach the values (they are left in
-    /// it), and not used by others until then.
+    /// As for `process_d3d12` in this module.
     pub unsafe fn process_d3d12(
         &mut self,
         inputs: &mut [D3d12Frame],
         outs: &mut [D3d12Frame],
         info: Option<&FrameInfo>,
     ) -> Result<(), Error> {
-        let ctx = self.context().clone();
-        let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D12 frames need a graph opened on a shared D3D12 device".into()))?;
-        if shared.d3d11.is_some() {
-            return Err(Error::Gpu("this graph runs on a D3D11 device; give it D3D11 frames".into()));
-        }
-        if let Some(last) = self.dx.last.take() {
-            ctx.device.poll(wgpu::PollType::Wait { submission_index: Some(last), timeout: None }).map_err(gpu_err)?;
-        }
-        let dev = &shared.device.0;
-        let mut ins = Vec::new();
-        let mut os = Vec::new();
-        let mut fences: Vec<(ID3D12Fence, u64)> = Vec::new();
-        for (output, list, res) in [(false, &*inputs, &mut ins), (true, &*outs, &mut os)] {
-            for (n, f) in list.iter().enumerate() {
-                let what = format!("{} {n}", if output { "output" } else { "input" });
-                let r: ID3D12Resource = borrow(f.resource, &format!("{what}: resource"))?;
-                res.push(check((f.format, f.width, f.height, r, f.subresource, f.color), output, &what, dev)?);
-                let fence: ID3D12Fence = borrow(f.fence, &format!("{what}: fence"))?;
-                match fences.iter_mut().find(|(x, _)| x.as_raw() == fence.as_raw()) {
-                    Some((_, v)) => *v = (*v).max(f.fence_value),
-                    None => fences.push((fence, f.fence_value)),
-                }
-            }
-        }
-        let sync: Vec<(ID3D12Fence, u64, u64)> = fences.into_iter().map(|(f, v)| (f, v, v + 1)).collect();
-        let index = self.run_dx12(&ctx, shared, &ins, &os, info, &sync)?;
-        self.dx.last = Some(index);
-        for f in inputs.iter_mut().chain(outs.iter_mut()) {
-            if let Some((_, _, s)) = sync.iter().find(|(x, _, _)| x.as_raw() == f.fence) {
-                f.fence_value = *s;
-            }
-        }
-        Ok(())
+        process_d3d12(self, inputs, outs, info)
     }
 
-    /// Runs the graph on D3D11 frames of the device the graph's context was made for
-    /// ([`GpuContext::from_d3d11`]). Shareable textures (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`)
-    /// are used in place; other inputs are copied once into a shared texture of gpufx,
-    /// and outputs must be shareable. The D3D11 work queued after the call (on the
-    /// immediate context) waits for the effects on the GPU.
+    /// Runs the graph on D3D11 frames (see `process_d3d11` in this module).
     ///
     /// # Safety
-    /// The textures must be valid textures of that device; the caller holds the lock of
-    /// the immediate context (FFmpeg's `AVD3D11VADeviceContext.lock`) during the call.
+    /// As for `process_d3d11` in this module.
     pub unsafe fn process_d3d11(&mut self, inputs: &[D3d11Frame], outs: &[D3d11Frame], info: Option<&FrameInfo>) -> Result<(), Error> {
-        let ctx = self.context().clone();
-        let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D11 frames need a graph opened on a D3D11 device".into()))?;
-        let mut d11 = shared
-            .d3d11
-            .as_ref()
-            .ok_or_else(|| Error::Gpu("this graph runs on a D3D12 device; give it D3D12 frames".into()))?
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let dev = &shared.device.0;
-        let mut ins = Vec::new();
-        let mut os = Vec::new();
-        for (output, list, res) in [(false, inputs, &mut ins), (true, outs, &mut os)] {
-            for (n, f) in list.iter().enumerate() {
-                let what = format!("{} {n}", if output { "output" } else { "input" });
-                let tex: ID3D11Texture2D = borrow(f.texture, &format!("{what}: texture"))?;
-                let mut d = D3D11_TEXTURE2D_DESC::default();
-                tex.GetDesc(&mut d);
-                let shareable = d.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0 as u32 != 0;
-                let (resource, slice) = if shareable {
-                    (d11.open(dev, &tex)?, f.array_slice)
-                } else if output {
-                    return Err(Error::Frame(format!(
-                        "{what}: D3D11 output frames must be shareable (D3D11_RESOURCE_MISC_SHARED_NTHANDLE); gpufx makes its own"
-                    )));
-                } else {
-                    // One copy into a shared texture of gpufx, on the immediate context.
-                    let key = (f.width, f.height, d.Format.0);
-                    let found = self.dx.staging.iter().position(|(pad, k, _, _)| *pad == n && *k == key);
-                    let i = match found {
-                        Some(i) => i,
-                        None => {
-                            self.dx.staging.retain(|(pad, _, _, _)| *pad != n);
-                            let desc = D3D11_TEXTURE2D_DESC {
-                                Width: f.width,
-                                Height: f.height,
-                                MipLevels: 1,
-                                ArraySize: 1,
-                                Format: d.Format,
-                                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                                Usage: D3D11_USAGE_DEFAULT,
-                                BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-                                CPUAccessFlags: 0,
-                                MiscFlags: (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32,
-                            };
-                            let mut staging: Option<ID3D11Texture2D> = None;
-                            d11.device.0.CreateTexture2D(&desc, None, Some(&mut staging)).map_err(|e| {
-                                gpu_err(format!("{what}: cannot make a shared D3D11 texture of DXGI_FORMAT {}: {e}", d.Format.0))
-                            })?;
-                            let staging = staging.ok_or_else(|| gpu_err("no texture"))?;
-                            let r = share(dev, &staging)?;
-                            self.dx.staging.push((n, key, Com(staging), Com(r)));
-                            self.dx.staging.len() - 1
-                        }
-                    };
-                    let (_, _, staging, r) = &self.dx.staging[i];
-                    if d.MipLevels != 1 {
-                        return Err(Error::Frame(format!("{what}: textures with {} mip levels are not supported", d.MipLevels)));
-                    }
-                    // Planar boxes must cover whole chroma samples.
-                    debug_assert!(
-                        f.format.plane_count() == 1 || (f.width % 2 == 0 && f.height % 2 == 0),
-                        "odd {}x{} box for a planar texture",
-                        f.width,
-                        f.height
-                    );
-                    let src = f.array_slice;
-                    let region = D3D11_BOX { left: 0, top: 0, front: 0, right: f.width, bottom: f.height, back: 1 };
-                    d11.context.0.CopySubresourceRegion(&staging.0, 0, 0, 0, 0, &tex, src, Some(&region));
-                    (r.0.clone(), 0)
-                };
-                res.push(check((f.format, f.width, f.height, resource, slice, f.color), output, &what, dev)?);
-            }
-        }
-        // D3D11 work so far, then gpufx, then what D3D11 queues next.
-        let v = d11.value + 1;
-        d11.context.0.Signal(&d11.fence11.0, v).map_err(gpu_err)?;
-        d11.context.0.Flush();
-        d11.value = v;
-        let sync = [(d11.fence12.0.clone(), v, v + 1)];
-        let run = self.run_dx12(&ctx, shared, &ins, &os, info, &sync);
-        if run.is_ok() {
-            d11.value = v + 1;
-            d11.context.0.Wait(&d11.fence11.0, v + 1).map_err(gpu_err)?;
-        }
-        run.map(|_| ())
+        process_d3d11(self, inputs, outs, info)
     }
+}
 
-    /// One submission: barriers to the states needed, copies into gpufx textures, the
-    /// graph, copies out, barriers back to COMMON; waits and signals `sync`
-    /// (fence, wait value, signal value).
-    unsafe fn run_dx12(
-        &mut self,
-        ctx: &Arc<GpuContext>,
-        shared: &Shared,
-        ins: &[Res],
-        outs: &[Res],
-        info: Option<&FrameInfo>,
-        sync: &[(ID3D12Fence, u64, u64)],
-    ) -> Result<wgpu::SubmissionIndex, Error> {
-        if *shared.submit.lock().unwrap_or_else(|p| p.into_inner()) {
-            return Err(Error::Gpu("an earlier D3D12 submission failed; the shared device is no longer used".into()));
-        }
-        let device = &ctx.device;
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-
-        // Plane wrappers (nothing owned, no copy) and the GpuFrames the graph sees.
-        struct Plane {
-            wrapper: wgpu::Texture,
-            scratch: Option<wgpu::Texture>,
-            slice: u32,
-            size: (u32, u32),
-        }
-        let mut frames: [Vec<GpuFrame>; 2] = [Vec::new(), Vec::new()];
-        let mut planes: [Vec<Plane>; 2] = [Vec::new(), Vec::new()];
-        // Barrier textures, one per (resource, slice), and the state each is used in.
-        let mut barriers: Vec<(usize, u32, hal::dx12::Texture, wgpu::TextureUses)> = Vec::new();
-        for (o, list) in [ins, outs].into_iter().enumerate() {
-            let output = o == 1;
-            for (n, r) in list.iter().enumerate() {
-                let (usage, state) = plan(output, r.direct);
-                let count = r.format.plane_count();
-                let planar = count > 1;
-                let mut textures = Vec::new();
-                for p in 0..count {
-                    let format = r.format.plane_texture_format(p);
-                    let (w, h) = r.format.plane_texture_size(p, r.width, r.height);
-                    let (rw, rh) = r.format.plane_texture_size(p, r.size.0, r.size.1);
-                    let size = wgpu::Extent3d { width: rw, height: rh, depth_or_array_layers: r.size.2 };
-                    let mut hal_tex =
-                        hal::dx12::Device::texture_from_raw(r.resource.clone(), format, wgpu::TextureDimension::D2, size, 1, 1);
-                    if planar {
-                        hal_tex = hal_tex.with_plane_slice(p as u32);
-                    }
-                    let wrapper = device.create_texture_from_hal::<Dx12>(
-                        hal_tex,
-                        &wgpu::TextureDescriptor {
-                            label: Some("gpufx d3d12 plane"),
-                            size,
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format,
-                            usage,
-                            view_formats: &[],
-                        },
-                        state,
-                    );
-                    let scratch = (!r.direct).then(|| self.dx.scratch(device, (output, n, p, format, w, h)));
-                    textures.push(scratch.clone().unwrap_or_else(|| wrapper.clone()));
-                    planes[o].push(Plane { wrapper, scratch, slice: r.slice, size: (w, h) });
-                }
-                frames[o].push(GpuFrame { format: r.format, width: r.width, height: r.height, planes: textures, color: r.color });
-                let key = r.resource.as_raw() as usize;
-                if !barriers.iter().any(|(k, s, _, _)| *k == key && *s == r.slice) {
-                    let whole = match r.format {
-                        PixelFormat::Nv12 => wgpu::TextureFormat::NV12,
-                        PixelFormat::P010 => wgpu::TextureFormat::P010,
-                        f => f.plane_texture_format(0),
-                    };
-                    let size = wgpu::Extent3d { width: r.size.0, height: r.size.1, depth_or_array_layers: r.size.2 };
-                    let t = hal::dx12::Device::texture_from_raw(r.resource.clone(), whole, wgpu::TextureDimension::D2, size, 1, 1);
-                    barriers.push((key, r.slice, t, state));
-                }
+/// Runs a stage (an effect graph) on D3D12 frames of the device the graph's context shares
+/// ([`GpuContext::from_d3d12`]), reading and writing the resources in place where
+/// they allow it (see the module documentation). One submission waits for every
+/// frame's fence at its value and signals one more; `fence_value` of every frame is
+/// updated. Returns once the work is submitted; the next call waits until it is done
+/// (an upload into a frame gpufx still reads would not wait for its fence).
+///
+/// # Safety
+/// The resources and fences must be valid objects of that device, the frames in
+/// `D3D12_RESOURCE_STATE_COMMON` once their fences reach the values (they are left in
+/// it), and not used by others until then.
+pub(crate) unsafe fn process_d3d12<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    inputs: &mut [D3d12Frame],
+    outs: &mut [D3d12Frame],
+    info: Option<&FrameInfo>,
+) -> Result<(), Error> {
+    let ctx = stage.context().clone();
+    let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D12 frames need a graph opened on a shared D3D12 device".into()))?;
+    if shared.d3d11.is_some() {
+        return Err(Error::Gpu("this graph runs on a D3D11 device; give it D3D11 frames".into()));
+    }
+    if let Some(last) = stage.interop().dx.last.take() {
+        ctx.device.poll(wgpu::PollType::Wait { submission_index: Some(last), timeout: None }).map_err(gpu_err)?;
+    }
+    let dev = &shared.device.0;
+    let mut ins = Vec::new();
+    let mut os = Vec::new();
+    let mut fences: Vec<(ID3D12Fence, u64)> = Vec::new();
+    for (output, list, res) in [(false, &*inputs, &mut ins), (true, &*outs, &mut os)] {
+        for (n, f) in list.iter().enumerate() {
+            let what = format!("{} {n}", if output { "output" } else { "input" });
+            let r: ID3D12Resource = borrow(f.resource, &format!("{what}: resource"))?;
+            res.push(check((f.format, f.width, f.height, r, f.subresource, f.color), output, &what, dev)?);
+            let fence: ID3D12Fence = borrow(f.fence, &format!("{what}: fence"))?;
+            match fences.iter_mut().find(|(x, _)| x.as_raw() == fence.as_raw()) {
+                Some((_, v)) => *v = (*v).max(f.fence_value),
+                None => fences.push((fence, f.fence_value)),
             }
         }
+    }
+    let sync: Vec<(ID3D12Fence, u64, u64)> = fences.into_iter().map(|(f, v)| (f, v, v + 1)).collect();
+    let index = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync)?;
+    stage.interop().dx.last = Some(index);
+    for f in inputs.iter_mut().chain(outs.iter_mut()) {
+        if let Some((_, _, s)) = sync.iter().find(|(x, _, _)| x.as_raw() == f.fence) {
+            f.fence_value = *s;
+        }
+    }
+    Ok(())
+}
 
-        // COMMON -> the state of each use, per subresource of the frame's slice.
-        let transition = |enc: &mut wgpu::CommandEncoder, to_common: bool| {
-            enc.as_hal_mut::<Dx12, _, _>(|enc| {
-                if let Some(enc) = enc {
-                    enc.transition_textures(barriers.iter().map(|(_, slice, t, state)| {
-                        let (from, to) =
-                            if to_common { (*state, wgpu::TextureUses::UNINITIALIZED) } else { (wgpu::TextureUses::UNINITIALIZED, *state) };
-                        hal::TextureBarrier {
-                            texture: t,
-                            range: wgpu::ImageSubresourceRange {
-                                aspect: wgpu::TextureAspect::All,
-                                base_mip_level: 0,
-                                mip_level_count: Some(1),
-                                base_array_layer: *slice,
-                                array_layer_count: Some(1),
-                            },
-                            usage: hal::StateTransition { from, to },
-                        }
-                    }));
-                }
-            });
-        };
-        let mut pre = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx d3d12 states") });
-        transition(&mut pre, false);
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx d3d12") });
-        let copy = |enc: &mut wgpu::CommandEncoder, p: &Plane, output: bool| {
-            let Some(scratch) = &p.scratch else { return };
-            let frame = wgpu::TexelCopyTextureInfo {
-                texture: &p.wrapper,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: p.slice },
-                aspect: wgpu::TextureAspect::All,
-            };
-            let own = wgpu::TexelCopyTextureInfo {
-                texture: scratch,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            };
-            let extent = wgpu::Extent3d { width: p.size.0, height: p.size.1, depth_or_array_layers: 1 };
-            if output {
-                enc.copy_texture_to_texture(own, frame, extent);
+/// Runs the graph on D3D11 frames of the device the graph's context was made for
+/// ([`GpuContext::from_d3d11`]). Shareable textures (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`)
+/// are used in place; other inputs are copied once into a shared texture of gpufx,
+/// and outputs must be shareable. The D3D11 work queued after the call (on the
+/// immediate context) waits for the effects on the GPU.
+///
+/// # Safety
+/// The textures must be valid textures of that device; the caller holds the lock of
+/// the immediate context (FFmpeg's `AVD3D11VADeviceContext.lock`) during the call.
+pub(crate) unsafe fn process_d3d11<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    inputs: &[D3d11Frame],
+    outs: &[D3d11Frame],
+    info: Option<&FrameInfo>,
+) -> Result<(), Error> {
+    let ctx = stage.context().clone();
+    let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D11 frames need a graph opened on a D3D11 device".into()))?;
+    let mut d11 = shared
+        .d3d11
+        .as_ref()
+        .ok_or_else(|| Error::Gpu("this graph runs on a D3D12 device; give it D3D12 frames".into()))?
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let dev = &shared.device.0;
+    let mut ins = Vec::new();
+    let mut os = Vec::new();
+    for (output, list, res) in [(false, inputs, &mut ins), (true, outs, &mut os)] {
+        for (n, f) in list.iter().enumerate() {
+            let what = format!("{} {n}", if output { "output" } else { "input" });
+            let tex: ID3D11Texture2D = borrow(f.texture, &format!("{what}: texture"))?;
+            let mut d = D3D11_TEXTURE2D_DESC::default();
+            tex.GetDesc(&mut d);
+            let shareable = d.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0 as u32 != 0;
+            let (resource, slice) = if shareable {
+                (d11.open(dev, &tex)?, f.array_slice)
+            } else if output {
+                return Err(Error::Frame(format!(
+                    "{what}: D3D11 output frames must be shareable (D3D11_RESOURCE_MISC_SHARED_NTHANDLE); gpufx makes its own"
+                )));
             } else {
-                enc.copy_texture_to_texture(frame, own, extent);
-            }
-        };
-        for p in &planes[0] {
-            copy(&mut enc, p, false);
+                // One copy into a shared texture of gpufx, on the immediate context.
+                let key = (f.width, f.height, d.Format.0);
+                let found = stage.interop().dx.staging.iter().position(|(pad, k, _, _)| *pad == n && *k == key);
+                let i = match found {
+                    Some(i) => i,
+                    None => {
+                        stage.interop().dx.staging.retain(|(pad, _, _, _)| *pad != n);
+                        let desc = D3D11_TEXTURE2D_DESC {
+                            Width: f.width,
+                            Height: f.height,
+                            MipLevels: 1,
+                            ArraySize: 1,
+                            Format: d.Format,
+                            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                            Usage: D3D11_USAGE_DEFAULT,
+                            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                            CPUAccessFlags: 0,
+                            MiscFlags: (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32,
+                        };
+                        let mut staging: Option<ID3D11Texture2D> = None;
+                        d11.device.0.CreateTexture2D(&desc, None, Some(&mut staging)).map_err(|e| {
+                            gpu_err(format!("{what}: cannot make a shared D3D11 texture of DXGI_FORMAT {}: {e}", d.Format.0))
+                        })?;
+                        let staging = staging.ok_or_else(|| gpu_err("no texture"))?;
+                        let r = share(dev, &staging)?;
+                        stage.interop().dx.staging.push((n, key, Com(staging), Com(r)));
+                        stage.interop().dx.staging.len() - 1
+                    }
+                };
+                let (_, _, staging, r) = &stage.interop().dx.staging[i];
+                if d.MipLevels != 1 {
+                    return Err(Error::Frame(format!("{what}: textures with {} mip levels are not supported", d.MipLevels)));
+                }
+                // Planar boxes must cover whole chroma samples.
+                debug_assert!(
+                    f.format.plane_count() == 1 || (f.width % 2 == 0 && f.height % 2 == 0),
+                    "odd {}x{} box for a planar texture",
+                    f.width,
+                    f.height
+                );
+                let src = f.array_slice;
+                let region = D3D11_BOX { left: 0, top: 0, front: 0, right: f.width, bottom: f.height, back: 1 };
+                d11.context.0.CopySubresourceRegion(&staging.0, 0, 0, 0, 0, &tex, src, Some(&region));
+                (r.0.clone(), 0)
+            };
+            res.push(check((f.format, f.width, f.height, resource, slice, f.color), output, &what, dev)?);
         }
-        let [in_frames, out_frames] = &frames;
-        self.encode_gpu(in_frames, out_frames, info, &mut enc)?;
-        for p in &planes[1] {
-            copy(&mut enc, p, true);
-        }
-        let mut post = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx d3d12 states back") });
-        transition(&mut post, true);
-        let buffers = [pre.finish(), enc.finish(), post.finish()];
-
-        let mut poisoned = shared.submit.lock().unwrap_or_else(|p| p.into_inner());
-        {
-            let queue = ctx.queue.as_hal::<Dx12>().ok_or_else(|| gpu_err("not a D3D12 queue"))?;
-            for (f, wait, signal) in sync {
-                queue.add_wait_fence(f.clone(), *wait);
-                queue.add_signal_fence(f.clone(), *signal);
-            }
-        }
-        let index = ctx.queue.submit(buffers);
-        self.release_frame();
-        // A submission wgpu refused leaves the fences staged: take them back so no later
-        // submission signals stale values, and stop using the device.
-        let mut left = false;
-        {
-            let queue = ctx.queue.as_hal::<Dx12>().ok_or_else(|| gpu_err("not a D3D12 queue"))?;
-            for (f, _, _) in sync {
-                left |= queue.remove_wait_fence(f);
-                left |= queue.remove_signal_fence(f);
-            }
-        }
-        let error = pollster::block_on(scope.pop());
-        if left || error.is_some() {
-            *poisoned = true;
-            let why = error.map_or_else(|| "it was not submitted".to_string(), |e| e.to_string());
-            return Err(Error::Gpu(format!("D3D12 submission failed ({why}); the shared device is no longer used")));
-        }
-        Ok(index)
     }
+    // D3D11 work so far, then gpufx, then what D3D11 queues next.
+    let v = d11.value + 1;
+    d11.context.0.Signal(&d11.fence11.0, v).map_err(gpu_err)?;
+    d11.context.0.Flush();
+    d11.value = v;
+    let sync = [(d11.fence12.0.clone(), v, v + 1)];
+    let run = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync);
+    if run.is_ok() {
+        d11.value = v + 1;
+        d11.context.0.Wait(&d11.fence11.0, v + 1).map_err(gpu_err)?;
+    }
+    run.map(|_| ())
+}
+
+/// One submission: barriers to the states needed, copies into gpufx textures, the
+/// graph, copies out, barriers back to COMMON; waits and signals `sync`
+/// (fence, wait value, signal value).
+unsafe fn run_dx12<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    ctx: &Arc<GpuContext>,
+    shared: &Shared,
+    ins: &[Res],
+    outs: &[Res],
+    info: Option<&FrameInfo>,
+    sync: &[(ID3D12Fence, u64, u64)],
+) -> Result<wgpu::SubmissionIndex, Error> {
+    if *shared.submit.lock().unwrap_or_else(|p| p.into_inner()) {
+        return Err(Error::Gpu("an earlier D3D12 submission failed; the shared device is no longer used".into()));
+    }
+    let device = &ctx.device;
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+    // Plane wrappers (nothing owned, no copy) and the GpuFrames the graph sees.
+    struct Plane {
+        wrapper: wgpu::Texture,
+        scratch: Option<wgpu::Texture>,
+        slice: u32,
+        size: (u32, u32),
+    }
+    let mut frames: [Vec<GpuFrame>; 2] = [Vec::new(), Vec::new()];
+    let mut planes: [Vec<Plane>; 2] = [Vec::new(), Vec::new()];
+    // Barrier textures, one per (resource, slice), and the state each is used in.
+    let mut barriers: Vec<(usize, u32, hal::dx12::Texture, wgpu::TextureUses)> = Vec::new();
+    for (o, list) in [ins, outs].into_iter().enumerate() {
+        let output = o == 1;
+        for (n, r) in list.iter().enumerate() {
+            let (usage, state) = plan(output, r.direct);
+            let count = r.format.plane_count();
+            let planar = count > 1;
+            let mut textures = Vec::new();
+            for p in 0..count {
+                let format = r.format.plane_texture_format(p);
+                let (w, h) = r.format.plane_texture_size(p, r.width, r.height);
+                let (rw, rh) = r.format.plane_texture_size(p, r.size.0, r.size.1);
+                let size = wgpu::Extent3d { width: rw, height: rh, depth_or_array_layers: r.size.2 };
+                let mut hal_tex = hal::dx12::Device::texture_from_raw(r.resource.clone(), format, wgpu::TextureDimension::D2, size, 1, 1);
+                if planar {
+                    hal_tex = hal_tex.with_plane_slice(p as u32);
+                }
+                let wrapper = device.create_texture_from_hal::<Dx12>(
+                    hal_tex,
+                    &wgpu::TextureDescriptor {
+                        label: Some("gpufx d3d12 plane"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage,
+                        view_formats: &[],
+                    },
+                    state,
+                );
+                let scratch = (!r.direct).then(|| stage.interop().dx.scratch(device, (output, n, p, format, w, h)));
+                textures.push(scratch.clone().unwrap_or_else(|| wrapper.clone()));
+                planes[o].push(Plane { wrapper, scratch, slice: r.slice, size: (w, h) });
+            }
+            frames[o].push(GpuFrame { format: r.format, width: r.width, height: r.height, planes: textures, color: r.color });
+            let key = r.resource.as_raw() as usize;
+            if !barriers.iter().any(|(k, s, _, _)| *k == key && *s == r.slice) {
+                let whole = match r.format {
+                    PixelFormat::Nv12 => wgpu::TextureFormat::NV12,
+                    PixelFormat::P010 => wgpu::TextureFormat::P010,
+                    f => f.plane_texture_format(0),
+                };
+                let size = wgpu::Extent3d { width: r.size.0, height: r.size.1, depth_or_array_layers: r.size.2 };
+                let t = hal::dx12::Device::texture_from_raw(r.resource.clone(), whole, wgpu::TextureDimension::D2, size, 1, 1);
+                barriers.push((key, r.slice, t, state));
+            }
+        }
+    }
+
+    // COMMON -> the state of each use, per subresource of the frame's slice.
+    let transition = |enc: &mut wgpu::CommandEncoder, to_common: bool| {
+        enc.as_hal_mut::<Dx12, _, _>(|enc| {
+            if let Some(enc) = enc {
+                enc.transition_textures(barriers.iter().map(|(_, slice, t, state)| {
+                    let (from, to) =
+                        if to_common { (*state, wgpu::TextureUses::UNINITIALIZED) } else { (wgpu::TextureUses::UNINITIALIZED, *state) };
+                    hal::TextureBarrier {
+                        texture: t,
+                        range: wgpu::ImageSubresourceRange {
+                            aspect: wgpu::TextureAspect::All,
+                            base_mip_level: 0,
+                            mip_level_count: Some(1),
+                            base_array_layer: *slice,
+                            array_layer_count: Some(1),
+                        },
+                        usage: hal::StateTransition { from, to },
+                    }
+                }));
+            }
+        });
+    };
+    let mut pre = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx d3d12 states") });
+    transition(&mut pre, false);
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx d3d12") });
+    let copy = |enc: &mut wgpu::CommandEncoder, p: &Plane, output: bool| {
+        let Some(scratch) = &p.scratch else { return };
+        let frame = wgpu::TexelCopyTextureInfo {
+            texture: &p.wrapper,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: 0, z: p.slice },
+            aspect: wgpu::TextureAspect::All,
+        };
+        let own =
+            wgpu::TexelCopyTextureInfo { texture: scratch, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All };
+        let extent = wgpu::Extent3d { width: p.size.0, height: p.size.1, depth_or_array_layers: 1 };
+        if output {
+            enc.copy_texture_to_texture(own, frame, extent);
+        } else {
+            enc.copy_texture_to_texture(frame, own, extent);
+        }
+    };
+    for p in &planes[0] {
+        copy(&mut enc, p, false);
+    }
+    let [in_frames, out_frames] = &frames;
+    stage.encode_gpu(in_frames, out_frames, info, &mut enc)?;
+    for p in &planes[1] {
+        copy(&mut enc, p, true);
+    }
+    let mut post = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx d3d12 states back") });
+    transition(&mut post, true);
+    let buffers = [pre.finish(), enc.finish(), post.finish()];
+
+    let mut poisoned = shared.submit.lock().unwrap_or_else(|p| p.into_inner());
+    {
+        let queue = ctx.queue.as_hal::<Dx12>().ok_or_else(|| gpu_err("not a D3D12 queue"))?;
+        for (f, wait, signal) in sync {
+            queue.add_wait_fence(f.clone(), *wait);
+            queue.add_signal_fence(f.clone(), *signal);
+        }
+    }
+    let index = ctx.queue.submit(buffers);
+    stage.release_frame();
+    // A submission wgpu refused leaves the fences staged: take them back so no later
+    // submission signals stale values, and stop using the device.
+    let mut left = false;
+    {
+        let queue = ctx.queue.as_hal::<Dx12>().ok_or_else(|| gpu_err("not a D3D12 queue"))?;
+        for (f, _, _) in sync {
+            left |= queue.remove_wait_fence(f);
+            left |= queue.remove_signal_fence(f);
+        }
+    }
+    let error = pollster::block_on(scope.pop());
+    if left || error.is_some() {
+        *poisoned = true;
+        let why = error.map_or_else(|| "it was not submitted".to_string(), |e| e.to_string());
+        return Err(Error::Gpu(format!("D3D12 submission failed ({why}); the shared device is no longer used")));
+    }
+    Ok(index)
 }
 
 /// A shareable D3D11 texture opened in the D3D12 device.

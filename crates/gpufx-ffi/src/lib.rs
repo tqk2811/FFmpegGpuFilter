@@ -15,13 +15,15 @@ use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+mod ai;
+
 use gpufx_core::{
     Backend, BypassPad, ChromaLocation, ColorInfo, Effect, EffectGraph, Frame, FrameInfo, FrameMut, GpuContext, Image, ImageMut, Matrix,
     Package, PixelFormat, Program, Range, StreamInfo,
 };
 
 /// Bumped when the C ABI changes incompatibly. Must match `GPUFX_API_VERSION` in gpufx.h.
-const API_VERSION: u32 = 12;
+const API_VERSION: u32 = 13;
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
@@ -909,6 +911,12 @@ mod vk {
     }
 
     pub unsafe fn use_vulkan(fx: &mut GpufxEffect, dev: &GpufxVulkanDevice) -> Result<(), String> {
+        let ctx = device_context(dev)?;
+        move_to(fx, &ctx, shared_device(&ctx, "Vulkan"))
+    }
+
+    /// The shared context of a Vulkan device.
+    pub unsafe fn device_context(dev: &GpufxVulkanDevice) -> Result<Arc<GpuContext>, String> {
         let desc = VulkanDevice {
             get_instance_proc_addr: dev.get_instance_proc_addr,
             instance: dev.instance,
@@ -922,8 +930,7 @@ mod vk {
             queue_index: dev.queue_index,
             queue_flags: dev.queue_flags,
         };
-        let ctx = vulkan_context(&desc)?;
-        move_to(fx, &ctx, shared_device(&ctx, "Vulkan"))
+        vulkan_context(&desc)
     }
 
     /// Device string of an effect on a device shared with the caller.
@@ -931,7 +938,7 @@ mod vk {
         format!("{} ({api} device shared with the caller)", ctx.description())
     }
 
-    unsafe fn frame(f: &GpufxVulkanFrame, what: &str) -> Result<VulkanFrame, String> {
+    pub unsafe fn frame(f: &GpufxVulkanFrame, what: &str) -> Result<VulkanFrame, String> {
         let format = pixel_format(f.format, what)?;
         if f.width == 0 || f.height == 0 || f.width > 1 << 16 || f.height > 1 << 16 {
             return Err(format!("{what}: bad size {}x{}", f.width, f.height));
@@ -952,14 +959,14 @@ mod vk {
         Ok(VulkanFrame { format, width: f.width, height: f.height, planes, color: color_info(&f.color)? })
     }
 
-    unsafe fn frames(list: *mut GpufxVulkanFrame, n: u32, what: &str) -> Result<Vec<VulkanFrame>, String> {
+    pub unsafe fn frames(list: *mut GpufxVulkanFrame, n: u32, what: &str) -> Result<Vec<VulkanFrame>, String> {
         if list.is_null() || n == 0 {
             return Err(format!("{what} must not be NULL"));
         }
         std::slice::from_raw_parts(list, n as usize).iter().enumerate().map(|(i, f)| frame(f, &format!("{what} {i}"))).collect()
     }
 
-    fn write_back(frames: &[VulkanFrame], raw: &mut [GpufxVulkanFrame]) {
+    pub fn write_back(frames: &[VulkanFrame], raw: &mut [GpufxVulkanFrame]) {
         for (f, r) in frames.iter().zip(raw) {
             for (i, p) in f.planes.iter().enumerate() {
                 r.layout[i] = p.layout;
@@ -1076,7 +1083,7 @@ mod dx {
     use gpufx_core::d3d12::{D3d11Frame, D3d12Frame};
 
     /// Shared D3D12/D3D11 contexts, by caller device, while an effect uses them.
-    fn shared(key: usize, make: impl FnOnce() -> Result<Arc<GpuContext>, gpufx_core::Error>) -> Result<Arc<GpuContext>, String> {
+    pub fn shared(key: usize, make: impl FnOnce() -> Result<Arc<GpuContext>, gpufx_core::Error>) -> Result<Arc<GpuContext>, String> {
         type Cache = Mutex<Vec<(usize, Weak<GpuContext>)>>;
         static CACHE: Cache = Mutex::new(Vec::new());
         let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
@@ -1099,7 +1106,7 @@ mod dx {
         move_to(fx, &ctx, vk::shared_device(&ctx, "D3D11"))
     }
 
-    unsafe fn list<'a, T>(p: *mut T, n: u32, what: &str) -> Result<&'a mut [T], String> {
+    pub unsafe fn list<'a, T>(p: *mut T, n: u32, what: &str) -> Result<&'a mut [T], String> {
         if p.is_null() || n == 0 {
             return Err(format!("{what} must not be NULL"));
         }
@@ -1113,7 +1120,7 @@ mod dx {
         Ok(())
     }
 
-    unsafe fn d3d12_frames(raw: &[GpufxD3D12Frame], what: &str) -> Result<Vec<D3d12Frame>, String> {
+    pub unsafe fn d3d12_frames(raw: &[GpufxD3D12Frame], what: &str) -> Result<Vec<D3d12Frame>, String> {
         raw.iter()
             .enumerate()
             .map(|(i, f)| {
@@ -1151,7 +1158,7 @@ mod dx {
         Ok(())
     }
 
-    unsafe fn d3d11_frames(raw: &[GpufxD3D11Frame], what: &str) -> Result<Vec<D3d11Frame>, String> {
+    pub unsafe fn d3d11_frames(raw: &[GpufxD3D11Frame], what: &str) -> Result<Vec<D3d11Frame>, String> {
         raw.iter()
             .enumerate()
             .map(|(i, f)| {
@@ -1289,7 +1296,7 @@ mod vt {
     use gpufx_core::videotoolbox::VtFrame;
 
     /// The context for VideoToolbox frames, while an effect uses it.
-    fn context() -> Result<Arc<GpuContext>, String> {
+    pub fn context() -> Result<Arc<GpuContext>, String> {
         static CACHE: Mutex<Weak<GpuContext>> = Mutex::new(Weak::new());
         let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(ctx) = cache.upgrade() {
@@ -1306,7 +1313,7 @@ mod vt {
         move_to(fx, &ctx, device)
     }
 
-    unsafe fn frames(p: *const GpufxVtFrame, n: u32, what: &str) -> Result<Vec<VtFrame>, String> {
+    pub unsafe fn frames(p: *const GpufxVtFrame, n: u32, what: &str) -> Result<Vec<VtFrame>, String> {
         if p.is_null() || n == 0 {
             return Err(format!("{what} must not be NULL"));
         }

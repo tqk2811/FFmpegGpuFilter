@@ -19,6 +19,7 @@ use crate::frame::{ColorInfo, GpuFrame, PixelFormat};
 use crate::graph::EffectGraph;
 use crate::lru::Lru;
 use crate::runtime::{device_limits, FrameInfo, GpuContext};
+use crate::stage::GpuStage;
 use crate::Error;
 
 /// A Vulkan device to share, as `AVVulkanDeviceContext` describes it.
@@ -556,7 +557,7 @@ impl EffectGraph {
     /// reused. For tests and diagnostics.
     #[doc(hidden)]
     pub fn vulkan_wrappers_made(&self) -> usize {
-        self.vk.made
+        self.interop.vk.made
     }
 
     /// Runs the graph on Vulkan frames of the device the graph's context shares
@@ -579,243 +580,256 @@ impl EffectGraph {
         outs: &mut [VulkanFrame],
         info: Option<&FrameInfo>,
     ) -> Result<(), Error> {
-        let t_start = std::time::Instant::now();
-        let ctx = self.context().clone();
-        if *ctx.vulkan_submit.lock().unwrap_or_else(|p| p.into_inner()) {
-            return Err(Error::Gpu("an earlier Vulkan submission failed; the shared device is no longer used".into()));
-        }
-        let scope = ctx.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let family =
-            ctx.vulkan_queue_family.ok_or_else(|| Error::Gpu("Vulkan frames need a graph opened on a shared Vulkan device".into()))?;
-        let device = &ctx.device;
+        process_vulkan(self, inputs, outs, info)
+    }
+}
 
-        // Wrap every image (no copy, nothing owned), or take the wrapper made for it on an
-        // earlier frame. wgpu's state of every wrapper is GENERAL (STORAGE_READ_WRITE)
-        // between calls: a new one is made in that state and every call ends there. The
-        // image itself may be in another layout (another filter used it since): a raw
-        // barrier moves it to GENERAL first, once per image.
-        struct Wrapped {
-            frames: Vec<GpuFrame>,
-            textures: Vec<wgpu::Texture>,
-        }
-        let mut barriers: Vec<vk::ImageMemoryBarrier> = Vec::new();
-        let pads = inputs.len() + outs.len();
-        if self.vk.pads.len() != pads {
-            self.vk.pads = (0..pads).map(|_| Lru::new(crate::lru::FRAMES * 4)).collect();
-        }
-        let (ins, outs_w, raw_device) = {
-            let hal_device = device.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the device is not a Vulkan device".into()))?;
-            let raw_device = hal_device.raw_device().clone();
-            // Per plane: the cached wrapper, or a new hal texture to wrap.
-            type Plane = (bool, usize, ImportKey, Result<wgpu::Texture, hal::vulkan::Texture>);
-            let mut planes: Vec<Plane> = Vec::new();
-            for (output, list) in [(false, &*inputs), (true, &*outs)] {
-                for (n, f) in list.iter().enumerate() {
-                    let what = format!("{} {n}", if output { "output" } else { "input" });
-                    let count = f.format.plane_count();
-                    if f.planes.len() != count {
-                        return Err(Error::Frame(format!(
-                            "{what}: a {} frame needs one Vulkan image per plane ({count}), got {}; multiplane images are not \
+/// [`EffectGraph::process_vulkan`] for any stage (see `stage.rs`).
+///
+/// # Safety
+/// As for [`EffectGraph::process_vulkan`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    inputs: &mut [VulkanFrame],
+    outs: &mut [VulkanFrame],
+    info: Option<&FrameInfo>,
+) -> Result<(), Error> {
+    let t_start = std::time::Instant::now();
+    let ctx = stage.context().clone();
+    if *ctx.vulkan_submit.lock().unwrap_or_else(|p| p.into_inner()) {
+        return Err(Error::Gpu("an earlier Vulkan submission failed; the shared device is no longer used".into()));
+    }
+    let scope = ctx.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let family = ctx.vulkan_queue_family.ok_or_else(|| Error::Gpu("Vulkan frames need a graph opened on a shared Vulkan device".into()))?;
+    let device = &ctx.device;
+
+    // Wrap every image (no copy, nothing owned), or take the wrapper made for it on an
+    // earlier frame. wgpu's state of every wrapper is GENERAL (STORAGE_READ_WRITE)
+    // between calls: a new one is made in that state and every call ends there. The
+    // image itself may be in another layout (another filter used it since): a raw
+    // barrier moves it to GENERAL first, once per image.
+    struct Wrapped {
+        frames: Vec<GpuFrame>,
+        textures: Vec<wgpu::Texture>,
+    }
+    let mut barriers: Vec<vk::ImageMemoryBarrier> = Vec::new();
+    let pads = inputs.len() + outs.len();
+    // Grow only: a changing number of outputs (frame rate conversion) keeps the imports of the pads it still uses.
+    while stage.interop().vk.pads.len() < pads {
+        stage.interop().vk.pads.push(Lru::new(crate::lru::FRAMES * 4));
+    }
+    let (ins, outs_w, raw_device) = {
+        let hal_device = device.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the device is not a Vulkan device".into()))?;
+        let raw_device = hal_device.raw_device().clone();
+        // Per plane: the cached wrapper, or a new hal texture to wrap.
+        type Plane = (bool, usize, ImportKey, Result<wgpu::Texture, hal::vulkan::Texture>);
+        let mut planes: Vec<Plane> = Vec::new();
+        for (output, list) in [(false, &*inputs), (true, &*outs)] {
+            for (n, f) in list.iter().enumerate() {
+                let what = format!("{} {n}", if output { "output" } else { "input" });
+                let count = f.format.plane_count();
+                if f.planes.len() != count {
+                    return Err(Error::Frame(format!(
+                        "{what}: a {} frame needs one Vulkan image per plane ({count}), got {}; multiplane images are not \
                              supported (FFmpeg: create the device with disable_multiplane=1)",
+                        f.format.name(),
+                        f.planes.len()
+                    )));
+                }
+                for (p, plane) in f.planes.iter().enumerate() {
+                    let format = f.format.plane_texture_format(p);
+                    if plane.format != vk_format(format).as_raw() {
+                        return Err(Error::Frame(format!(
+                            "{what}: plane {p} of a {} frame must be {:?}, the image is VkFormat {}",
                             f.format.name(),
-                            f.planes.len()
+                            vk_format(format),
+                            plane.format
                         )));
                     }
-                    for (p, plane) in f.planes.iter().enumerate() {
-                        let format = f.format.plane_texture_format(p);
-                        if plane.format != vk_format(format).as_raw() {
-                            return Err(Error::Frame(format!(
-                                "{what}: plane {p} of a {} frame must be {:?}, the image is VkFormat {}",
-                                f.format.name(),
-                                vk_format(format),
-                                plane.format
-                            )));
-                        }
-                        if plane.queue_family != vk::QUEUE_FAMILY_IGNORED && plane.queue_family != family {
-                            return Err(Error::Frame(format!(
-                                "{what}: plane {p} belongs to queue family {}, gpufx submits to {family}",
-                                plane.queue_family
-                            )));
-                        }
-                        let (w, h) = f.format.plane_texture_size(p, f.width, f.height);
-                        let image = vk::Image::from_raw(plane.image);
-                        let layout = vk::ImageLayout::from_raw(plane.layout);
-                        if layout != vk::ImageLayout::GENERAL && !barriers.iter().any(|b| b.image == image) {
-                            barriers.push(
-                                vk::ImageMemoryBarrier::default()
-                                    .src_access_mask(vk::AccessFlags::MEMORY_WRITE)
-                                    .dst_access_mask(vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE)
-                                    // Outputs are written whole: their old content may go.
-                                    .old_layout(if output { vk::ImageLayout::UNDEFINED } else { layout })
-                                    .new_layout(vk::ImageLayout::GENERAL)
-                                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                                    .image(image)
-                                    .subresource_range(vk::ImageSubresourceRange {
-                                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                                        base_mip_level: 0,
-                                        level_count: 1,
-                                        base_array_layer: 0,
-                                        layer_count: 1,
-                                    }),
-                            );
-                        }
-                        let key = ImportKey { image: plane.image, semaphore: plane.semaphore, format, size: (w, h), output };
-                        let pad = if output { inputs.len() + n } else { n };
-                        if let Some(t) = self.vk.pads[pad].get(&key) {
-                            planes.push((output, n, key, Ok(t.clone())));
-                            continue;
-                        }
-                        let usage = if output { wgpu::TextureUses::STORAGE_WRITE_ONLY } else { wgpu::TextureUses::RESOURCE };
-                        let hal_desc = hal::TextureDescriptor {
+                    if plane.queue_family != vk::QUEUE_FAMILY_IGNORED && plane.queue_family != family {
+                        return Err(Error::Frame(format!(
+                            "{what}: plane {p} belongs to queue family {}, gpufx submits to {family}",
+                            plane.queue_family
+                        )));
+                    }
+                    let (w, h) = f.format.plane_texture_size(p, f.width, f.height);
+                    let image = vk::Image::from_raw(plane.image);
+                    let layout = vk::ImageLayout::from_raw(plane.layout);
+                    if layout != vk::ImageLayout::GENERAL && !barriers.iter().any(|b| b.image == image) {
+                        barriers.push(
+                            vk::ImageMemoryBarrier::default()
+                                .src_access_mask(vk::AccessFlags::MEMORY_WRITE)
+                                .dst_access_mask(vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE)
+                                // Outputs are written whole: their old content may go.
+                                .old_layout(if output { vk::ImageLayout::UNDEFINED } else { layout })
+                                .new_layout(vk::ImageLayout::GENERAL)
+                                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                                .image(image)
+                                .subresource_range(vk::ImageSubresourceRange {
+                                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                }),
+                        );
+                    }
+                    let key = ImportKey { image: plane.image, semaphore: plane.semaphore, format, size: (w, h), output };
+                    let pad = if output { inputs.len() + n } else { n };
+                    if let Some(t) = stage.interop().vk.pads[pad].get(&key) {
+                        planes.push((output, n, key, Ok(t.clone())));
+                        continue;
+                    }
+                    let usage = if output { wgpu::TextureUses::STORAGE_WRITE_ONLY } else { wgpu::TextureUses::RESOURCE };
+                    let hal_desc = hal::TextureDescriptor {
+                        label: Some("gpufx vulkan plane"),
+                        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage,
+                        memory_flags: hal::MemoryFlags::empty(),
+                        view_formats: Vec::new(),
+                    };
+                    // The drop callback keeps wgpu from destroying the image (FFmpeg owns it).
+                    let tex = hal_device.texture_from_raw(image, &hal_desc, Some(Box::new(|| ())), hal::vulkan::TextureMemory::External);
+                    planes.push((output, n, key, Err(tex)));
+                }
+            }
+        }
+        drop(hal_device);
+        let mut ins = Wrapped { frames: Vec::new(), textures: Vec::new() };
+        let mut outs_w = Wrapped { frames: Vec::new(), textures: Vec::new() };
+        for f in inputs.iter() {
+            ins.frames.push(GpuFrame { format: f.format, width: f.width, height: f.height, planes: Vec::new(), color: f.color });
+        }
+        for f in outs.iter() {
+            outs_w.frames.push(GpuFrame { format: f.format, width: f.width, height: f.height, planes: Vec::new(), color: f.color });
+        }
+        for (output, n, key, tex) in planes {
+            let t = match tex {
+                Ok(t) => t,
+                Err(tex) => {
+                    let usage = if output { wgpu::TextureUsages::STORAGE_BINDING } else { wgpu::TextureUsages::TEXTURE_BINDING };
+                    let t = device.create_texture_from_hal::<Vulkan>(
+                        tex,
+                        &wgpu::TextureDescriptor {
                             label: Some("gpufx vulkan plane"),
-                            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                            size: wgpu::Extent3d { width: key.size.0, height: key.size.1, depth_or_array_layers: 1 },
                             mip_level_count: 1,
                             sample_count: 1,
                             dimension: wgpu::TextureDimension::D2,
-                            format,
+                            format: key.format,
                             usage,
-                            memory_flags: hal::MemoryFlags::empty(),
-                            view_formats: Vec::new(),
-                        };
-                        // The drop callback keeps wgpu from destroying the image (FFmpeg owns it).
-                        let tex =
-                            hal_device.texture_from_raw(image, &hal_desc, Some(Box::new(|| ())), hal::vulkan::TextureMemory::External);
-                        planes.push((output, n, key, Err(tex)));
-                    }
-                }
-            }
-            drop(hal_device);
-            let mut ins = Wrapped { frames: Vec::new(), textures: Vec::new() };
-            let mut outs_w = Wrapped { frames: Vec::new(), textures: Vec::new() };
-            for f in inputs.iter() {
-                ins.frames.push(GpuFrame { format: f.format, width: f.width, height: f.height, planes: Vec::new(), color: f.color });
-            }
-            for f in outs.iter() {
-                outs_w.frames.push(GpuFrame { format: f.format, width: f.width, height: f.height, planes: Vec::new(), color: f.color });
-            }
-            for (output, n, key, tex) in planes {
-                let t = match tex {
-                    Ok(t) => t,
-                    Err(tex) => {
-                        let usage = if output { wgpu::TextureUsages::STORAGE_BINDING } else { wgpu::TextureUsages::TEXTURE_BINDING };
-                        let t = device.create_texture_from_hal::<Vulkan>(
-                            tex,
-                            &wgpu::TextureDescriptor {
-                                label: Some("gpufx vulkan plane"),
-                                size: wgpu::Extent3d { width: key.size.0, height: key.size.1, depth_or_array_layers: 1 },
-                                mip_level_count: 1,
-                                sample_count: 1,
-                                dimension: wgpu::TextureDimension::D2,
-                                format: key.format,
-                                usage,
-                                view_formats: &[],
-                            },
-                            wgpu::TextureUses::STORAGE_READ_WRITE,
-                        );
-                        let pad = if output { inputs.len() + n } else { n };
-                        self.vk.made += 1;
-                        self.vk.pads[pad].insert(key, t.clone());
-                        t
-                    }
-                };
-                let w = if output { &mut outs_w } else { &mut ins };
-                w.frames[n].planes.push(t.clone());
-                w.textures.push(t);
-            }
-            (ins, outs_w, raw_device)
-        };
-
-        let t_import = t_start.elapsed();
-        let mut buffers = Vec::new();
-        if !barriers.is_empty() {
-            let mut pre = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx vulkan layouts") });
-            pre.as_hal_mut::<Vulkan, _, _>(|enc| {
-                if let Some(enc) = enc {
-                    raw_device.cmd_pipeline_barrier(
-                        enc.raw_handle(),
-                        vk::PipelineStageFlags::ALL_COMMANDS,
-                        vk::PipelineStageFlags::ALL_COMMANDS,
-                        vk::DependencyFlags::empty(),
-                        &[],
-                        &[],
-                        &barriers,
+                            view_formats: &[],
+                        },
+                        wgpu::TextureUses::STORAGE_READ_WRITE,
                     );
+                    let pad = if output { inputs.len() + n } else { n };
+                    stage.interop().vk.made += 1;
+                    stage.interop().vk.pads[pad].insert(key, t.clone());
+                    t
                 }
-            });
-            buffers.push(pre.finish());
+            };
+            let w = if output { &mut outs_w } else { &mut ins };
+            w.frames[n].planes.push(t.clone());
+            w.textures.push(t);
         }
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx vulkan") });
-        self.allow_direct_gpu();
-        self.encode_gpu(&ins.frames, &outs_w.frames, info, &mut enc)?;
-        // Leave every image in one known layout for whoever uses it next.
-        enc.transition_resources(
-            std::iter::empty(),
-            ins.textures.iter().chain(&outs_w.textures).map(|t| wgpu::TextureTransition {
-                texture: t,
-                selector: None,
-                state: wgpu::TextureUses::STORAGE_READ_WRITE,
-            }),
-        );
-        buffers.push(enc.finish());
+        (ins, outs_w, raw_device)
+    };
 
-        // Wait for each semaphore once, at the highest value asked, and signal one more.
-        let mut sems: Vec<(u64, u64)> = Vec::new();
-        for plane in inputs.iter().chain(outs.iter()).flat_map(|f| &f.planes) {
-            match sems.iter_mut().find(|(s, _)| *s == plane.semaphore) {
-                Some((_, v)) => *v = (*v).max(plane.value),
-                None => sems.push((plane.semaphore, plane.value)),
+    let t_import = t_start.elapsed();
+    let mut buffers = Vec::new();
+    if !barriers.is_empty() {
+        let mut pre = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx vulkan layouts") });
+        pre.as_hal_mut::<Vulkan, _, _>(|enc| {
+            if let Some(enc) = enc {
+                raw_device.cmd_pipeline_barrier(
+                    enc.raw_handle(),
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &barriers,
+                );
             }
-        }
-        // Held from staging the semaphores until the submission took them, so two threads
-        // using this device never stage into each other's submission.
-        let t_submit = std::time::Instant::now();
-        let mut poisoned = ctx.vulkan_submit.lock().unwrap_or_else(|p| p.into_inner());
-        if *poisoned {
-            return Err(Error::Gpu("an earlier Vulkan submission failed; the shared device is no longer used".into()));
-        }
-        {
-            let queue = ctx.queue.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the queue is not a Vulkan queue".into()))?;
-            for &(s, v) in &sems {
-                let sem = vk::Semaphore::from_raw(s);
-                queue.add_wait_semaphore(sem, Some(v), vk::PipelineStageFlags::ALL_COMMANDS);
-                queue.add_signal_semaphore(sem, Some(v + 1));
-            }
-        }
-        ctx.queue.submit(buffers);
-        self.release_frame();
-        // A submission wgpu refused leaves the semaphores staged: take them back so no
-        // later submission signals stale values, and stop using the device.
-        let mut left = false;
-        {
-            let queue = ctx.queue.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the queue is not a Vulkan queue".into()))?;
-            for &(s, _) in &sems {
-                let sem = vk::Semaphore::from_raw(s);
-                left |= queue.remove_wait_semaphore(sem);
-                left |= queue.remove_signal_semaphore(sem);
-            }
-        }
-        let t_scope = std::time::Instant::now();
-        let error = pollster::block_on(scope.pop());
-        if left || error.is_some() {
-            *poisoned = true;
-            let why = error.map_or_else(|| "it was not submitted".to_string(), |e| e.to_string());
-            return Err(Error::Gpu(format!("Vulkan submission failed ({why}); the shared device is no longer used")));
-        }
-        drop(poisoned);
-        for plane in inputs.iter_mut().chain(outs.iter_mut()).flat_map(|f| f.planes.iter_mut()) {
-            plane.layout = LAYOUT_AFTER;
-            plane.value = sems.iter().find(|(s, _)| *s == plane.semaphore).map_or(plane.value, |&(_, v)| v + 1);
-        }
-        if crate::profile::enabled() {
-            use crate::profile::Cpu;
-            self.profile_cpu(Cpu::Import, t_import);
-            self.profile_cpu(Cpu::Submit, t_scope - t_submit);
-            self.profile_cpu(Cpu::Scope, t_scope.elapsed());
-            self.profile_cpu(Cpu::Total, t_start.elapsed());
-        }
-        Ok(())
+        });
+        buffers.push(pre.finish());
     }
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx vulkan") });
+    stage.allow_direct_gpu();
+    stage.encode_gpu(&ins.frames, &outs_w.frames, info, &mut enc)?;
+    // Leave every image in one known layout for whoever uses it next.
+    enc.transition_resources(
+        std::iter::empty(),
+        ins.textures.iter().chain(&outs_w.textures).map(|t| wgpu::TextureTransition {
+            texture: t,
+            selector: None,
+            state: wgpu::TextureUses::STORAGE_READ_WRITE,
+        }),
+    );
+    buffers.push(enc.finish());
+
+    // Wait for each semaphore once, at the highest value asked, and signal one more.
+    let mut sems: Vec<(u64, u64)> = Vec::new();
+    for plane in inputs.iter().chain(outs.iter()).flat_map(|f| &f.planes) {
+        match sems.iter_mut().find(|(s, _)| *s == plane.semaphore) {
+            Some((_, v)) => *v = (*v).max(plane.value),
+            None => sems.push((plane.semaphore, plane.value)),
+        }
+    }
+    // Held from staging the semaphores until the submission took them, so two threads
+    // using this device never stage into each other's submission.
+    let t_submit = std::time::Instant::now();
+    let mut poisoned = ctx.vulkan_submit.lock().unwrap_or_else(|p| p.into_inner());
+    if *poisoned {
+        return Err(Error::Gpu("an earlier Vulkan submission failed; the shared device is no longer used".into()));
+    }
+    {
+        let queue = ctx.queue.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the queue is not a Vulkan queue".into()))?;
+        for &(s, v) in &sems {
+            let sem = vk::Semaphore::from_raw(s);
+            queue.add_wait_semaphore(sem, Some(v), vk::PipelineStageFlags::ALL_COMMANDS);
+            queue.add_signal_semaphore(sem, Some(v + 1));
+        }
+    }
+    ctx.queue.submit(buffers);
+    stage.release_frame();
+    // A submission wgpu refused leaves the semaphores staged: take them back so no
+    // later submission signals stale values, and stop using the device.
+    let mut left = false;
+    {
+        let queue = ctx.queue.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the queue is not a Vulkan queue".into()))?;
+        for &(s, _) in &sems {
+            let sem = vk::Semaphore::from_raw(s);
+            left |= queue.remove_wait_semaphore(sem);
+            left |= queue.remove_signal_semaphore(sem);
+        }
+    }
+    let t_scope = std::time::Instant::now();
+    let error = pollster::block_on(scope.pop());
+    if left || error.is_some() {
+        *poisoned = true;
+        let why = error.map_or_else(|| "it was not submitted".to_string(), |e| e.to_string());
+        return Err(Error::Gpu(format!("Vulkan submission failed ({why}); the shared device is no longer used")));
+    }
+    drop(poisoned);
+    for plane in inputs.iter_mut().chain(outs.iter_mut()).flat_map(|f| f.planes.iter_mut()) {
+        plane.layout = LAYOUT_AFTER;
+        plane.value = sems.iter().find(|(s, _)| *s == plane.semaphore).map_or(plane.value, |&(_, v)| v + 1);
+    }
+    if crate::profile::enabled() {
+        use crate::profile::Cpu;
+        stage.profile_cpu(Cpu::Import, t_import);
+        stage.profile_cpu(Cpu::Submit, t_scope - t_submit);
+        stage.profile_cpu(Cpu::Scope, t_scope.elapsed());
+        stage.profile_cpu(Cpu::Total, t_start.elapsed());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

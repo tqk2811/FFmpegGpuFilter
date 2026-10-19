@@ -41,6 +41,7 @@ fn precompiled_shaders_are_used_only_when_trusted() {
         .filter(|g| g.is_dir())
         .flat_map(|g| std::fs::read_dir(g).unwrap())
         .map(|e| e.unwrap().path())
+        .filter(|p| p.join("manifest.json").exists())
         .collect();
     dirs.sort();
     let out = std::env::temp_dir().join(format!("gpufx-precompile-test-{}", std::process::id()));

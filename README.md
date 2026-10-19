@@ -109,6 +109,39 @@ this path has not run on a Mac yet (see below).
 
 Docs: [design](docs/DESIGN.md) · [package format and how to write shaders](docs/EFFECT_FORMAT.md) · [benchmark](docs/BENCHMARK.md)
 
+## Frame interpolation (`gpufx_ai_framerate`)
+
+`gpufx_ai_framerate` raises the frame rate with a neural frame interpolation model (RIFE v4.6, converted to a
+gpufx-nn package) run on the GPU by libgpufx, on the same GPU frames and devices as `gpufx`:
+
+```sh
+# 12 fps -> 24 fps on Vulkan
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+# D3D12 (Windows; needs dxcompiler.dll, shipped in bin/)
+ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
+  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `model` | (required) | path of a `frame_interp` package, e.g. `models/rife-v4.6.zip` |
+| `fps` | twice the input's | output frame rate; any rate, not only multiples |
+| `scene` | 8.2 | scene change threshold (0-100, scored like FFmpeg's `framerate`); a pair scoring at least this is not interpolated (the nearer frame is repeated); 0 interpolates every pair |
+| `max_gap` | 2 | a pair further apart than this many input frame durations (a gap in a VFR stream) is not interpolated |
+
+The output is a constant rate grid: a grid point between two source frames is interpolated at the matching time,
+a point on a source frame is that frame itself, and the last frame lasts until the end of the stream. The input
+must be GPU frames (Vulkan, D3D12, D3D11 or VideoToolbox) of nv12, p010le, rgba or rgba64le. When the GPU can write
+the input frames (Vulkan storage images, D3D12, shared D3D11 textures) the output uses the input frames context and
+the source frames pass as they are; otherwise (e.g. D3D11 `hwupload`) the output has a frames context of its own and
+the source frames are copied into it on the GPU (through 8-bit RGBA, so slightly lossy).
+
+The model is not in git: the win64/linux64 bundles ship it in `models/` (with its license), or fetch and convert it
+with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (pinned URLs and sha256, written to `build/models/`).
+On D3D12 the model's shaders need DXC (`dxcompiler.dll`); the first run compiles them (set `GPUFX_SHADER_CACHE` to
+keep them).
+
 ## Hardware and OS requirements
 
 - **Windows**: Windows 10 64-bit or later. D3D12: feature level 11_0, resource binding tier 2 (NVIDIA Kepler+,
