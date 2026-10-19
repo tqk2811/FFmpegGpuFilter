@@ -69,6 +69,8 @@ for name in "$@"; do
         fetch "$(json_get "$src" license_url)" "$(json_get "$src" sha256_license)" "$dir/LICENSE"
         license=$dir/LICENSE
     fi
+    readme=
+    [ -f "$ROOT/models/$name/README.md" ] && readme=$ROOT/models/$name/README.md
     convert ncnn --param "$dir/flownet.param" --bin "$dir/flownet.bin" --io "$ROOT/models/$name/io.json" \
-        ${license:+--license "$license"} --name "$name" -o "$ROOT/build/models/$name.zip"
+        ${license:+--license "$license"} ${readme:+--readme "$readme"} --name "$name" -o "$ROOT/build/models/$name.zip"
 done

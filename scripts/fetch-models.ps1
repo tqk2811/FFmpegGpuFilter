@@ -42,6 +42,8 @@ foreach ($name in $Names) {
     Get-Model $src.url_bin $src.sha256_bin (Join-Path $dir 'flownet.bin')
     $convertArgs = @('ncnn', '--param', (Join-Path $dir 'flownet.param'), '--bin', (Join-Path $dir 'flownet.bin'),
         '--io', (Join-Path $root "models/$name/io.json"), '--name', $name, '-o', (Join-Path $root "build/models/$name.zip"))
+    $readmeFile = Join-Path $root "models/$name/README.md"
+    if (Test-Path $readmeFile) { $convertArgs += @('--readme', $readmeFile) }
     if ($src.license_url) {
         Get-Model $src.license_url $src.sha256_license (Join-Path $dir 'LICENSE')
         $convertArgs += @('--license', (Join-Path $dir 'LICENSE'))

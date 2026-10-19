@@ -7,7 +7,7 @@ ncnn, ONNX or other runtime at run time). `gpufx-nnconv` makes it offline from a
 
 ```
 gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> \
-                  [--license <file>] [--name <name>] -o <out.zip|out_dir>
+                  [--license <file>] [--readme <file>] [--name <name>] -o <out.zip|out_dir>
 ```
 
 `-o` ending in `.zip` writes a zip, anything else a directory with the same files. The name defaults to the
@@ -23,6 +23,7 @@ to `build/models/<name>.zip`.
 | `weights.bin` | all weights, raw (stored, not compressed in the zip) |
 | `io.json` | how to feed and read the model (pre/post processing), copied as given, only checked to be JSON |
 | `LICENSE` | license of the model, when given |
+| `README.md` | description of the model (`--readme <file>`, else a minimal generated one); not read by the runtime |
 
 ## weights.bin
 

@@ -1,4 +1,4 @@
-//! The `gpufx-nn` package: model.json, weights.bin, io.json and an optional LICENSE.
+//! The `gpufx-nn` package: model.json, weights.bin, io.json, README.md and an optional LICENSE.
 
 use std::io::Write;
 use std::path::Path;
@@ -11,17 +11,20 @@ pub struct Package {
     pub weights: Vec<u8>,
     pub io_json: Vec<u8>,
     pub license: Option<Vec<u8>>,
+    pub readme: Vec<u8>,
 }
 
 impl Package {
-    /// `io_json` is stored as given after checking that it is JSON.
-    pub fn new(converted: &Converted, io_json: Vec<u8>, license: Option<Vec<u8>>) -> Result<Self> {
+    /// `io_json` is stored as given after checking that it is JSON. `readme` is stored as given; without it
+    /// a minimal README.md is generated from the model name, source and license.
+    pub fn new(converted: &Converted, io_json: Vec<u8>, license: Option<Vec<u8>>, readme: Option<Vec<u8>>) -> Result<Self> {
         if let Err(e) = serde_json::from_slice::<serde_json::Value>(&io_json) {
             return fail(format!("io.json is not valid JSON: {e}"));
         }
         let mut model_json = serde_json::to_vec_pretty(&converted.model)?;
         model_json.push(b'\n');
-        Ok(Package { model_json, weights: converted.weights.clone(), io_json, license })
+        let readme = readme.unwrap_or_else(|| default_readme(converted, license.is_some()).into_bytes());
+        Ok(Package { model_json, weights: converted.weights.clone(), io_json, license, readme })
     }
 
     fn files(&self) -> Vec<(&'static str, &[u8], bool)> {
@@ -29,6 +32,7 @@ impl Package {
         if let Some(l) = &self.license {
             files.push(("LICENSE", &l[..], true));
         }
+        files.push(("README.md", &self.readme[..], true));
         files.push(("weights.bin", &self.weights[..], false));
         files
     }
@@ -67,6 +71,38 @@ impl Package {
     }
 }
 
+/// Minimal README.md for a package converted without `--readme`.
+fn default_readme(converted: &Converted, has_license: bool) -> String {
+    let model = &converted.model;
+    let mut s = format!(
+        "# {name}
+
+A gpufx-nn package (format version {version}), converted from {source} by gpufx-nnconv.
+
+\n         ## Files
+
+\n         - `model.json`: graph and op parameters
+\n         - `weights.bin`: weights
+\n         - `io.json`: how the model is fed and read
+",
+        name = model.name,
+        version = model.version,
+        source = model.source.kind,
+    );
+    if has_license {
+        s.push_str(
+            "- `LICENSE`: license of the model; read it before redistributing the package
+",
+        );
+    }
+    s.push_str(
+        "
+See docs/NN_MODEL_FORMAT.md of the gpufx repository for the format.
+",
+    );
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,7 +118,17 @@ mod tests {
     }
 
     fn package() -> Package {
-        Package::new(&converted(), br#"{"kind":"x"}"#.to_vec(), Some(b"MIT".to_vec())).unwrap()
+        Package::new(
+            &converted(),
+            br#"{"kind":"x"}"#.to_vec(),
+            Some(b"MIT".to_vec()),
+            Some(
+                b"# custom
+"
+                .to_vec(),
+            ),
+        )
+        .unwrap()
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
@@ -99,12 +145,38 @@ mod tests {
         package().write(&out).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
         let names: Vec<String> = (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().unwrap().to_string()).collect();
-        assert_eq!(names, ["model.json", "io.json", "LICENSE", "weights.bin"]);
+        assert_eq!(names, ["model.json", "io.json", "LICENSE", "README.md", "weights.bin"]);
         assert_eq!(zip.by_name("weights.bin").unwrap().compression(), zip::CompressionMethod::Stored);
         assert_eq!(zip.by_name("model.json").unwrap().compression(), zip::CompressionMethod::Deflated);
+        let mut readme = String::new();
+        zip.by_name("README.md").unwrap().read_to_string(&mut readme).unwrap();
+        assert_eq!(
+            readme,
+            "# custom
+"
+        );
         let mut io = String::new();
         zip.by_name("io.json").unwrap().read_to_string(&mut io).unwrap();
         assert_eq!(io, r#"{"kind":"x"}"#);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generated_readme_without_option() {
+        let dir = scratch("readme");
+        let pkg = Package::new(&converted(), b"{}".to_vec(), Some(b"MIT".to_vec()), None).unwrap();
+        pkg.write(&dir.join("pkg")).unwrap();
+        let readme = std::fs::read_to_string(dir.join("pkg/README.md")).unwrap();
+        assert!(
+            readme.starts_with(
+                "# t
+"
+            ),
+            "{readme}"
+        );
+        assert!(readme.contains("ncnn") && readme.contains("LICENSE"), "{readme}");
+        let no_license = Package::new(&converted(), b"{}".to_vec(), None, None).unwrap();
+        assert!(!String::from_utf8(no_license.readme).unwrap().contains("LICENSE"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -115,7 +187,7 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("pkg/weights.bin")).unwrap().len(), 8);
         assert!(dir.join("pkg/model.json").exists());
         let converted = converted();
-        assert!(Package::new(&converted, b"{".to_vec(), None).is_err());
+        assert!(Package::new(&converted, b"{".to_vec(), None, None).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
