@@ -19,6 +19,10 @@ thiserror = "2"
 naga = { version = "30", features = ["wgsl-in", "glsl-in"] }
 sha2 = "0.10"
 
+[dev-dependencies]
+# the CPU reference executor: the golden semantics of the gpufx-nn ops (tests/nn.rs)
+gpufx-nnconv = { path = "../gpufx-nnconv" }
+
 # Zero-copy Vulkan frames (src/vulkan.rs): the same ash wgpu-hal uses.
 [target.'cfg(any(windows, all(unix, not(target_vendor = "apple"))))'.dependencies]
 ash = { version = "0.38", default-features = false, features = ["std"] }

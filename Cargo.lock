@@ -294,6 +294,7 @@ name = "gpufx-core"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "gpufx-nnconv",
  "image",
  "libloading",
  "naga",

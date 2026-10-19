@@ -1,5 +1,17 @@
 # Việc còn treo
 
+### [Vừa] Runtime nn: 4K vượt giới hạn binding storage buffer trên GPU 128 MiB
+- **Vấn đề**: RIFE v4.6 ở 4K cần tensor buffer khoảng 400–530 MB; trên adapter có `max_storage_buffer_binding_size` 128 MiB (D3D12, downlevel, nhiều GPU không phải NVIDIA) plan báo lỗi và không có đường lùi.
+- **Vị trí**: [plan.rs:386](../crates/gpufx-core/src/nn/plan.rs#L386)
+- **Vì sao**: nên chia slot theo tensor, chia ảnh thành tile, hoặc chạy RIFE ở `scale` 0.5 cho 4K.
+- **Ngày ghi**: 2026-10-19
+
+### [Thấp] Runtime nn: conv chiếm ~70% thời gian, 1080p còn 44–46 ms/frame
+- **Vấn đề**: trên RTX 4060 Laptop (Vulkan) RIFE v4.6 1080p mất 44–46 ms/frame, conv khoảng 31 ms; chưa xuống dưới 40 ms.
+- **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs)
+- **Vì sao**: nhân đôi 24 fps 1080p cần dưới ~42 ms để chạy thời gian thực. Hướng: tính f16 (`SHADER_F16`, có đường lùi f32) hoặc conv kiểu GEMM nạp đôi bộ đệm; có thể bỏ các biến môi trường chỉnh tham số `GPUFX_NN_CONV`/`GPUFX_NN_MINWG` khi chốt cấu hình.
+- **Ngày ghi**: 2026-10-19
+
 ### [Thấp] Hiệu ứng CapCut đợt 4: các finding review để sau
 - **Vấn đề**:
   - heat-flash lấy mẫu glow trên lưới cố định 240 texel nhưng đọc thẳng texture `bright` full-res, nên ở 1080p/4K các tap cách nhau 9–18 px, highlight nhỏ có thể nhấp nháy.
