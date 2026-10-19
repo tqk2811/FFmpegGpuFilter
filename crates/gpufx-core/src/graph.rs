@@ -1169,15 +1169,8 @@ pub struct EffectGraph {
     /// "chain" or "graph", in messages.
     what: &'static str,
     io: FrameIo,
-    /// Copies and the last submission of D3D12/D3D11 frames (see `d3d12.rs`).
-    #[cfg(windows)]
-    pub(crate) dx: crate::d3d12::GraphState,
-    /// Wrappers of the images of recent Vulkan frames (see `vulkan.rs`).
-    #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
-    pub(crate) vk: crate::vulkan::ImportCache,
-    /// Wrappers of the IOSurface planes of recent VideoToolbox frames (see `videotoolbox.rs`).
-    #[cfg(target_vendor = "apple")]
-    pub(crate) vt: crate::videotoolbox::ImportCache,
+    /// Wrappers and copies of the frames of the GPU frame APIs (see `stage.rs`).
+    pub(crate) interop: crate::stage::Interop,
 }
 
 impl EffectGraph {
@@ -1525,12 +1518,7 @@ impl EffectGraph {
             param_names,
             what,
             io: FrameIo::default(),
-            #[cfg(windows)]
-            dx: Default::default(),
-            #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
-            vk: Default::default(),
-            #[cfg(target_vendor = "apple")]
-            vt: Default::default(),
+            interop: Default::default(),
         })
     }
 
@@ -1909,6 +1897,38 @@ impl EffectGraph {
     #[doc(hidden)]
     pub fn frame_binds(&self) -> usize {
         self.io.frame_binds
+    }
+}
+
+impl crate::stage::GpuStage for EffectGraph {
+    fn context(&self) -> &Arc<crate::GpuContext> {
+        EffectGraph::context(self)
+    }
+
+    fn interop(&mut self) -> &mut crate::stage::Interop {
+        &mut self.interop
+    }
+
+    fn encode_gpu(
+        &mut self,
+        inputs: &[GpuFrame],
+        outs: &[GpuFrame],
+        info: Option<&FrameInfo>,
+        enc: &mut wgpu::CommandEncoder,
+    ) -> Result<(), Error> {
+        EffectGraph::encode_gpu(self, inputs, outs, info, enc)
+    }
+
+    fn release_frame(&mut self) {
+        EffectGraph::release_frame(self);
+    }
+
+    fn allow_direct_gpu(&mut self) {
+        EffectGraph::allow_direct_gpu(self);
+    }
+
+    fn profile_cpu(&mut self, span: crate::profile::Cpu, d: std::time::Duration) {
+        EffectGraph::profile_cpu(self, span, d);
     }
 }
 

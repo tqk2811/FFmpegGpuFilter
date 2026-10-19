@@ -6,6 +6,7 @@
 //! The CPU reference executor of `gpufx-nnconv` (`src/reference.rs`) pins the semantics of every op; the
 //! shaders follow it (same tap rules, same summation order where it matters).
 
+mod frames;
 mod interp;
 mod kernels;
 pub mod model;
@@ -15,6 +16,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+pub use frames::InterpFrames;
 pub use interp::FrameInterp;
 pub use plan::{NnPlan, Profile, TensorView};
 

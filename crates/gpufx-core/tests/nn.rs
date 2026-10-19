@@ -7,8 +7,8 @@ mod common;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpufx_core::nn::{FrameInterp, NnModel};
-use gpufx_core::{GpuContext, Image};
+use gpufx_core::nn::{FrameInterp, InterpFrames, NnModel};
+use gpufx_core::{ColorInfo, GpuContext, GpuFrame, Image, Matrix, PixelFormat, Range};
 use gpufx_nnconv::reference::{Reference, Tensor};
 
 fn gpu() -> Option<Arc<GpuContext>> {
@@ -447,4 +447,135 @@ fn rife_matches_the_cpu_reference() {
         eprintln!("{set}: {db:.2} dB against the CPU reference on {}", ctx.description());
         assert!(db > 50.0, "{set}: {db:.2} dB");
     }
+}
+
+// ---- InterpFrames (the stage behind the FFmpeg filter): scene scoring across calls ----
+
+const FW: u32 = 64;
+const FH: u32 = 16;
+
+/// A frame_interp model of one 1x1 convolution (output is not a source frame), on frames of `FW`x`FH`.
+fn interp_frames(ctx: &Arc<GpuContext>, scene: f32) -> InterpFrames {
+    let (mut w, mut r) = (Weights::default(), Rng(7));
+    let ops = vec![
+        op("concat", "cat", &["in0", "in1", "in2"], r#""axis":0"#),
+        conv(&mut w, &mut r, "conv2d", "c", "cat", 7, 3, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        op("binary", "out0", &["c"], r#""kind":"add","scalar":0.5"#),
+    ];
+    let json = model(&["in0", "in1", "in2"], &["out0"], &ops);
+    let io = r#"{"kind":"frame_interp","inputs":{"frame0":"in0","frame1":"in1","timestep":"in2"},"output":"out0",
+        "color":"rgb","range":[0,1],"pad_multiple":1,"pad_mode":"zero","output_clamp":[0,1]}"#;
+    let m = NnModel::from_parts(ctx.clone(), json.as_bytes(), &w.0, Some(io.as_bytes())).unwrap();
+    let mut fi = InterpFrames::new(ctx.clone(), Arc::new(m)).unwrap();
+    fi.set_scene_threshold(scene).unwrap();
+    fi
+}
+
+fn gpu_frame(ctx: &GpuContext, usage: wgpu::TextureUsages, data: Option<&[u8]>) -> GpuFrame {
+    let tex = rgba_texture(ctx, FW, FH, usage);
+    if let Some(data) = data {
+        ctx.queue().write_texture(
+            tex.as_image_copy(),
+            data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(FW * 4), rows_per_image: Some(FH) },
+            wgpu::Extent3d { width: FW, height: FH, depth_or_array_layers: 1 },
+        );
+    }
+    let color = ColorInfo { matrix: Matrix::Bt709, range: Range::Full, ..Default::default() };
+    GpuFrame { format: PixelFormat::Rgba, width: FW, height: FH, planes: vec![tex], color }
+}
+
+fn read_frame(ctx: &GpuContext, f: &GpuFrame) -> Vec<u8> {
+    let buf = ctx.device().create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (FW * FH * 4) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        f.planes[0].as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(FW * 4), rows_per_image: None },
+        },
+        f.planes[0].size(),
+    );
+    ctx.queue().submit([enc.finish()]);
+    buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    ctx.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let out = buf.slice(..).get_mapped_range().unwrap().to_vec();
+    out
+}
+
+/// One call: `src` as the next source frame, the frames in between at `times`.
+fn call(ctx: &Arc<GpuContext>, fi: &mut InterpFrames, src: &[u8], times: &[f32]) -> Result<Vec<Vec<u8>>, gpufx_core::Error> {
+    let input = gpu_frame(ctx, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, Some(src));
+    let outs: Vec<GpuFrame> =
+        times.iter().map(|_| gpu_frame(ctx, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC, None)).collect();
+    fi.set_times(times)?;
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    fi.encode_frames(&input, &outs, &mut enc)?;
+    ctx.queue().submit([enc.finish()]);
+    Ok(outs.iter().map(|o| read_frame(ctx, o)).collect())
+}
+
+/// A bright gradient and a black frame: a pair of them scores far above any threshold used here.
+fn bright() -> Vec<u8> {
+    (0..FW * FH).flat_map(|i| [(190 + (i % FW) * 2) as u8, (200 + (i / FW) * 3) as u8, 220, 255]).collect()
+}
+
+fn black() -> Vec<u8> {
+    [0u8, 0, 0, 255].repeat((FW * FH) as usize)
+}
+
+/// A first call that makes only a copy (time 1) has no pair: it must not leave a score behind (the first pair
+/// then starts from a fresh baseline and is a cut).
+#[test]
+fn a_first_call_at_time_one_scores_no_pair() {
+    let Some(ctx) = gpu() else { return };
+    let (a, b) = (bright(), black());
+    let mut reference = interp_frames(&ctx, 0.0);
+    call(&ctx, &mut reference, &a, &[1.0]).unwrap();
+    let interpolated = call(&ctx, &mut reference, &b, &[0.3]).unwrap().remove(0);
+    assert!(interpolated != a && interpolated != b, "the model should not return a source frame");
+
+    let mut fi = interp_frames(&ctx, 5.0);
+    assert!(call(&ctx, &mut fi, &a, &[1.0]).unwrap()[0] == a, "time 1 is the source frame");
+    assert!(call(&ctx, &mut fi, &b, &[0.3]).unwrap()[0] == a, "a cut repeats the nearer source frame");
+}
+
+/// Calls without frames in between still score their pair, so the next pair is scored against it as in
+/// FFmpeg's framerate filter: after bright -> black, black -> bright changes by nothing and is no cut.
+#[test]
+fn pairs_without_frames_in_between_are_scored() {
+    let Some(ctx) = gpu() else { return };
+    let (a, b) = (bright(), black());
+    let mut reference = interp_frames(&ctx, 0.0);
+    call(&ctx, &mut reference, &b, &[]).unwrap();
+    let interpolated = call(&ctx, &mut reference, &a, &[0.3]).unwrap().remove(0);
+    assert!(interpolated != a && interpolated != b, "the model should not return a source frame");
+
+    let mut fi = interp_frames(&ctx, 5.0);
+    call(&ctx, &mut fi, &a, &[]).unwrap();
+    call(&ctx, &mut fi, &b, &[]).unwrap();
+    assert!(call(&ctx, &mut fi, &a, &[0.3]).unwrap()[0] == interpolated, "no cut: the interpolated frame");
+}
+
+/// After a reset the previous frame and the scene history are gone: time below 1 fails, time 1 works, and the
+/// first pair scores from a fresh baseline.
+#[test]
+fn reset_forgets_the_previous_frame_and_the_scene_history() {
+    let Some(ctx) = gpu() else { return };
+    let (a, b) = (bright(), black());
+    let mut fi = interp_frames(&ctx, 5.0);
+    call(&ctx, &mut fi, &a, &[]).unwrap();
+    call(&ctx, &mut fi, &b, &[]).unwrap();
+    assert!(fi.has_previous());
+    fi.reset();
+    assert!(!fi.has_previous());
+    assert!(call(&ctx, &mut fi, &a, &[0.3]).is_err(), "no previous frame");
+    assert!(call(&ctx, &mut fi, &a, &[1.0]).unwrap()[0] == a, "time 1 is the source frame");
+    // black -> bright scored the same as bright -> black before the reset: still a cut, not "no change"
+    assert!(call(&ctx, &mut fi, &b, &[0.3]).unwrap()[0] == a, "a cut after a reset");
 }

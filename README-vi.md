@@ -107,6 +107,38 @@ filter chạy trên frame VideoToolbox (nv12, p010le) qua Metal, ví dụ
 
 Tài liệu: [thiết kế](docs/DESIGN-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)
 
+## Nội suy khung hình (`gpufx_ai_framerate`)
+
+`gpufx_ai_framerate` tăng frame rate bằng một model nội suy khung hình (RIFE v4.6, đã chuyển sang gói gpufx-nn)
+chạy trên GPU qua libgpufx, trên cùng loại frame GPU và device như `gpufx`:
+
+```sh
+# 12 fps -> 24 fps trên Vulkan
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+# D3D12 (Windows; cần dxcompiler.dll, có sẵn trong bin/)
+ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
+  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+```
+
+| Option | Mặc định | Ý nghĩa |
+|---|---|---|
+| `model` | (bắt buộc) | đường dẫn gói `frame_interp`, vd `models/rife-v4.6.zip` |
+| `fps` | gấp đôi input | frame rate đầu ra; tỉ lệ bất kỳ, không chỉ bội số |
+| `scene` | 8.2 | ngưỡng chuyển cảnh (0-100, chấm điểm như filter `framerate` của FFmpeg); cặp frame đạt ngưỡng thì không nội suy (lặp frame gần hơn); 0 thì nội suy mọi cặp |
+| `max_gap` | 2 | cặp frame cách nhau quá số lần thời lượng frame input này (khoảng hở của luồng VFR) thì không nội suy |
+
+Đầu ra là lưới frame rate cố định: điểm lưới nằm giữa hai frame nguồn được nội suy đúng thời điểm, điểm trùng
+frame nguồn thì chính là frame đó, frame cuối kéo dài tới hết luồng. Input phải là frame GPU (Vulkan, D3D12, D3D11
+hoặc VideoToolbox) dạng nv12, p010le, rgba hoặc rgba64le. Khi GPU ghi được vào frame input (Vulkan có storage, D3D12,
+texture D3D11 shared) thì output dùng chính frames context của input và frame nguồn đi qua nguyên trạng; nếu không
+(vd `hwupload` D3D11) output có frames context riêng và frame nguồn được copy sang trên GPU (qua RGBA 8-bit, hơi mất
+chất lượng).
+
+Model không nằm trong git: bundle win64/linux64 kèm sẵn trong `models/` (cùng license), hoặc tự tải và chuyển đổi
+bằng `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (URL và sha256 cố định, ghi ra `build/models/`). Trên
+D3D12 shader của model cần DXC (`dxcompiler.dll`); lần chạy đầu phải biên dịch (đặt `GPUFX_SHADER_CACHE` để giữ lại).
+
 ## Yêu cầu phần cứng và hệ điều hành
 
 - **Windows**: Windows 10 64-bit trở lên. D3D12: feature level 11_0, resource binding tier 2 (NVIDIA Kepler+,

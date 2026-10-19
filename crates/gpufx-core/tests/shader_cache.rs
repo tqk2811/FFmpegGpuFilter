@@ -16,6 +16,7 @@ fn example() -> PathBuf {
         .filter(|g| g.is_dir())
         .flat_map(|g| std::fs::read_dir(g).unwrap())
         .map(|e| e.unwrap().path())
+        .filter(|p| p.join("manifest.json").exists())
         .collect();
     all.sort();
     all.into_iter().next().unwrap()
@@ -158,6 +159,7 @@ fn run_all_d3d12(dir: Option<&Path>) -> Option<(Vec<Vec<u8>>, Option<gpufx_core:
         .filter(|g| g.is_dir())
         .flat_map(|g| std::fs::read_dir(g).unwrap())
         .map(|e| e.unwrap().path())
+        .filter(|p| p.join("manifest.json").exists())
         .collect();
     all.sort();
     let effects: Vec<Effect> = all.into_iter().map(|p| Effect::new(ctx.clone(), Package::open(p).unwrap()).unwrap()).collect();

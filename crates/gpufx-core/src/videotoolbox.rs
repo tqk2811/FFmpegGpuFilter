@@ -22,6 +22,7 @@ use crate::frame::{ColorInfo, GpuFrame, PixelFormat};
 use crate::graph::EffectGraph;
 use crate::lru::Lru;
 use crate::runtime::{request_adapter, Backend, FrameInfo, GpuContext};
+use crate::stage::GpuStage;
 use crate::Error;
 
 #[link(name = "CoreVideo", kind = "framework")]
@@ -177,7 +178,7 @@ impl EffectGraph {
     /// How many wgpu wrappers of IOSurface planes were made. For tests and diagnostics.
     #[doc(hidden)]
     pub fn videotoolbox_wrappers_made(&self) -> usize {
-        self.vt.made
+        self.interop.vt.made
     }
 
     /// Runs the graph on VideoToolbox frames, reading and writing their IOSurfaces in
@@ -189,94 +190,109 @@ impl EffectGraph {
     /// anyone else during the call. Wrappers of the planes are kept for the next frames
     /// (they retain the surfaces) until the graph is dropped.
     pub unsafe fn process_videotoolbox(&mut self, inputs: &[VtFrame], outs: &[VtFrame], info: Option<&FrameInfo>) -> Result<(), Error> {
-        let t_start = std::time::Instant::now();
-        let ctx = self.context().clone();
-        let shared = ctx.videotoolbox.as_ref().ok_or_else(|| gpu_err("the effect's device was not made for VideoToolbox frames"))?;
-        let device = &ctx.device;
-        let pads = inputs.len() + outs.len();
-        if self.vt.pads.len() != pads {
-            self.vt.pads = (0..pads).map(|_| Lru::new(crate::lru::FRAMES * 4)).collect();
-        }
+        process_videotoolbox(self, inputs, outs, info)
+    }
+}
 
-        // Also catches validation errors of the imports below.
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut frames: Vec<GpuFrame> = Vec::with_capacity(pads);
-        for (output, list) in [(false, inputs), (true, outs)] {
-            for (n, f) in list.iter().enumerate() {
-                let what = format!("{} {n}", if output { "output" } else { "input" });
-                let surface = surface_of(f, &what)?;
-                let count = f.format.plane_count();
-                if surface.plane_count() != count {
-                    return Err(Error::Frame(format!(
-                        "{what}: the IOSurface has {} planes, {} needs {count}",
-                        surface.plane_count(),
+/// [`EffectGraph::process_videotoolbox`] for any stage (see `stage.rs`).
+///
+/// # Safety
+/// As for [`EffectGraph::process_videotoolbox`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn process_videotoolbox<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    inputs: &[VtFrame],
+    outs: &[VtFrame],
+    info: Option<&FrameInfo>,
+) -> Result<(), Error> {
+    let t_start = std::time::Instant::now();
+    let ctx = stage.context().clone();
+    let shared = ctx.videotoolbox.as_ref().ok_or_else(|| gpu_err("the effect's device was not made for VideoToolbox frames"))?;
+    let device = &ctx.device;
+    let pads = inputs.len() + outs.len();
+    // Grow only: a changing number of outputs (frame rate conversion) keeps the imports of the pads it still uses.
+    while stage.interop().vt.pads.len() < pads {
+        stage.interop().vt.pads.push(Lru::new(crate::lru::FRAMES * 4));
+    }
+
+    // Also catches validation errors of the imports below.
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut frames: Vec<GpuFrame> = Vec::with_capacity(pads);
+    for (output, list) in [(false, inputs), (true, outs)] {
+        for (n, f) in list.iter().enumerate() {
+            let what = format!("{} {n}", if output { "output" } else { "input" });
+            let surface = surface_of(f, &what)?;
+            let count = f.format.plane_count();
+            if surface.plane_count() != count {
+                return Err(Error::Frame(format!(
+                    "{what}: the IOSurface has {} planes, {} needs {count}",
+                    surface.plane_count(),
+                    f.format.name()
+                )));
+            }
+            let pad = if output { inputs.len() + n } else { n };
+            let mut planes = Vec::with_capacity(count);
+            for p in 0..count {
+                let format = f.format.plane_texture_format(p);
+                if !shared.has16 && matches!(format, wgpu::TextureFormat::R16Unorm | wgpu::TextureFormat::Rg16Unorm) {
+                    return Err(gpu_err(format!(
+                        "{} has no 16-bit normalized textures, needed for {} frames",
+                        ctx.description(),
                         f.format.name()
                     )));
                 }
-                let pad = if output { inputs.len() + n } else { n };
-                let mut planes = Vec::with_capacity(count);
-                for p in 0..count {
-                    let format = f.format.plane_texture_format(p);
-                    if !shared.has16 && matches!(format, wgpu::TextureFormat::R16Unorm | wgpu::TextureFormat::Rg16Unorm) {
-                        return Err(gpu_err(format!(
-                            "{} has no 16-bit normalized textures, needed for {} frames",
-                            ctx.description(),
-                            f.format.name()
-                        )));
-                    }
-                    if output && !shared.writable.contains(&format) {
-                        return Err(gpu_err(format!(
-                            "{} cannot write {format:?} storage textures, needed for {} output frames; use nv12, or a CPU format \
+                if output && !shared.writable.contains(&format) {
+                    return Err(gpu_err(format!(
+                        "{} cannot write {format:?} storage textures, needed for {} output frames; use nv12, or a CPU format \
                              and hwupload after gpufx",
-                            ctx.description(),
-                            f.format.name()
-                        )));
-                    }
-                    let (w, h) = f.format.plane_texture_size(p, f.width, f.height);
-                    let (sw, sh) = (surface.width_of_plane(p), surface.height_of_plane(p));
-                    if sw < w as usize || sh < h as usize {
-                        return Err(Error::Frame(format!(
-                            "{what}: plane {p} of a {}x{} frame needs {w}x{h} samples, the IOSurface plane is {sw}x{sh}",
-                            f.width, f.height
-                        )));
-                    }
-                    let key = ImportKey { surface: surface.id(), plane: p, format, size: (w, h), output };
-                    if let Some(t) = self.vt.pads[pad].get(&key) {
-                        planes.push(t.clone());
-                        continue;
-                    }
-                    let t = wrap(device, surface, &key, &what)?;
-                    self.vt.made += 1;
-                    self.vt.pads[pad].insert(key, t.clone());
-                    planes.push(t);
+                        ctx.description(),
+                        f.format.name()
+                    )));
                 }
-                frames.push(GpuFrame { format: f.format, width: f.width, height: f.height, planes, color: f.color });
+                let (w, h) = f.format.plane_texture_size(p, f.width, f.height);
+                let (sw, sh) = (surface.width_of_plane(p), surface.height_of_plane(p));
+                if sw < w as usize || sh < h as usize {
+                    return Err(Error::Frame(format!(
+                        "{what}: plane {p} of a {}x{} frame needs {w}x{h} samples, the IOSurface plane is {sw}x{sh}",
+                        f.width, f.height
+                    )));
+                }
+                let key = ImportKey { surface: surface.id(), plane: p, format, size: (w, h), output };
+                if let Some(t) = stage.interop().vt.pads[pad].get(&key) {
+                    planes.push(t.clone());
+                    continue;
+                }
+                let t = wrap(device, surface, &key, &what)?;
+                stage.interop().vt.made += 1;
+                stage.interop().vt.pads[pad].insert(key, t.clone());
+                planes.push(t);
             }
+            frames.push(GpuFrame { format: f.format, width: f.width, height: f.height, planes, color: f.color });
         }
-        let (ins, outs_w) = frames.split_at(inputs.len());
-        let t_import = t_start.elapsed();
-
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx videotoolbox") });
-        self.allow_direct_gpu();
-        let encoded = self.encode_gpu(ins, outs_w, info, &mut enc);
-        let t_submit = std::time::Instant::now();
-        let submitted = encoded.map(|()| ctx.queue.submit([enc.finish()]));
-        self.release_frame();
-        let error = pollster::block_on(scope.pop());
-        let index = submitted?;
-        if let Some(e) = error {
-            return Err(gpu_err(e));
-        }
-        // FFmpeg reads the surfaces next (hwdownload, encoders) without waiting on anything.
-        device.poll(wgpu::PollType::Wait { submission_index: Some(index), timeout: None }).map_err(gpu_err)?;
-        if crate::profile::enabled() {
-            use crate::profile::Cpu;
-            self.profile_cpu(Cpu::Import, t_import);
-            self.profile_cpu(Cpu::Submit, t_submit.elapsed());
-            self.profile_cpu(Cpu::Total, t_start.elapsed());
-        }
-        Ok(())
     }
+    let (ins, outs_w) = frames.split_at(inputs.len());
+    let t_import = t_start.elapsed();
+
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx videotoolbox") });
+    stage.allow_direct_gpu();
+    let encoded = stage.encode_gpu(ins, outs_w, info, &mut enc);
+    let t_submit = std::time::Instant::now();
+    let submitted = encoded.map(|()| ctx.queue.submit([enc.finish()]));
+    stage.release_frame();
+    let error = pollster::block_on(scope.pop());
+    let index = submitted?;
+    if let Some(e) = error {
+        return Err(gpu_err(e));
+    }
+    // FFmpeg reads the surfaces next (hwdownload, encoders) without waiting on anything.
+    device.poll(wgpu::PollType::Wait { submission_index: Some(index), timeout: None }).map_err(gpu_err)?;
+    if crate::profile::enabled() {
+        use crate::profile::Cpu;
+        stage.profile_cpu(Cpu::Import, t_import);
+        stage.profile_cpu(Cpu::Submit, t_submit.elapsed());
+        stage.profile_cpu(Cpu::Total, t_start.elapsed());
+    }
+    Ok(())
 }
 
 /// A wgpu texture on plane `key.plane` of `surface`, without a copy.

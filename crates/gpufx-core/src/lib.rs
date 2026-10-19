@@ -20,6 +20,7 @@ mod pool;
 mod profile;
 pub mod runtime;
 mod shader_cache;
+mod stage;
 mod texture;
 #[cfg(target_vendor = "apple")]
 pub mod videotoolbox;
