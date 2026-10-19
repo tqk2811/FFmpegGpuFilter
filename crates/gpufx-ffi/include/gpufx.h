@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define GPUFX_API_VERSION 13
+#define GPUFX_API_VERSION 1
 
 /* Names of the FFmpeg filters this project adds to libavfilter, for
  * avfilter_get_by_name() or a filter graph string. */
@@ -119,7 +119,8 @@ typedef struct GpufxStreamInfo {
 /*
  * Returns GPUFX_API_VERSION of the loaded library. Versions only grow by additions
  * (new functions, constants): a library with a version >= the header's works, an older
- * one does not. A change that breaks existing callers renames the library.
+ * one does not. A change that breaks existing callers renames the library. Pre-release: the
+ * version stays 1 until the first release.
  */
 uint32_t gpufx_version(void);
 
@@ -244,17 +245,17 @@ uint32_t gpufx_effect_output_format_count(const GpufxEffect *fx);
 const char *gpufx_effect_output_format(const GpufxEffect *fx, uint32_t index);
 
 /*
- * Since version 5. Output pads: 1 for an effect or a chain (named "default"), any number
+ * Output pads: 1 for an effect or a chain (named "default"), any number
  * for a graph (named after their labels).
  */
 uint32_t gpufx_effect_output_count(const GpufxEffect *fx);
 const char *gpufx_effect_output_name(const GpufxEffect *fx, uint32_t output);
 /*
- * Since version 5. The input pad whose size output has (effects write the size of their
+ * The input pad whose size output has (effects write the size of their
  * first input), or a negative value when there is no such output.
  */
 int gpufx_effect_output_source(const GpufxEffect *fx, uint32_t output);
-/* Since version 5. gpufx_effect_output_format*() for any output pad. */
+/* gpufx_effect_output_format*() for any output pad. */
 uint32_t gpufx_effect_output_pad_format_count(const GpufxEffect *fx, uint32_t output);
 const char *gpufx_effect_output_pad_format(const GpufxEffect *fx, uint32_t output, uint32_t index);
 
@@ -288,7 +289,7 @@ int gpufx_effect_set_param_values(GpufxEffect *fx, const char *name,
                                   const double *values, uint32_t count);
 
 /*
- * Effects of a chain or graph switched on and off (since API 10). node names effects as
+ * Effects of a chain or graph switched on and off. node names effects as
  * the prefix of a parameter name does: a package label naming one effect, an index
  * ("0", "1"... always valid) or a graph statement's output label (every effect of that
  * statement); "" is the only effect of a single effect. An effect switched off copies
@@ -302,7 +303,7 @@ int gpufx_effect_set_node_enabled(GpufxEffect *fx, const char *node, int enabled
 int gpufx_effect_all_nodes_disabled(const GpufxEffect *fx);
 
 /*
- * Which input passes when switched off (since API 11).
+ * Which input passes when switched off.
  * gpufx_effect_set_node_bypass picks the input the effects node names copy while off:
  * an input index of each (0 by default), or GPUFX_BYPASS_LAST for the last input of
  * each. It fails when an effect has no such input. An input of another size than the
@@ -346,7 +347,7 @@ int gpufx_effect_process_frames(GpufxEffect *fx, const GpufxFrame *inputs, uint3
                                 const GpufxFrameOut *out, const GpufxFrameInfo *info);
 
 /*
- * Since version 5. gpufx_effect_process_frames() for any number of outputs: outs holds
+ * gpufx_effect_process_frames() for any number of outputs: outs holds
  * one frame per output pad, each the size of its gpufx_effect_output_source() input.
  * Everything runs in one GPU submission and all outputs are read back together through
  * one shared buffer. No plane may overlap another (refused).
@@ -358,7 +359,7 @@ int gpufx_effect_process_graph(GpufxEffect *fx, const GpufxFrame *inputs, uint32
                                const GpufxFrameInfo *info);
 
 /*
- * Since version 5. Bypass for any number of outputs: each output is its
+ * Bypass for any number of outputs: each output is its
  * gpufx_effect_output_source() input converted to its format, without running the effects.
  * inputs may hold only the first pads, as long as every output's source is among them.
  */
@@ -373,7 +374,7 @@ int gpufx_effect_convert_graph(GpufxEffect *fx, const GpufxFrame *inputs, uint32
 int gpufx_effect_convert_frame(GpufxEffect *fx, const GpufxFrame *input, const GpufxFrameOut *out);
 
 /*
- * Since version 6: Vulkan frames without copies. The effect runs on a Vulkan device the
+ * Vulkan frames without copies. The effect runs on a Vulkan device the
  * caller made (FFmpeg's AVVulkanDeviceContext) and reads and writes its VkImages in
  * place. Handles are passed without <vulkan/vulkan.h>: dispatchable handles as
  * pointers, non-dispatchable ones (VkImage, VkSemaphore) as uint64_t.
@@ -455,7 +456,7 @@ int gpufx_effect_process_vulkan(GpufxEffect *fx, GpufxVulkanFrame *inputs, uint3
                                 const GpufxFrameInfo *info);
 
 /*
- * Since version 7: Direct3D 12 and Direct3D 11 frames on the GPU (Windows; elsewhere the
+ * Direct3D 12 and Direct3D 11 frames on the GPU (Windows; elsewhere the
  * functions fail). Handles are passed as void pointers, without <d3d12.h>.
  *
  * D3D12: the effect runs on the caller's ID3D12Device (FFmpeg's AVD3D12VADeviceContext)
@@ -533,7 +534,7 @@ int gpufx_effect_process_d3d11(GpufxEffect *fx, const GpufxD3D11Frame *inputs, u
                                const GpufxFrameInfo *info);
 
 /*
- * Since version 9: VideoToolbox frames (macOS; elsewhere the functions fail). A frame is
+ * VideoToolbox frames (macOS; elsewhere the functions fail). A frame is
  * FFmpeg's AV_PIX_FMT_VIDEOTOOLBOX frame: a CVPixelBufferRef (AVFrame.data[3]) backed by
  * an IOSurface, in nv12 (420v/420f) or p010le (x420/xf20). The effect runs on the system's
  * Metal device and reads and writes the IOSurface planes in place (R8 + RG8, R16 + RG16
@@ -569,7 +570,7 @@ int gpufx_effect_process_videotoolbox(GpufxEffect *fx, const GpufxVtFrame *input
                                       const GpufxFrameInfo *info);
 
 /*
- * Since version 13: frame interpolation with a gpufx-nn package whose io.json has kind
+ * Frame interpolation with a gpufx-nn package whose io.json has kind
  * "frame_interp" (RIFE v4, docs/NN_MODEL_FORMAT.md), on the GPU frames above. Same frames,
  * devices and synchronisation as the gpufx_effect_*_vulkan/d3d12/d3d11/videotoolbox calls.
  *
