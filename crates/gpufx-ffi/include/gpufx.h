@@ -251,10 +251,20 @@ const char *gpufx_effect_output_format(const GpufxEffect *fx, uint32_t index);
 uint32_t gpufx_effect_output_count(const GpufxEffect *fx);
 const char *gpufx_effect_output_name(const GpufxEffect *fx, uint32_t output);
 /*
- * The input pad whose size output has (effects write the size of their
- * first input), or a negative value when there is no such output.
+ * The input pad output follows (effects follow their first input): its frame
+ * rate and aspect ratio, and its size unless an effect stacks its inputs (see
+ * gpufx_effect_output_size()). A negative value when there is no such output.
  */
 int gpufx_effect_output_source(const GpufxEffect *fx, uint32_t output);
+/*
+ * Size of output for input pads of these sizes (count = the input count):
+ * the size of its gpufx_effect_output_source() pad, or for effects such as
+ * hstack/vstack (manifest output.size) the stacked size. 0 on success; a
+ * negative value (see gpufx_last_error()) when the sizes break a size rule or
+ * the output is larger than the GPU allows.
+ */
+int gpufx_effect_output_size(const GpufxEffect *fx, uint32_t output, const GpufxStreamInfo *streams, uint32_t count,
+                             uint32_t *width, uint32_t *height);
 /* gpufx_effect_output_format*() for any output pad. */
 uint32_t gpufx_effect_output_pad_format_count(const GpufxEffect *fx, uint32_t output);
 const char *gpufx_effect_output_pad_format(const GpufxEffect *fx, uint32_t output, uint32_t index);

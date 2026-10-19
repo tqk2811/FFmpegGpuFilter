@@ -1,5 +1,9 @@
 # Việc còn treo
 
+### [Vừa] DXIL precompile cho pixel khác đường thường ở 23 gói CapCut
+
+Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/gpufx-core/tests/precompile.rs`) đỏ ở `assert_eq!(trusted, plain)` khi có `dxcompiler.dll` trên PATH (vd `dist/win64/bin`). Đỏ cả trên master, không do hstack/vstack. Các gói lệch: big-wave, blu-ray-scanning, delay-zoom, digital-paint, doodle-scratch, fade-up, film-blur, glassblock-zoom-2, golden-sand, hot-shimmers, layers, left-transition, neon-graffiti, pink-grunge, signal-glitch-2, slide-bars, subject-flash, tear-apart, thermal-imaging-3, turn-table, tv-glitch, varnish-wash, zoom-switch. Chạy thường thì test bị skip vì thiếu dxcompiler, nên CI không thấy. Nên làm vì bật `GPUFX_TRUST_PRECOMPILED=1` sẽ cho hình khác bản biên dịch lúc chạy (có thể do cờ tối ưu DXC khác nhau, hoặc hiệu ứng phụ thuộc phép tính float không ổn định).
+
 ### [Vừa] Runtime nn: 4K vượt giới hạn binding storage buffer trên GPU 128 MiB
 - **Vấn đề**: RIFE v4.6 ở 4K cần tensor buffer khoảng 400–530 MB; trên adapter có `max_storage_buffer_binding_size` 128 MiB (D3D12, downlevel, nhiều GPU không phải NVIDIA) plan báo lỗi và không có đường lùi.
 - **Vị trí**: [plan.rs:386](../crates/gpufx-core/src/nn/plan.rs#L386)

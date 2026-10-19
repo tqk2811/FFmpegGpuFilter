@@ -1,0 +1,22 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.vstack",
+  "name": "Vertical Stack",
+  "version": "1.0.0",
+  "description": "Places the inputs one above the other, top to bottom, like FFmpeg's vstack.",
+  "inputs": [
+    {
+      "name": "src",
+      "description": "Videos to stack, all of the same width",
+      "repeat": { "default": 2, "min": 2, "max": 16 }
+    }
+  ],
+  "output": {
+    "size": "vstack"
+  },
+  "passes": [
+    {
+      "shader": "shaders/vstack.wgsl"
+    }
+  ]
+}

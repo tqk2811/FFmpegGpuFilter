@@ -186,7 +186,11 @@ fn run(text: &str, args: &[String]) -> Result<(), String> {
     let images: Vec<image::RgbaImage> = decoded.iter().map(|i| i.to_rgba8()).collect();
     let views: Vec<Image> =
         images.iter().map(|i| Image { data: i.as_raw(), width: i.width(), height: i.height(), stride: i.width() * 4 }).collect();
-    let (w, h) = views.get(graph.output_pad(0)).map(|v| (v.width, v.height)).ok_or("need at least one -i")?;
+    if views.is_empty() {
+        return Err("need at least one -i".into());
+    }
+    let pads: Vec<(u32, u32)> = views.iter().map(|v| (v.width, v.height)).collect();
+    let (w, h) = graph.output_size(0, &pads).map_err(|e| e.to_string())?;
     let mut out = vec![0u8; (w * h * 4) as usize];
     let start = std::time::Instant::now();
     graph

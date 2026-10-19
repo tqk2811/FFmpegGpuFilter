@@ -14,7 +14,10 @@ const MAX_TOTAL_BYTES: u64 = 256 << 20;
 
 #[derive(Debug, Clone)]
 pub struct Package {
+    /// The manifest, with a repeated input expanded to its default count.
     pub manifest: Manifest,
+    /// The manifest as written, when it has a repeated input (see [`Package::with_input_count`]).
+    template: Option<Box<Manifest>>,
     files: HashMap<String, Vec<u8>>,
 }
 
@@ -33,8 +36,10 @@ impl Package {
 
     fn from_files(files: HashMap<String, Vec<u8>>) -> Result<Self, Error> {
         let manifest_bytes = files.get("manifest.json").ok_or_else(|| Error::Package("missing manifest.json".into()))?;
-        let manifest = Manifest::parse(manifest_bytes)?;
-        let pkg = Package { manifest, files };
+        let parsed = Manifest::parse(manifest_bytes)?;
+        let manifest = parsed.with_input_count(None)?;
+        let template = parsed.repeat().is_some().then(|| Box::new(parsed));
+        let pkg = Package { manifest, template, files };
         for pass in &pkg.manifest.passes {
             pkg.file(&pass.shader)?;
         }
@@ -46,6 +51,21 @@ impl Package {
         // Image sizes come from the headers: nothing is decoded until a device loads it.
         crate::texture::check_package(&pkg)?;
         Ok(pkg)
+    }
+
+    /// The package with its repeated input expanded to `count` inputs (the number of labels a
+    /// graph node reads). Fails for a package without one or a count outside its range.
+    pub fn with_input_count(&self, count: u32) -> Result<Self, Error> {
+        let manifest = match &self.template {
+            Some(t) => t.with_input_count(Some(count))?,
+            None => self.manifest.with_input_count(Some(count))?,
+        };
+        Ok(Package { manifest, template: self.template.clone(), files: self.files.clone() })
+    }
+
+    /// The manifest has a repeated input (see [`Package::with_input_count`]).
+    pub fn has_repeated_input(&self) -> bool {
+        self.template.is_some()
     }
 
     pub fn file(&self, path: &str) -> Result<&[u8], Error> {

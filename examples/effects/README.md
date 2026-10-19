@@ -30,6 +30,8 @@ Equivalents of FFmpeg built-in filters and `xfade` transitions.
 - [mirror](ffmpeg/mirror/README.md)
 - [transform](ffmpeg/transform/README.md)
 - [overlay](ffmpeg/overlay/README.md)
+- [hstack](ffmpeg/hstack/README.md)
+- [vstack](ffmpeg/vstack/README.md)
 
 ## slideshow
 

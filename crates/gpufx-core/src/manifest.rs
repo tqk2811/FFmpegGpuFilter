@@ -58,6 +58,63 @@ pub struct InputDef {
     /// (api 2), for shaders that shrink it a lot with `textureSampleLevel`.
     #[serde(default)]
     pub mipmaps: bool,
+    /// The last input stands for a variable number of pads (api 2), named `<name>0`,
+    /// `<name>1`...; a graph node sets the number by the labels it reads. See [`Manifest::with_input_count`].
+    #[serde(default)]
+    pub repeat: Option<RepeatRule>,
+}
+
+/// How many pads a repeated input expands to.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepeatRule {
+    pub default: u32,
+    #[serde(default = "default_repeat_min")]
+    pub min: u32,
+    #[serde(default = "default_repeat_max")]
+    pub max: u32,
+}
+
+/// Most pads a repeated input may expand to.
+pub const MAX_REPEAT: u32 = 16;
+
+fn default_repeat_min() -> u32 {
+    1
+}
+fn default_repeat_max() -> u32 {
+    MAX_REPEAT
+}
+
+/// Size of the effect output, from the sizes of its inputs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputSize {
+    /// The size of the first input.
+    #[default]
+    First,
+    /// Inputs side by side: same height, widths summed (api 2).
+    Hstack,
+    /// Inputs top to bottom: same width, heights summed (api 2).
+    Vstack,
+}
+
+impl OutputSize {
+    /// The output size for these input sizes; `None` when they do not fit the rule
+    /// (see [`Manifest::check_inputs`]) or the sum overflows.
+    pub fn apply(self, sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
+        let first = *sizes.first()?;
+        match self {
+            OutputSize::First => Some(first),
+            OutputSize::Hstack => {
+                sizes.iter().all(|s| s.1 == first.1).then_some(())?;
+                Some((sizes.iter().try_fold(0u32, |a, s| a.checked_add(s.0))?, first.1))
+            }
+            OutputSize::Vstack => {
+                sizes.iter().all(|s| s.0 == first.0).then_some(())?;
+                Some((first.0, sizes.iter().try_fold(0u32, |a, s| a.checked_add(s.1))?))
+            }
+        }
+    }
 }
 
 /// Limits on one frame dimension, in pixels.
@@ -94,11 +151,14 @@ pub struct OutputDef {
     /// and every other format the runtime writes on the GPU ([`crate::PixelFormat`]).
     #[serde(default = "default_output_formats")]
     pub formats: Vec<String>,
+    /// Size of the output (api 2 for other rules than `first`).
+    #[serde(default)]
+    pub size: OutputSize,
 }
 
 impl Default for OutputDef {
     fn default() -> Self {
-        OutputDef { formats: default_output_formats() }
+        OutputDef { formats: default_output_formats(), size: OutputSize::First }
     }
 }
 
@@ -302,6 +362,7 @@ fn default_inputs() -> Vec<InputDef> {
         height: None,
         same_size: false,
         mipmaps: false,
+        repeat: None,
     }]
 }
 
@@ -393,6 +454,26 @@ impl Manifest {
             if idx == 0 && i.same_size {
                 return bad(format!("input `{}` is the first input; same_size only applies to later inputs", i.name));
             }
+            if let Some(r) = i.repeat {
+                if self.api < 2 {
+                    return bad(format!("input `{}`: repeat needs \"api\": 2", i.name));
+                }
+                if idx + 1 != self.inputs.len() {
+                    return bad(format!("input `{}`: only the last input may repeat", i.name));
+                }
+                if r.min == 0 || r.min > r.max || r.max > MAX_REPEAT || r.default < r.min || r.default > r.max {
+                    return bad(format!(
+                        "input `{}`: repeat needs 1 <= min <= default <= max <= {MAX_REPEAT} (got min {}, default {}, max {})",
+                        i.name, r.min, r.default, r.max
+                    ));
+                }
+                if self.passes.iter().any(|p| p.language() == ShaderLanguage::Glsl) {
+                    return bad(format!("input `{}`: repeat is only for WGSL shaders", i.name));
+                }
+            }
+        }
+        if self.output.size != OutputSize::First && self.api < 2 {
+            return bad("an output size other than `first` needs \"api\": 2".into());
         }
         if self.output.formats.is_empty() {
             return bad("output formats must list at least one pixel format".into());
@@ -480,6 +561,15 @@ impl Manifest {
         let first = (streams[0].width, streams[0].height);
         for (def, s) in self.inputs.iter().zip(streams) {
             let fail = |msg: String| Error::Unsupported(format!("input `{}` of `{}`: {msg}", def.name, self.name));
+            match self.output.size {
+                OutputSize::Hstack if s.height != first.1 => {
+                    return Err(fail(format!("height {} must equal the first input's ({}) to stack side by side", s.height, first.1)));
+                }
+                OutputSize::Vstack if s.width != first.0 => {
+                    return Err(fail(format!("width {} must equal the first input's ({}) to stack top to bottom", s.width, first.0)));
+                }
+                _ => {}
+            }
             if let Some(f) = s.format {
                 if !def.formats.is_empty() && !def.formats.iter().any(|x| x == f) {
                     return Err(fail(format!("pixel format `{f}` is not supported (accepted: {})", def.formats.join(", "))));
@@ -496,6 +586,47 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// The rule of the repeated input (the last one, with `repeat`), if any.
+    pub fn repeat(&self) -> Option<RepeatRule> {
+        self.inputs.last().and_then(|i| i.repeat)
+    }
+
+    /// The manifest with its repeated input expanded into `count` inputs (its default
+    /// when `None`) named `<name>0`, `<name>1`..., also in the input lists of the passes.
+    /// A manifest without one is returned as is; giving it a `count` fails.
+    pub fn with_input_count(&self, count: Option<u32>) -> Result<Manifest, Error> {
+        let Some(rule) = self.repeat() else {
+            return match count {
+                None => Ok(self.clone()),
+                Some(_) => Err(Error::Manifest(format!("effect `{}` has a fixed number of inputs", self.name))),
+            };
+        };
+        let n = count.unwrap_or(rule.default);
+        if n < rule.min || n > rule.max {
+            return Err(Error::Manifest(format!("effect `{}` takes {} to {} inputs, got {n}", self.name, rule.min, rule.max)));
+        }
+        let mut m = self.clone();
+        let last = m.inputs.pop().expect("repeat is on the last input");
+        let names: Vec<String> = (0..n).map(|k| format!("{}{k}", last.name)).collect();
+        for name in &names {
+            let first = m.inputs.is_empty();
+            m.inputs.push(InputDef { name: name.clone(), repeat: None, same_size: last.same_size && !first, ..last.clone() });
+        }
+        for pass in &mut m.passes {
+            if let Some(list) = &mut pass.inputs {
+                *list = list.iter().flat_map(|s| if *s == last.name { names.clone() } else { vec![s.clone()] }).collect();
+            }
+        }
+        m.validate()?;
+        Ok(m)
+    }
+
+    /// Size of the effect output for these input sizes, `None` when they break the
+    /// output size rule.
+    pub fn output_size(&self, sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
+        self.output.size.apply(sizes)
     }
 
     /// Checks that the effect may produce `format`.
@@ -564,6 +695,38 @@ mod tests {
         assert!(manifest(r#"[{"name":"a","height":{"multiple_of":0}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","same_size":true}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a"}]"#, r#","output":{"formats":[]}"#).is_err());
+    }
+
+    #[test]
+    fn repeated_inputs_expand_and_output_size_rules_apply() {
+        let parse = |inputs: &str, extra: &str| {
+            Manifest::parse(
+                format!(
+                    r#"{{"api":2,"id":"t.x","name":"X","inputs":{inputs}{extra},"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}"#
+                )
+                .as_bytes(),
+            )
+        };
+        let m = parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"min":1,"max":3}}]"#, r#","output":{"size":"hstack"}"#).unwrap();
+        let e = m.with_input_count(Some(3)).unwrap();
+        let names: Vec<&str> = e.inputs.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["a", "s0", "s1", "s2"]);
+        assert_eq!(e.passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
+        assert_eq!(m.with_input_count(None).unwrap().inputs.len(), 3);
+        assert!(m.with_input_count(Some(4)).unwrap_err().to_string().contains("takes 1 to 3 inputs, got 4"));
+        assert_eq!(e.output_size(&[(2, 5), (3, 5), (4, 5), (1, 5)]), Some((10, 5)));
+        assert_eq!(e.output_size(&[(2, 5), (3, 4), (4, 5), (1, 5)]), None);
+        let err = e.check_inputs(&[info("rgba", 2, 5), info("rgba", 3, 4), info("rgba", 1, 5), info("rgba", 1, 5)]).unwrap_err();
+        assert!(err.to_string().contains("height 4 must equal"), "{err}");
+        assert_eq!(OutputSize::Vstack.apply(&[(4, 1), (4, 2)]), Some((4, 3)));
+        assert_eq!(OutputSize::Hstack.apply(&[(u32::MAX, 1), (1, 1)]), None);
+        // Rules on the rules.
+        assert!(parse(r#"[{"name":"s","repeat":{"default":2}},{"name":"a"}]"#, "").unwrap_err().to_string().contains("only the last"));
+        assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":5,"max":3}}]"#, "").is_err());
+        assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"max":17}}]"#, "").is_err());
+        assert!(manifest(r#"[{"name":"s","repeat":{"default":2}}]"#, "").unwrap_err().to_string().contains(r#""api": 2"#));
+        assert!(manifest(r#"[{"name":"s"}]"#, r#","output":{"size":"vstack"}"#).unwrap_err().to_string().contains(r#""api": 2"#));
+        assert!(manifest(r#"[{"name":"s"}]"#, "").unwrap().with_input_count(Some(2)).is_err());
     }
 
     fn textures(api: u32, list: &str) -> Result<Manifest, Error> {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::convert::{read_outputs, readback_key, work_format, GpuOutputSlot, InputKey, InputSlot, OutputSlot};
 use crate::frame::{Frame, FrameMut, GpuFrame, PixelFormat};
-use crate::manifest::StreamInfo;
+use crate::manifest::{OutputSize, StreamInfo};
 use crate::mips::MipChain;
 use crate::params::ParamBlock;
 use crate::pool::PoolKey;
@@ -56,7 +56,8 @@ impl Topology {
         }
     }
 
-    /// The input pad whose size `src` has: an effect writes the size of its first input.
+    /// The input pad `src` follows: an effect follows its first input. It has that pad's
+    /// size unless an effect on the way stacks its inputs (see [`node_size`]).
     pub fn pad_of(&self, src: Source) -> usize {
         match src {
             Source::Input(i) => i,
@@ -71,11 +72,6 @@ impl Topology {
             Source::Input(i) => i,
             Source::Node(j) => self.bypass_pad(self.node_inputs[j][bypass.get(j).copied().unwrap_or(0)], bypass),
         }
-    }
-
-    /// Size of every effect output for the given pad sizes.
-    fn node_sizes(&self, pads: &[(u32, u32)]) -> Vec<(u32, u32)> {
-        (0..self.node_inputs.len()).map(|k| pads[self.pad_of(Source::Node(k))]).collect()
     }
 }
 
@@ -388,8 +384,8 @@ fn check_nodes<'a>(
     links: Option<&'a [Vec<Option<String>>]>,
     streams: &[StreamInfo<'a>],
 ) -> Result<(), Error> {
-    let pads: Vec<(u32, u32)> = streams.iter().map(|s| (s.width, s.height)).collect();
-    let sizes = topo.node_sizes(&pads);
+    let max = effects[0].program.ctx.device.limits().max_texture_dimension_2d;
+    let mut sizes = vec![(0, 0); topo.node_inputs.len()];
     for &k in &topo.order {
         let infos: Vec<StreamInfo> = topo.node_inputs[k]
             .iter()
@@ -400,8 +396,43 @@ fn check_nodes<'a>(
             })
             .collect();
         effects[k].package().manifest.check_inputs(&infos)?;
+        let ins: Vec<(u32, u32)> = infos.iter().map(|s| (s.width, s.height)).collect();
+        sizes[k] = node_size(&effects[k], &ins, max)?;
     }
     Ok(())
+}
+
+/// Size of the output of `fx` for its input sizes: its manifest output size rule, within
+/// the `max` texture side of the device.
+fn node_size(fx: &Effect, ins: &[(u32, u32)], max: u32) -> Result<(u32, u32), Error> {
+    let m = &fx.package().manifest;
+    let Some((w, h)) = m.output_size(ins) else {
+        let streams: Vec<StreamInfo> = ins.iter().map(|&(width, height)| StreamInfo { format: None, width, height }).collect();
+        m.check_inputs(&streams)?;
+        return Err(Error::Unsupported(format!("output of `{}`: the size overflows", m.name)));
+    };
+    if w > max || h > max {
+        return Err(Error::Unsupported(format!("output of `{}` would be {w}x{h}; this GPU allows at most {max} a side", m.name)));
+    }
+    Ok((w, h))
+}
+
+/// Size of every effect output for the given pad sizes (see [`node_size`]).
+fn node_sizes(effects: &[Effect], topo: &Topology, pads: &[(u32, u32)]) -> Result<Vec<(u32, u32)>, Error> {
+    let max = effects[0].program.ctx.device.limits().max_texture_dimension_2d;
+    let mut sizes = vec![(0, 0); topo.node_inputs.len()];
+    for &k in &topo.order {
+        let ins: Vec<(u32, u32)> = topo.node_inputs[k].iter().map(|s| source_size(*s, pads, &sizes)).collect();
+        sizes[k] = node_size(&effects[k], &ins, max)?;
+    }
+    Ok(sizes)
+}
+
+fn source_size(src: Source, pads: &[(u32, u32)], sizes: &[(u32, u32)]) -> (u32, u32) {
+    match src {
+        Source::Input(p) => pads[p],
+        Source::Node(j) => sizes[j],
+    }
 }
 
 fn source_texture(effects: &[Effect], inputs: &[InputSlot], src: Source) -> wgpu::Texture {
@@ -455,8 +486,30 @@ fn prepare(
     if outs.len() != topo.outputs.len() {
         return Err(Error::Frame(format!("effect writes {} outputs, got {}", topo.outputs.len(), outs.len())));
     }
+    // Effects that stack their inputs write a size no input pad has.
+    let stacked = if effects.iter().any(|fx| fx.package().manifest.output.size != OutputSize::First) {
+        let planned: &[InputKey] = io.layout.as_ref().map_or(&[], |l| &l.keys);
+        let pads: Vec<(u32, u32)> = (0..topo.nb_inputs)
+            .map(|i| match (inputs.get(i), planned.get(i)) {
+                (Some(f), _) => (f.width, f.height),
+                (None, Some(p)) => (p.width, p.height),
+                (None, None) => (inputs[0].width, inputs[0].height),
+            })
+            .collect();
+        let sizes = node_sizes(effects, topo, &pads)?;
+        Some(topo.outputs.iter().map(|s| source_size(*s, &pads, &sizes)).collect::<Vec<_>>())
+    } else {
+        None
+    };
     for (k, out) in outs.iter().enumerate() {
         let what = if outs.len() == 1 { "output".to_string() } else { format!("output {k}") };
+        if let Some(sizes) = &stacked {
+            let (w, h) = sizes[k];
+            if (out.width, out.height) != (w, h) {
+                return Err(Error::Frame(format!("{what} is {}x{}, the effect writes {w}x{h}", out.width, out.height)));
+            }
+            continue;
+        }
         let pad = topo.pad_of(topo.outputs[k]);
         let Some(f) = inputs.get(pad) else {
             return Err(Error::Frame(format!("{what} has the size of input {pad}, which is not given")));
@@ -510,7 +563,7 @@ fn prepare(
         let streams: Vec<StreamInfo> = keys.iter().map(|k| StreamInfo { format: None, width: k.width, height: k.height }).collect();
         check_nodes(effects, topo, None, &streams)?;
         let pads: Vec<(u32, u32)> = keys.iter().map(|k| (k.width, k.height)).collect();
-        let sizes = topo.node_sizes(&pads);
+        let sizes = node_sizes(effects, topo, &pads)?;
         let plan = plan(effects, topo, &sizes, &node_mips, &direct_out, deep)?;
         // Drop the bindings of the old textures; they go back to the pool's trimming.
         io.input_mips.clear();
@@ -1263,6 +1316,24 @@ impl EffectGraph {
         }
         let specs = specs;
 
+        // A repeated input (hstack, vstack) takes every label the node reads, as FFmpeg's
+        // hstack takes its inputs: the package is compiled again for that count.
+        for (spec, kind) in specs.iter().zip(&kinds) {
+            let NodeKind::Effects(ks) = kind else { continue };
+            let k = ks[0];
+            let fx = &effects[k];
+            if !fx.package().has_repeated_input() || fx.input_count() == spec.inputs.len() {
+                continue;
+            }
+            let package = fx
+                .package()
+                .with_input_count(spec.inputs.len() as u32)
+                .map_err(|e| graph_err(format!("`{}` reads {} labels: {e}", labels[k], spec.inputs.len())))?;
+            let mut rebuilt = Effect::new(fx.program.ctx.clone(), package)?;
+            apply_constants(&mut rebuilt, &options[k]);
+            effects[k] = rebuilt;
+        }
+
         let mut producers: HashMap<&str, usize> = HashMap::new();
         let mut defined: Vec<&str> = Vec::new();
         for (n, (spec, kind)) in specs.iter().zip(&kinds).enumerate() {
@@ -1586,6 +1657,20 @@ impl EffectGraph {
         self.topo.pad_of(self.topo.outputs[k])
     }
 
+    /// Size of output `k` for these input pad sizes: the size of [`Self::output_pad`],
+    /// unless an effect on the way stacks its inputs (manifest `output.size`). Fails when
+    /// the sizes break a size rule or the output is larger than the GPU allows.
+    pub fn output_size(&self, k: usize, pads: &[(u32, u32)]) -> Result<(u32, u32), Error> {
+        if k >= self.topo.outputs.len() {
+            return Err(Error::Unsupported(format!("the {} has no output {k}", self.what)));
+        }
+        if pads.len() != self.topo.nb_inputs {
+            return Err(Error::Unsupported(format!("the {} takes {} input(s), got {}", self.what, self.topo.nb_inputs, pads.len())));
+        }
+        let sizes = node_sizes(&self.effects, &self.topo, pads)?;
+        Ok(source_size(self.topo.outputs[k], pads, &sizes))
+    }
+
     /// Full names of every parameter: `name` for a single effect, else `label.name`, or
     /// `index.name` when two effects share a label.
     pub fn param_names(&self) -> &[String] {
@@ -1793,7 +1878,8 @@ impl EffectGraph {
             return Err(Error::Unsupported(format!("the {} takes {} input(s), got {}", self.what, self.topo.nb_inputs, sizes.len())));
         }
         let (_, mips) = mip_sources(&self.effects, &self.topo);
-        let plan = plan(&self.effects, &self.topo, &self.topo.node_sizes(sizes), &mips, &vec![None; self.effects.len()], deep)?;
+        let plan =
+            plan(&self.effects, &self.topo, &node_sizes(&self.effects, &self.topo, sizes)?, &mips, &vec![None; self.effects.len()], deep)?;
         Ok((plan.slots.len(), plan.bytes(deep)))
     }
 
