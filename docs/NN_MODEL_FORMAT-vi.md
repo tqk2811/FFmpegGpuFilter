@@ -7,7 +7,7 @@ không cần ncnn, ONNX hay runtime nào khác). `gpufx-nnconv` tạo nó offlin
 
 ```
 gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> \
-                  [--license <file>] [--name <name>] -o <out.zip|out_dir>
+                  [--license <file>] [--readme <file>] [--name <name>] -o <out.zip|out_dir>
 ```
 
 `-o` kết thúc bằng `.zip` thì ghi zip, còn lại ghi thư mục có cùng các file. Mặc định tên model là tên file output
@@ -23,6 +23,7 @@ liệt kê trong `models/*/source.json` (URL ghim commit, kiểm sha256) vào `b
 | `weights.bin` | toàn bộ weights, dữ liệu thô (trong zip lưu stored, không nén) |
 | `io.json` | cách đưa vào và đọc ra của model (pre/post processing), copy nguyên văn, chỉ kiểm là JSON hợp lệ |
 | `LICENSE` | license của model, nếu có |
+| `README.md` | mô tả model (`--readme <file>`, nếu không có thì sinh bản tối giản); runtime không đọc |
 
 ## weights.bin
 

@@ -9,9 +9,11 @@ use gpufx_nnconv::{convert_ncnn, frames, Package};
 const USAGE: &str = "\
 usage:
   gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json>
-                    [--license <file>] [--name <name>] -o <out.zip|out_dir>
+                    [--license <file>] [--readme <file>] [--name <name>]
+                    -o <out.zip|out_dir>
              converts an ncnn model to a gpufx-nn package: model.json, weights.bin,
-             io.json (copied as given) and LICENSE. -o ending in .zip writes a zip,
+             io.json (copied as given), README.md (--readme, else a minimal generated
+             one) and LICENSE. -o ending in .zip writes a zip,
              anything else a directory. The name defaults to the output file stem.
   gpufx-nnconv run-ref --model <pkg.zip|dir> --frame0 <a.png> --frame1 <b.png> [--t 0.5] -o <out.png>
              dev tool: interpolates with the CPU reference executor (slow, golden semantics).
@@ -36,7 +38,7 @@ fn main() -> ExitCode {
 }
 
 fn ncnn(args: &[String]) -> Result<(), String> {
-    let (mut param, mut bin, mut io, mut license, mut name, mut out) = (None, None, None, None, None, None);
+    let (mut param, mut bin, mut io, mut license, mut readme, mut name, mut out) = (None, None, None, None, None, None, None);
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let slot = match flag.as_str() {
@@ -44,6 +46,7 @@ fn ncnn(args: &[String]) -> Result<(), String> {
             "--bin" => &mut bin,
             "--io" => &mut io,
             "--license" => &mut license,
+            "--readme" => &mut readme,
             "--name" => &mut name,
             "-o" => &mut out,
             _ => return Err(USAGE.to_string()),
@@ -58,7 +61,8 @@ fn ncnn(args: &[String]) -> Result<(), String> {
     let param_text = String::from_utf8(read(&param)?).map_err(|e| format!("{param}: {e}"))?;
     let converted = convert_ncnn(&param_text, &read(&bin)?, &name).map_err(|e| format!("{param}: {e}"))?;
     let license = license.as_deref().map(read).transpose()?;
-    let package = Package::new(&converted, read(&io)?, license).map_err(|e| e.to_string())?;
+    let readme = readme.as_deref().map(read).transpose()?;
+    let package = Package::new(&converted, read(&io)?, license, readme).map_err(|e| e.to_string())?;
     package.write(&out).map_err(|e| format!("{}: {e}", out.display()))?;
     summary(&converted, &out);
     Ok(())
