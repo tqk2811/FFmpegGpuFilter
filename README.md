@@ -127,7 +127,7 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
 |---|---|---|
 | `model` | (required) | path of a `frame_interp` package, e.g. `models/rife-v4.6.zip` |
 | `fps` | twice the input's | output frame rate, a number or fraction (`30`, `24000/1001`; named rates such as `ntsc` are not accepted); any rate, not only multiples |
-| `scene` | 0.2 | scene change threshold (0-1): the SSIM of the pair at 32x32, as the official RIFE `inference_video.py` checks it; a pair below it is a cut and is not interpolated (the nearer frame is repeated); 0 never detects a cut (every pair is interpolated) |
+| `scene` | 0.2 | scene change threshold (0-1): the SSIM of the pair at 32x32, as the official RIFE `inference_video.py` checks it; a pair below it is a cut and is not interpolated (the nearer frame is repeated); 0 never detects a cut (every pair is interpolated). On anime 0.2 still blends some cuts between shots of similar layout; 0.4 caught 89% of the cuts of three 90 s OP/ED clips, at the cost of repeating a frame on some very fast zooms and flashes |
 | `max_gap` | 2 | a pair further apart than this many input frame durations (a gap in a VFR stream) is not interpolated |
 
 The output is a constant rate grid: a grid point between two source frames is interpolated at the matching time,
