@@ -86,7 +86,12 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](EFFECT_FORMAT
 }
 ```
 
-- `inputs` determines the number of input pads on the filter (a transition uses 2 inputs, etc.).
+- `inputs` determines the number of input pads on the filter (a transition uses 2 inputs, etc.). The last input may
+  carry `repeat` (api 2, WGSL only, `{default, min, max <= 16}`): it expands into pads `<name>0..N-1`, N = the number of
+  labels the graph node reads (`default` without labels); the prelude adds `gpufx_input_count/size/load`.
+- `output.size` (api 2): `first` (default, the size of the first input), `hstack` (width = sum of the widths, all inputs
+  the same height) or `vstack` (height = sum, same width). Checked at configure and on a size change; the result must
+  fit the GPU's `max_texture_dimension_2d`. Downstream graph nodes see the propagated size.
 - `params` are **generated automatically** by the runtime into a `params` struct in the shader, following the
   WGSL/std140 uniform alignment rules; the author just uses `params.radius`.
 - `passes` run sequentially; the output of one pass is a readable texture in the next; the last pass is the
@@ -143,7 +148,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
 
 - **graph**: the only option. A single effect is `graph=a.zip`; a chain is `graph='a.zip|b.zip|c.zip'`; a whole
   graph with several inputs and outputs is written with labels (see "GPU graph inside one filter" in section 6).
-  The filter's number of inputs comes from the manifest of the first effect (or, in a graph, the highest pad read plus one).
+  The filter's number of inputs comes from the manifest of the first effect (or, in a graph, the highest pad read plus one; for a `repeat` input, the number of labels the node reads).
   Statements need no labels, as in an FFmpeg filtergraph: an unlabelled input binds to the lowest input pad no
   label of the graph names, and an unlabelled output becomes a graph output (exact rules in section 6).
 - **Effect chain** `graph='a.zip|b.zip|c.zip'`: runs one after another like three chained filters, but
@@ -151,7 +156,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
   The filter's inputs are the inputs of the first effect; only the first effect may have multiple inputs. The output
   follows the rules of the last effect. The rules of the later effects are checked as when chaining filters:
   the format is the first one in the previous effect's `output.formats` that the next effect accepts,
-  and the size is the size of the first input. The frame stays RGBA on the GPU and is not converted to that format.
+  and the size is the one the previous effect writes (the first input's, or the stacked size with `output.size`). The frame stays RGBA on the GPU and is not converted to that format.
   Each effect takes its own inline parameters (`graph='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, see
   "Inline parameters" below). Spaces around `|` are ignored.
 - **GPU frames out only**, like the `*_cuda` filters: every output is a Vulkan, D3D12, D3D11 or VideoToolbox frame, so
@@ -214,7 +219,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
   (`grayscale.zip|vignette.zip`) put `enable` on each effect that should switch. It is not the filter's own
   timeline option `enable=`, which stays outside the effect string. No package may declare a parameter named
   `enable`. An effect switched off copies its first input into its output texture
-  (every effect has its first input's size), so the plan, the pooled textures and the bindings of the
+  (its output has the first input's size; with `output.size` `hstack`/`vstack` it does not, and switching off fails), so the plan, the pooled textures and the bindings of the
   rest of the graph stay as they are and toggling allocates nothing. Switching an effect off saves
   its shader work but not all of it: the copy is still one compute pass, and the effect keeps its
   output texture. With every effect off, the event is handled as a disabled filter (relabel when
@@ -223,7 +228,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
   input; `auto` its first input until its `enable` expression has been true once, then its last input (an effect
   of one input keeps it); any other value is an error. Any input may be copied, so the plan keeps every input of
   an effect alive until the effect's last pass. An input of another size than the effect's output makes the
-  frame fail. With every effect off, the outputs are the input pads the chosen inputs lead to. No package may
+  frame fail (so an effect with `output.size` `hstack`/`vstack` cannot be bypassed). With every effect off, the outputs are the input pads the chosen inputs lead to. No package may
   declare a parameter named `bypass`. This is not the filter option `bypass=` (which sets the input a filter
   disabled by `enable=` passes).
   `auto` rests on the history of the frames processed: an `enable` window shorter than one frame
@@ -241,7 +246,7 @@ gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:s
 - Multiple inputs use `framesync`: the first input decides the length and frame rate (an input with a
   different fps has its frames repeated or dropped). Another input that has not started yet is a black GPU frame (opaque for formats with alpha); one that has
   ended holds its last frame (or use `shortest=1`).
-- The output takes the size, SAR and frame rate of the first input (in a graph, of the input pad its source comes from); colorspace/range/alpha are the values
+- The output takes the SAR and frame rate of the first input (in a graph, of the input pad its source comes from) and its size from `gpufx_effect_output_size` (the first input's, or the stacked size of a `hstack`/`vstack` effect); colorspace/range/alpha are the values
   negotiated on the output link. Color-dependent side data (HDR metadata, film grain...), motion
   vectors and video enc params are dropped because the pixels have changed.
 - If an input's size or pixel format changes midstream, that is an error (`ffmpeg` rebuilds the
@@ -279,7 +284,7 @@ describe the behaviour; the tables below list every option and key in one place.
 
 | Option | Type | Default | Range / values | Meaning and constraints |
 |--------|------|---------|----------------|-------------------------|
-| `graph` | string | none | an effect path, a `\|` chain or a labelled graph | Required: the filter fails at init without it. The number of input pads is the number of inputs of the first effect for an unlabelled chain, else the highest pad read (labelled or bound implicitly) plus one; the number of output pads is the number of graph outputs |
+| `graph` | string | none | an effect path, a `\|` chain or a labelled graph | Required: the filter fails at init without it. The number of input pads is the number of inputs of the first effect for an unlabelled chain (for a `repeat` input, `default`), else the highest pad read (labelled or bound implicitly) plus one; the number of output pads is the number of graph outputs |
 | `backend` | string | `auto` | `auto`, `vulkan` (`vk`), `dx12` (`d3d12`, `directx`), `metal` (`mtl`); not case sensitive | Testing only: `auto` follows the device of the frames. `gl` is refused; `metal` is refused unless the build has VideoToolbox support (macOS). Any other name fails when the graph is opened |
 | `shortest` | bool | `0` | `0`, `1` | `0`: only input 0 decides the end (other inputs hold their last frame, and show a blank frame before their first frame). `1`: the output ends when any input ends |
 | `out_format` | pix_fmt | none (chosen from the input) | any FFmpeg pixel format name | Forces the format of every output (the `sw_format` of GPU frames). It must be in the effect's `output.formats`, written by libgpufx and storable by the device, else configuration fails. One format for all outputs |
@@ -314,7 +319,7 @@ Parsed by `parse_effect_item` (`crates/gpufx-core/src/graph.rs`) for each effect
 | Key names | A parameter name of the package, `enable` or `bypass`. Any other key is an error naming the effect and the keys it knows; a key given twice is an error; a token without `=` is an error |
 | Escape and quote | `\` escapes one of `\ ' : & ; \| = [ ]` (before any other character it stays literal, so Windows paths work); `'...'` quotes a value; an unclosed `'` is an error |
 | `enable=<expr>` | Per frame, on while the expression is not 0 (a constant is an expression). Off: the effect copies one input into its output texture (one compute pass, nothing is reallocated). No package may declare a parameter `enable` |
-| `bypass=0\|auto` | Which input an effect switched off copies: `0` its first input, `auto` its first input until `enable` has been true once, then its last input. Any other value is an error. No package may declare a parameter `bypass` |
+| `bypass=0\|auto` | Which input an effect switched off copies: `0` its first input, `auto` its first input until `enable` has been true once, then its last input. Any other value is an error (also when the copied input and the output differ in size, as for a stack effect). No package may declare a parameter `bypass` |
 | Parameter constants | A literal that parses as the parameter's type (`0.5`, `1,0,0`, `#ff8800`, `true`) is set when the graph opens and clamped to `min`/`max`; an `expr` parameter takes its expression text the same way |
 | Parameter expressions | Any other value is an FFmpeg expression evaluated for each frame in `t` (seconds, `NaN` before the first timestamp, passed to the shader as 0), `n` (frame count of this filter), `w`, `h` (output size), `a` (`w/h`), `sar`, `dar` (`a*sar`) |
 | Graph statements | `;` separates statements; labels `[0]`, `[1]`... name the filter's input pads, other labels (letters, digits, `_`, `-`) connect effects. On each side of a statement labels are left out entirely or all given. Unlabelled inputs take the lowest input pads that no label names anywhere in the graph, later statements included (`ffmpeg -filter_complex` binds the first unused stream in order without looking ahead; gpufx looks ahead because a pad may be read only once). Unlabelled outputs become graph outputs `out0`, `out1`..., skipping labels the graph uses; an unlabelled `split` writes two. Only one fully unlabelled statement whose node is a package chain (not `split`/`null`) is the old chain: pads named after the first manifest's inputs, output `default`; any label switches to pads `in0`, `in1`... and outputs `out0`... A lone `null` is a valid no-op |
@@ -330,7 +335,7 @@ Layout details and examples: [EFFECT_FORMAT.md](EFFECT_FORMAT.md).
 
 | Field | WGSL type | GLSL type | Offset | Meaning |
 |-------|-----------|-----------|--------|---------|
-| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The size of the first input of the effect; the same for all its passes |
+| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The output size of the effect (the first input's, or the stacked size with `output.size` `hstack`/`vstack`); the same for all its passes |
 | `time` | `f32` | `float` | 8 | Presentation time in seconds (`t` of the filter). Loses precision on long clips (about 0.008 s steps after one day) |
 | `frame` | `u32` | `uint` | 12 | Frame count of this filter instance (also the `n` of expressions); restarts on a seek, so not for time-based motion |
 | `time_int` | `i32` | `int` | 16 | Whole seconds of the time (floor; saturates beyond the i32 range) |
@@ -475,7 +480,8 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
 - A node is `split` (one label in, any number out), `null` (one in, one out), or packages chained with
   `|` as in `graph=`, which take as many labels as the first package has inputs and write one.
   `split` and `null` cost nothing: their outputs *are* their input (two edges reading one texture).
-- An effect writes the size of its first input; output pad k takes the size, SAR and frame rate of the
+- An effect writes the size of its first input (the stacked size with `output.size` `hstack`/`vstack`, propagated to
+  downstream nodes); output pad k takes the SAR and frame rate of the
   input pad its source comes from. Frames come at input 0's events (framesync as with several inputs).
 - Each input pad is uploaded once, each output pad is read back once, all outputs through one shared
   readback buffer; the whole graph runs in one submission, effects in topological order. The output
@@ -498,7 +504,8 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
 
 C API (v5, additive): `gpufx_effect_open_graph` (the only open function), `gpufx_effect_output_count`, `gpufx_effect_output_name`,
 `gpufx_effect_output_source`, `gpufx_effect_output_pad_format[_count]`, `gpufx_effect_process_graph`,
-`gpufx_effect_convert_graph`; see `gpufx.h`.
+`gpufx_effect_convert_graph`, `gpufx_effect_output_size(fx, output, streams, count, &w, &h)` (the size of an output
+for given input sizes; `vf_gpufx` `config_output` sets the outlink size from it); see `gpufx.h`.
 Inline parameters: `gpufx_effect_open_graph` accepts them in every node, and `gpufx_effect_option_count` /
 `gpufx_effect_option` read them back (constants are already applied; the caller evaluates expressions, `enable` and
 `bypass`).
@@ -855,7 +862,7 @@ crates/gpufx-cli    the `gpufx` command: info, check, pack, run (test effects wi
 ffmpeg/             vf_gpufx.c and integrate.sh (adds the filter to the FFmpeg source tree)
 external/FFmpeg     FFmpeg submodule, pinned to n9.0-2-g03d9533176 (release/9.0) = the prebuilt's commit
 docker/, build.sh   build FFmpeg + gpufx with one command in Docker (linux64, win64)
-examples/effects    38 effects (groups ffmpeg, slideshow, standalone): color adjustment, blur, sharpen, chroma key, overlay, transitions...
+examples/effects    38 effects (groups ffmpeg, slideshow, standalone): color adjustment, blur, sharpen, chroma key, overlay, transitions, hstack/vstack (variable input count, larger output)...
 scripts/            build-prebuilt.sh (builds only libavfilter, swaps it into the prebuilt FFmpeg),
                     test-bundle.sh (runs the effects through the package's ffmpeg),
                     install-libgpufx.sh (builds + installs the .pc for pkg-config),
