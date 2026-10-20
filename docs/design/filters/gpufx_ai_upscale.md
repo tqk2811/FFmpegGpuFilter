@@ -65,9 +65,8 @@ convert them with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (writte
 ## Limitations
 
 - Not real time: on an RTX 4060 Laptop a 1080p frame at x2 (realesr-animevideov3) takes about 480-510 ms on
-  D3D11/D3D12 (f16) and about 690 ms on Vulkan. For offline encodes.
-- On the Vulkan device FFmpeg creates, `precision=auto` runs f32: that device does not enable the 16-bit features
-  wgpu needs for f16.
+  D3D11/D3D12 (f16) and about 280 ms on Vulkan (f16 on tensor cores, also on the device FFmpeg creates). For
+  offline encodes.
 - Frames go through 8-bit RGBA: 10-bit input loses its extra bits and alpha is not kept.
 - Untested: the VideoToolbox path has never run. Vulkan, D3D12 and D3D11 match the CPU reference in the win64
   bundle (97.5 dB f32, 57.9 dB f16); linux64 was tested on lavapipe only.

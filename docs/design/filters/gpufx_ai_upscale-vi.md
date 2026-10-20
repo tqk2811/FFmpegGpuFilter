@@ -64,9 +64,8 @@ Model không nằm trong git: bundle win64/linux64 có sẵn trong `models/` (k�
 ## Giới hạn
 
 - Không real time: trên RTX 4060 Laptop, một frame 1080p x2 (realesr-animevideov3) mất khoảng 480-510 ms trên
-  D3D11/D3D12 (f16) và khoảng 690 ms trên Vulkan. Dùng cho encode offline.
-- Trên Vulkan device do FFmpeg tạo, `precision=auto` chạy f32: device đó không bật các tính năng 16-bit mà wgpu
-  cần cho f16.
+  D3D11/D3D12 (f16) và khoảng 280 ms trên Vulkan (f16 trên Tensor Core, kể cả device do FFmpeg tạo). Dùng cho
+  encode offline.
 - Frame đi qua RGBA 8-bit: input 10-bit mất các bit thừa và alpha không được giữ.
 - Chưa kiểm: đường VideoToolbox chưa từng chạy. Vulkan, D3D12 và D3D11 khớp bản CPU chuẩn trong bundle win64
   (97,5 dB f32, 57,9 dB f16); linux64 chỉ được test trên lavapipe.
