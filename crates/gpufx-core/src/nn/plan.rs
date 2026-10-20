@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use super::kernels::{self, ConvConfig, Fixed, Kernel, PARAM_SLOT};
+use super::kernels::{self, ConvConfig, CoopConfig, Fixed, Kernel, PARAM_SLOT};
 use super::model::{Activation, BinaryKind, EltwiseKind, OpKind, ResizeMode};
 use super::{conv_shape, NnModel};
 use crate::Error;
@@ -538,7 +538,20 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
                     .u(post.4);
                 let shape = conv_shape(c);
                 let src1 = res.map_or(x.slot, |r| r.slot);
-                if matches!(op.kind, OpKind::Conv2d(_)) {
+                if m.coop_ops.contains(&step.op) {
+                    let cfg = CoopConfig::choose(&shape, out.w, x.c, out.c)
+                        .ok_or_else(|| Error::Unsupported(format!("op {}: kernel {:?} is too large", op.name, c.kernel)))?;
+                    let groups = cfg.groups(out.w, out.h, out.c);
+                    pend.push(Pending {
+                        label: "conv2d",
+                        kernel: Kernel::Coop(shape, cfg),
+                        words,
+                        src0: x.slot,
+                        src1,
+                        dst: out.slot,
+                        groups,
+                    });
+                } else if matches!(op.kind, OpKind::Conv2d(_)) {
                     let ocb = ConvConfig::ocb(out.c);
                     let cfg = ConvConfig::choose(&shape, ocb, out.w, out.h, out.c)
                         .ok_or_else(|| Error::Unsupported(format!("op {}: kernel {:?} is too large", op.name, c.kernel)))?;
@@ -733,24 +746,35 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
         .iter()
         .enumerate()
         .map(|(k, p)| {
+            let coop = match p.kernel {
+                // Both exist whenever the model was loaded with coop kernels.
+                Kernel::Coop(..) => {
+                    Some((m.kernels.coop_layout.as_ref().expect("coop layout"), m.weights_h.as_ref().expect("coop weights")))
+                }
+                _ => None,
+            };
+            let mut entries = vec![
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &params,
+                        offset: k as u64 * PARAM_SLOT,
+                        size: wgpu::BufferSize::new(PARAM_SLOT),
+                    }),
+                },
+                wgpu::BindGroupEntry { binding: 1, resource: buffers[p.src0].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: buffers[p.src1].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: m.weights.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: m.weights.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: buffers[p.dst].as_entire_binding() },
+            ];
+            if let Some((_, wh)) = coop {
+                entries.push(wgpu::BindGroupEntry { binding: 6, resource: wh.as_entire_binding() });
+            }
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gpufx nn op"),
-                layout: &m.kernels.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &params,
-                            offset: k as u64 * PARAM_SLOT,
-                            size: wgpu::BufferSize::new(PARAM_SLOT),
-                        }),
-                    },
-                    wgpu::BindGroupEntry { binding: 1, resource: buffers[p.src0].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: buffers[p.src1].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: m.weights.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: m.weights.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 5, resource: buffers[p.dst].as_entire_binding() },
-                ],
+                layout: coop.map_or(&m.kernels.layout, |c| c.0),
+                entries: &entries,
             });
             Dispatch { label: p.label, detail: details[k].clone(), pipeline: m.kernels.get(device, p.kernel), group, groups: p.groups }
         })

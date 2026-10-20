@@ -22,6 +22,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: nhân đôi 24 fps 1080p cần dưới ~42 ms để chạy thời gian thực. Hướng: tính f16 (`SHADER_F16`, có đường lùi f32) hoặc conv kiểu GEMM nạp đôi bộ đệm; có thể bỏ các biến môi trường chỉnh tham số `GPUFX_NN_CONV`/`GPUFX_NN_MINWG` khi chốt cấu hình.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] Runtime nn: conv Tensor Core (coop) mới là pha 1
+- **Vấn đề**: (1) chỉ bật khi subgroup đúng 32 lane (`sg = li / 32`), nên AMD/Intel có coop vẫn đi kernel cũ; nên viết theo `subgroup_id`/`subgroup_size`. (2) chỉ conv stride 1; stride 2 và deconv của RIFE vẫn đi kernel cũ. (3) nhanh hơn kernel cũ ~1,45x (Real-ESRGAN anime x2 1080p 339 so với 492 ms) nhưng còn xa ~8x của matmul thử: chưa profile, nghi staging input CHW f32, B đọc thẳng global, epilogue qua scratch, giới hạn workgroup 16 KiB. (4) `choose` lấy `nb = min(blocks, 4)` nên cout 80/96 tính thừa 2–3 block ở group cuối. (5) bật/tắt bằng env `GPUFX_NN_COOP`, chưa có tuỳ chọn API; `Precision::F32` vẫn đi kernel cũ. (6) chưa chạy coop trên device Vulkan do FFmpeg tạo (code cho thấy FFmpeg bật đủ `SHADER_F16`, chưa kiểm bằng bundle).
+- **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs) (`CoopConfig`, `coop_available`, `coop_source`), [mod.rs](../crates/gpufx-core/src/nn/mod.rs) (`push_coop_weights`)
+- **Vì sao**: phần lớn thời gian upscale/RIFE nằm ở conv; mỗi bước trên gỡ thêm tốc độ hoặc mở rộng GPU dùng được.
+- **Ngày ghi**: 2026-10-21
+
 ### [Thấp] gpufx-nnconv: các finding review bước 1 của AI upscale để sau
 - **Vấn đề**: (1) bundle realesr-animevideov3 lưu 3 bản `weights.bin` giống hệt nhau (x2/x3/x4 cùng sha256), zip to gấp ~3 lần; nên cho biến thể trỏ chung một file weights trong khi format còn pre-release. (2) `fetch-models.sh` đọc `source.json` bằng awk, chỉ chạy đúng khi mỗi key một dòng. (3) converter chưa đối chiếu `num_slope` của PReLU với số channel; runtime GPU phải tự kiểm để khỏi đọc quá blob. (4) reference CPU chạy cả frame, không có chế độ chia tile để làm mẫu đối chiếu cho tile ở runtime GPU. (5) `run-ref` nhận cả `--input` lẫn `--frame0` mà không báo lỗi.
 - **Vị trí**: [bundle.rs](../crates/gpufx-nnconv/src/bundle.rs), [fetch-models.sh](../scripts/fetch-models.sh), [convert.rs](../crates/gpufx-nnconv/src/convert.rs), [frames.rs](../crates/gpufx-nnconv/src/frames.rs), [main.rs](../crates/gpufx-nnconv/src/main.rs)

@@ -25,7 +25,7 @@ pub use upscale::{FrameUpscale, TileLayout, UpscaleOptions, DEFAULT_TENSOR_BYTES
 
 use crate::runtime::GpuContext;
 use crate::Error;
-use kernels::{ConvConfig, ConvShape, Fixed, Kernel, Kernels};
+use kernels::{ConvConfig, ConvShape, CoopConfig, Fixed, Kernel, Kernels};
 use model::{BlobRef, Dtype, Model, OpKind};
 
 /// The arithmetic of the convolutions.
@@ -51,6 +51,10 @@ pub struct NnModel {
     pub(crate) conv_weights: HashMap<usize, (u32, u32)>,
     /// Per prelu op index: offset of its slopes in `f32` units and their count.
     pub(crate) slopes: HashMap<usize, (u32, u32)>,
+    /// The conv ops that run the tensor core kernel: their weights are in `weights_h` (offset in f16 units).
+    pub(crate) coop_ops: std::collections::HashSet<usize>,
+    /// The f16 weights of the tensor core kernels (a placeholder when none runs one).
+    pub(crate) weights_h: Option<wgpu::Buffer>,
     pub(crate) kernels: Kernels,
     weight_bytes: u64,
 }
@@ -187,6 +191,55 @@ fn push_conv_weights(blob: &mut Vec<f32>, c: &model::ConvParams, w: &[f32], bias
     ((w_off / 4) as u32, b_off as u32)
 }
 
+/// f32 to f16 bits, rounding to nearest even (overflow to infinity, subnormals kept).
+fn f32_to_half(v: f32) -> u16 {
+    let b = v.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let exp = ((b >> 23) & 0xff) as i32;
+    let man = b & 0x7f_ffff;
+    if exp == 0xff {
+        return sign | 0x7c00 | if man != 0 { 0x200 } else { 0 };
+    }
+    let e = exp - 127 + 15;
+    if e >= 0x1f {
+        return sign | 0x7c00;
+    }
+    // the mantissa with its implicit bit, shifted to f16 precision (subnormals shift further)
+    let (m, shift) = if e <= 0 { (man | 0x80_0000, (14 - e) as u32) } else { (man, 13) };
+    if shift > 24 {
+        return sign;
+    }
+    let half = 1u32 << (shift - 1);
+    let rest = m & ((1u32 << shift) - 1);
+    let mut r = m >> shift;
+    if rest > half || (rest == half && r & 1 == 1) {
+        r += 1;
+    }
+    // a carry out of the mantissa moves to the exponent, as the bit layout makes it
+    sign | if e <= 0 { r as u16 } else { (((e as u32) << 10) + r) as u16 }
+}
+
+/// Appends `w` (`[out][in][kh][kw]`) for the tensor core kernel as f16 laid out `[kh * kw][in padded to 16][out
+/// padded to 16]` (zero filled), its bias to `blob` padded to a multiple of 16. Returns the offsets (f16 units,
+/// a multiple of 16 so loads stay aligned; `f32` units).
+fn push_coop_weights(wh: &mut Vec<u16>, blob: &mut Vec<f32>, c: &model::ConvParams, w: &[f32], bias: &[f32]) -> (u32, u32) {
+    let (cin, cout, k) = (c.in_channels as usize, c.out_channels as usize, (c.kernel[0] * c.kernel[1]) as usize);
+    let (cinp, coutp) = (cin.div_ceil(16) * 16, cout.div_ceil(16) * 16);
+    let w_off = wh.len();
+    wh.resize(w_off + k * cinp * coutp, 0);
+    for co in 0..cout {
+        for ci in 0..cin {
+            for kk in 0..k {
+                wh[w_off + (kk * cinp + ci) * coutp + co] = f32_to_half(w[(co * cin + ci) * k + kk]);
+            }
+        }
+    }
+    let b_off = blob.len();
+    blob.extend_from_slice(bias);
+    blob.resize(b_off + coutp, 0.0);
+    (w_off as u32, b_off as u32)
+}
+
 impl NnModel {
     /// Loads a package from a `.zip` or a directory (`model.json`, `weights.bin`, optional `io.json`), computing in
     /// f32. A bundle (`package.json` with several variants) needs [`NnModel::load_with`].
@@ -229,8 +282,11 @@ impl NnModel {
         check_shader_compiler(&ctx.info)?;
         let device = &ctx.device;
         let f16 = precision == Precision::Auto && device.features().contains(wgpu::Features::SHADER_F16);
-        let kernels = Kernels::new(device, ctx.shader_cache.clone(), f16);
+        let coop = f16 && ctx.coop_f16 && kernels::coop_available(device, &ctx.info);
+        let kernels = Kernels::new(device, ctx.shader_cache.clone(), f16, coop);
         let mut blob: Vec<f32> = Vec::new();
+        let mut wh: Vec<u16> = Vec::new();
+        let mut coop_ops = std::collections::HashSet::new();
         let mut conv_weights = HashMap::new();
         let mut slopes = HashMap::new();
         for (i, op) in model.ops.iter().enumerate() {
@@ -251,7 +307,12 @@ impl NnModel {
                         Some(b) => read_blob(b, weights).map_err(fail)?,
                         None => vec![0.0; c.out_channels as usize],
                     };
-                    conv_weights.insert(i, push_conv_weights(&mut blob, c, &w, &b, ocb));
+                    if coop && matches!(op.kind, OpKind::Conv2d(_)) && CoopConfig::supports(&shape) {
+                        conv_weights.insert(i, push_coop_weights(&mut wh, &mut blob, c, &w, &b));
+                        coop_ops.insert(i);
+                    } else {
+                        conv_weights.insert(i, push_conv_weights(&mut blob, c, &w, &b, ocb));
+                    }
                     kernel
                 }
                 OpKind::Prelu { slope } => {
@@ -300,12 +361,16 @@ impl NnModel {
             blob.resize(4, 0.0);
         }
         let bytes: Vec<u8> = blob.iter().flat_map(|v| v.to_le_bytes()).collect();
+        if wh.is_empty() {
+            wh.resize(8, 0);
+        }
+        let bytes_h: Vec<u8> = wh.iter().flat_map(|v| v.to_le_bytes()).collect();
         let limits = device.limits();
         let max_bytes = limits.max_storage_buffer_binding_size.min(limits.max_buffer_size);
-        if bytes.len() as u64 > max_bytes {
+        if bytes.len().max(bytes_h.len()) as u64 > max_bytes {
             return Err(Error::Gpu(format!(
                 "the weights take {} bytes on the GPU, above the device limit of {max_bytes} bytes for one storage buffer",
-                bytes.len()
+                bytes.len().max(bytes_h.len())
             )));
         }
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -315,7 +380,18 @@ impl NnModel {
             mapped_at_creation: false,
         });
         ctx.queue.write_buffer(&buffer, 0, &bytes);
-        Ok(NnModel { ctx, model, io, weights: buffer, conv_weights, slopes, kernels, weight_bytes: bytes.len() as u64 })
+        let weights_h = coop.then(|| {
+            let b = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gpufx nn weights f16"),
+                size: bytes_h.len() as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            ctx.queue.write_buffer(&b, 0, &bytes_h);
+            b
+        });
+        let weight_bytes = bytes.len() as u64 + weights_h.as_ref().map_or(0, |b| b.size());
+        Ok(NnModel { ctx, model, io, weights: buffer, conv_weights, slopes, coop_ops, weights_h, kernels, weight_bytes })
     }
 
     pub fn name(&self) -> &str {
@@ -336,6 +412,11 @@ impl NnModel {
         self.kernels.f16
     }
 
+    /// How many convolutions run the tensor core kernel (Vulkan devices with cooperative matrices, f16).
+    pub fn coop_convs(&self) -> usize {
+        self.coop_ops.len()
+    }
+
     /// Bytes of the weights buffer on the GPU.
     pub fn weight_bytes(&self) -> u64 {
         self.weight_bytes
@@ -353,7 +434,31 @@ impl NnModel {
 
 #[cfg(test)]
 mod tests {
-    use super::uses_fxc;
+    use super::{f32_to_half, uses_fxc};
+
+    /// The f16 weights of the tensor core kernels round to nearest even, keep subnormals, NaN and inf.
+    #[test]
+    fn f32_to_half_rounds_like_ieee() {
+        for (v, want) in [
+            (0.0f32, 0x0000u16),
+            (-0.0, 0x8000),
+            (1.0, 0x3c00),
+            (-2.0, 0xc000),
+            (65504.0, 0x7bff),
+            (65520.0, 0x7c00),
+            (f32::INFINITY, 0x7c00),
+            (f32::NEG_INFINITY, 0xfc00),
+            (2f32.powi(-24), 0x0001),
+            (2f32.powi(-25), 0x0000),
+            (2f32.powi(-14), 0x0400),
+            (1.0 + 2f32.powi(-11), 0x3c00),
+            (1.0 + 3.0 * 2f32.powi(-11), 0x3c02),
+        ] {
+            assert_eq!(f32_to_half(v), want, "{v:e}");
+        }
+        assert_eq!(f32_to_half(f32::NAN) & 0x7c00, 0x7c00);
+        assert_ne!(f32_to_half(f32::NAN) & 0x03ff, 0);
+    }
 
     /// D3D12 without DXC must be refused up front: FXC hung for minutes on the RIFE deconvolutions.
     #[test]

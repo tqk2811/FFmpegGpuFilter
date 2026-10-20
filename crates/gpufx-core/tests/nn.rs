@@ -739,6 +739,42 @@ fn reset_forgets_the_previous_frame() {
 
 // ---- prelu, clip, bundles and FrameUpscale (super_resolution) ----
 
+/// The tensor core convolutions (Vulkan with cooperative matrices, `Precision::Auto`; skipped elsewhere): channel
+/// counts off the 16 blocks and above one staging pass, widths under one 16-pixel block and heights off the
+/// 4-row tile, 1x1, dilated 5x5, fused prelu, residual and activations. Inputs and products are f16, sums f32.
+#[test]
+fn coop_convolutions_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(31));
+    let leaky = r#"{"type":"leaky_relu","slope":0.2}"#;
+    let ops = vec![
+        conv(&mut w, &mut r, "conv2d", "a", "x", 7, 20, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], leaky),
+        conv(&mut w, &mut r, "conv2d", "b", "a", 20, 20, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], "null"),
+        op("binary", "s", &["b", "a"], r#""kind":"add","scalar":null"#),
+        op("activation", "t", &["s"], r#""type":"leaky_relu","slope":0.2"#),
+        conv(&mut w, &mut r, "conv2d", "d", "x", 7, 37, [5, 5], [1, 1], [2, 2], [4, 4, 4, 4], [0, 0], r#"{"type":"sigmoid"}"#),
+        conv(&mut w, &mut r, "conv2d", "e", "t", 20, 70, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], "null"),
+        prelu(&mut w, &mut r, "pe", "e", 70),
+        conv(&mut w, &mut r, "conv2d", "f", "pe", 70, 48, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        // stride 2 keeps the direct kernel
+        conv(&mut w, &mut r, "conv2d", "g", "t", 20, 5, [3, 3], [2, 2], [1, 1], [1, 1, 1, 1], [0, 0], r#"{"type":"relu"}"#),
+    ];
+    let json = model(&["x"], &["d", "f", "g"], &ops);
+    let m = NnModel::from_parts_with(ctx.clone(), json.as_bytes(), &w.0, None, Precision::Auto).unwrap();
+    if m.coop_convs() == 0 {
+        eprintln!("skipping: no tensor core convolutions on {}", ctx.description());
+        return;
+    }
+    assert_eq!(m.coop_convs(), 5, "every stride 1 convolution");
+    // the first layers read exact f16 inputs and weights: only the f32 sums differ; deeper ones see activations
+    // rounded to f16 (|e| reaches ~20, 70 products per output of `f`)
+    let first = model(&["x"], &["a", "d"], &ops[..5]);
+    for shape in [[7, 9, 37], [7, 6, 7], [7, 21, 40], [7, 1, 1]] {
+        check_with(&ctx, &first, &w.0, &[("x", shape)], &mut r, Precision::Auto, 1e-4);
+        check_with(&ctx, &json, &w.0, &[("x", shape)], &mut r, Precision::Auto, 0.05);
+    }
+}
+
 fn prelu(w: &mut Weights, r: &mut Rng, name: &str, input: &str, n: usize) -> String {
     let slope = w.add(&r.vec(n), false);
     op("prelu", name, &[input], &format!(r#""slope":{slope}"#))
