@@ -68,7 +68,7 @@ vignette.zip
 └── textures/*.png       tuỳ chọn (LUT, mask, overlay)
 ```
 
-Chi tiết định dạng và cách viết shader: [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md).
+Chi tiết định dạng và cách viết shader: [EFFECT_FORMAT-vi.md](../EFFECT_FORMAT-vi.md).
 
 Tóm tắt `manifest.json`:
 
@@ -117,7 +117,7 @@ của device) trước khi giải mã. Input khai `mipmaps` được sinh chuỗ
 texture của nó (slot input, hoặc texture trong pool của hiệu ứng ghi ra nó; texture có mip và không có
 mip nằm ở hai pool riêng), không copy. Tham số `expr` được biên dịch vào shader thành
 `gpufx_expr_<name>`, sinh từ cây đã parse; hiệu ứng có biểu thức khác mặc định tự dựng pipeline riêng khi
-biểu thức đổi (`Program` giữ pipeline mặc định). Xem [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md).
+biểu thức đổi (`Program` giữ pipeline mặc định). Xem [EFFECT_FORMAT-vi.md](../EFFECT_FORMAT-vi.md).
 
 Kèm hàm tiện ích `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)`.
 
@@ -141,9 +141,9 @@ tạo graph thay vì chạy sai.
 
 ## 5. Filter FFmpeg `gpufx`
 
-Tham chiếu đầy đủ (cú pháp, option, lệnh runtime, ví dụ): [design/filters/gpufx-vi.md](design/filters/gpufx-vi.md).
-Các filter khác: [gpufx_upload / gpufx_download](design/filters/gpufx_transfer-vi.md),
-[gpufx_ai_framerate](design/filters/gpufx_ai_framerate-vi.md), [gpufx_ai_upscale](design/filters/gpufx_ai_upscale-vi.md).
+Tham chiếu đầy đủ (cú pháp, option, lệnh runtime, ví dụ): [design/filters/gpufx-vi.md](filters/gpufx-vi.md).
+Các filter khác: [gpufx_upload / gpufx_download](filters/gpufx_transfer-vi.md),
+[gpufx_ai_framerate](filters/gpufx_ai_framerate-vi.md), [gpufx_ai_upscale](filters/gpufx_ai_upscale-vi.md).
 
 Lý do thiết kế:
 
@@ -167,7 +167,7 @@ Lý do thiết kế:
 - **Kiểm chặt lúc configure**, báo lỗi nêu tên effect, input và key, thay vì chuyển đổi lặng lẽ.
 
 Đường đi của frame phía sau nằm ở [mục 6](#6-đường-đi-của-frame-và-hiệu-năng). Shader nhận gì (prelude, binding, dispatch,
-màu): [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md#tham-chiếu-shader-shader-nhận-gì-ngoài-parameter).
+màu): [EFFECT_FORMAT-vi.md](../EFFECT_FORMAT-vi.md#tham-chiếu-shader-shader-nhận-gì-ngoài-parameter).
 
 ## 6. Đường đi của frame và hiệu năng
 
@@ -258,7 +258,7 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
 - `graph='a.zip|b.zip'` là đồ thị thẳng: `EffectGraph::parse` dựng nó, và một hiệu ứng đơn cũng chạy
   qua cùng đoạn mã. `graph` là option duy nhất của filter.
 - Tham số viết inline sau từng gói của một nút (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`, xem "Tham số
-  inline" trong [design/filters/gpufx-vi.md](design/filters/gpufx-vi.md)), nên ví dụ graph có giá trị là
+  inline" trong [design/filters/gpufx-vi.md](filters/gpufx-vi.md)), nên ví dụ graph có giá trị là
   `graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=clip((t-1)/1.5\,0\,1)&enable=between(t\,1\,3)&bypass=auto[x]'`.
   `sendcmd` gọi giá trị lúc chạy bằng `nút.tên=value` trên mọi gói của đồ thị theo thứ tự câu (label gói, chỉ số
   từ 0, tên trơn, hoặc nhãn output của nút: `ba.radius`; `gb.strength` tìm hiệu ứng duy nhất trong
@@ -315,7 +315,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   format khác, ví dụ `rgba`. sw_format của output là của input nguồn nếu effect
   được phép xuất, không thì format đầu tiên của pad output mà libgpufx chuyển được và ghi được.
   `out_format` thay cho cách chọn đó (đúng format ấy, hoặc lỗi lúc configure). Chuỗi nhiều filter rời giữ
-  RGBA ở giữa bằng `out_format=rgba` trên mọi filter trừ cái cuối (số đo ở [BENCHMARK-vi.md](BENCHMARK-vi.md)).
+  RGBA ở giữa bằng `out_format=rgba` trên mọi filter trừ cái cuối (số đo ở [BENCHMARK-vi.md](../BENCHMARK-vi.md)).
 - **Mỗi frame**, CPU không chờ: filter khoá mỗi `AVVkFrame` một lần (`lock_frame`; một frame `split` phía
   trước có thể nằm trên hai pad), libgpufx bọc mỗi image thành texture wgpu (`texture_from_raw`, bộ nhớ
   ngoài, callback drop rỗng) hoặc dùng lại wrapper đã tạo ở frame trước (LRU 16 frame mỗi pad, khoá theo
@@ -373,14 +373,14 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 ### Filter truyền frame `gpufx_upload` / `gpufx_download` (Vulkan)
 
-Cách dùng và option: [design/filters/gpufx_transfer-vi.md](design/filters/gpufx_transfer-vi.md).
+Cách dùng và option: [design/filters/gpufx_transfer-vi.md](filters/gpufx_transfer-vi.md).
 
 Thay thẳng cho `hwupload` / `hwdownload` trên device Vulkan (`ffmpeg/vf_gpufx_transfer.c`, C thuần dùng
 helper Vulkan nội bộ của FFmpeg `libavutil/vulkan.h`, không cần libgpufx). Lý do: trên NVIDIA, FFmpeg 9.0
 copy qua staging buffer (tắt host image copy và import bộ nhớ host), và `hwdownload` chờ trên CPU từng lần
 copy (`ff_vk_exec_wait`), nên CPU và GPU chạy lần lượt. Trên driver Intel Windows, host image copy của
 FFmpeg 9 bị lỗi; các frames context do gpufx tạo bỏ cờ usage host-transfer, và `gpufx` từ chối frame của
-`hwupload` trên driver đó ([INTEL_VULKAN-vi.md](INTEL_VULKAN-vi.md)).
+`hwupload` trên driver đó ([INTEL_VULKAN-vi.md](../INTEL_VULKAN-vi.md)).
 
 - **gpufx_upload** (`depth`, mặc định 3): frames context tạo trên `-filter_hw_device` như `hwupload` (format
   vào: sw format của device mà plane khớp 1:1 với plane Vulkan). Vòng `depth` staging buffer map sẵn,
@@ -414,7 +414,7 @@ FFmpeg 9 bị lỗi; các frames context do gpufx tạo bỏ cờ usage host-tra
   vẫn ra đủ frame. Kiểm tay thêm: p010, validation layer (bản copy không sinh VUID nào; `hwupload`/`hwdownload`
   gốc sinh VUID-00174/00191).
 
-Số đo trên clip 90 s (RTX 4060 Laptop, GPU rảnh): xem [BENCHMARK-vi.md](BENCHMARK-vi.md).
+Số đo trên clip 90 s (RTX 4060 Laptop, GPU rảnh): xem [BENCHMARK-vi.md](../BENCHMARK-vi.md).
 
 ### Frame D3D12 và D3D11 (đã build và cross-compile, chỉ job CI Windows chạy thử)
 
@@ -518,7 +518,7 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
 
 ### Nội suy khung hình `gpufx_ai_framerate` (RIFE, gói gpufx-nn)
 
-Cách dùng và option: [design/filters/gpufx_ai_framerate-vi.md](design/filters/gpufx_ai_framerate-vi.md).
+Cách dùng và option: [design/filters/gpufx_ai_framerate-vi.md](filters/gpufx_ai_framerate-vi.md).
 
 Filter `gpufx_ai_framerate` (`ffmpeg/vf_gpufx_ai_framerate.c`) tăng frame rate bằng một mạng nơ-ron do libgpufx chạy
 trên cùng loại frame GPU và device như `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). Model là gói gpufx-nn
@@ -645,7 +645,7 @@ submodule với `--disable-everything` + mọi filter (`FFMPEG_FILTERS=all`, m�
   `subtitles`…) hoặc GPL (`boxblur`…) vẫn thiếu dù đã bật mọi filter (win64: 440 filter thay vì 62, dll
   `avfilter` 1,2 MB -> 6 MB, build lâu thêm khoảng một phút). Có `nasm` thì bật SIMD.
 - win64: `avfilter-12.dll` dùng `msvcrt.dll` còn bản build sẵn dùng UCRT (xem
-  [Backlog-vi.md](Backlog-vi.md)).
+  [Backlog-vi.md](../Backlog-vi.md)).
 - win64: `bin/` có `dxcompiler.dll` (DXC, tải từ NuGet bằng `scripts/fetch-dxc.sh`, kiểm
   sha256). wgpu tìm nó cạnh `ffmpeg.exe` để biên dịch shader cho D3D12; thiếu nó thì wgpu
   dùng FXC cũ, chậm tới vài phút với shader nhiều vòng lặp (lá rơi). `WGPU_DX12_COMPILER=fxc`

@@ -5,7 +5,7 @@ English: [gpufx.md](gpufx.md)
 `gpufx` chạy một hoặc nhiều gói hiệu ứng GPU (`.zip` hoặc thư mục, xem [EFFECT_FORMAT-vi.md](../../EFFECT_FORMAT-vi.md))
 trong filter graph của FFmpeg. Filter nhận frame CPU hoặc GPU (Vulkan, D3D12, D3D11, VideoToolbox) và trả ra frame GPU;
 cả graph hiệu ứng của một filter chạy trong một lần submit GPU. Mã nguồn: `ffmpeg/vf_gpufx.c`. Lý do thiết kế như vậy:
-[DESIGN-vi.md](../../DESIGN-vi.md#5-filter-ffmpeg-gpufx).
+[DESIGN-vi.md](../DESIGN-vi.md#5-filter-ffmpeg-gpufx).
 
 Filter liên quan: [gpufx_upload / gpufx_download](gpufx_transfer-vi.md), [gpufx_ai_framerate](gpufx_ai_framerate-vi.md),
 [gpufx_ai_upscale](gpufx_ai_upscale-vi.md).
@@ -82,7 +82,7 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
   ra). Format phải nằm trong danh sách output của effect, libgpufx phải chuyển được trên GPU
   (`gpufx_format_supported`), và với frame GPU thì FFmpeg phải tạo được storage image của nó; không thì
   filter báo lỗi lúc configure. Mặc định: format của input nguồn (input CPU: format nó được upload) nếu effect
-  được trả ra format đó, không thì format output đầu tiên GPU ghi được (xem "Frame Vulkan" trong [DESIGN-vi.md](../../DESIGN-vi.md)). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
+  được trả ra format đó, không thì format output đầu tiên GPU ghi được (xem "Frame Vulkan" trong [DESIGN-vi.md](../DESIGN-vi.md)). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
   đổi YUV ↔ RGBA (filter cuối quay về bằng `out_format=nv12`).
   Giới hạn: một format cho mọi output của filter; với frame D3D chỉ nv12, p010le, rgba, rgba64le; với frame VideoToolbox chỉ nv12, p010le.
 - **passthrough** (`auto`, `off`; mặc định `auto`): filter làm gì khi timeline `enable=` tắt nó.
