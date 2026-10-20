@@ -217,7 +217,7 @@ The main costs are upload/readback and color conversion on the CPU. The roadmap 
 | Phase | Change | Benefit |
 |-------|--------|---------|
 | P1 (done) | Convert YUV (NV12/P010/yuv420p...) ↔ RGBA on the GPU in the runtime; `rgba16float` textures when a frame is above 8 bits | Drops `swscale`, supports 10-bit/HDR |
-| P2 | Pipelining: double-buffered readback, no blocking on the previous frame | 2–3× throughput on discrete GPUs |
+| P2 (done, differently) | The `gpufx` filter outputs GPU frames only, so it does no readback itself. Reading back to RAM is `gpufx_download`'s job: it submits the copy without waiting and keeps a ring of staging buffers (option `latency`, 2 frames by default) | No blocking on the previous frame on the way to RAM |
 | P3 (done) | **Zero-copy** with `AV_PIX_FMT_VULKAN`: the wgpu device is made from `AVVulkanDeviceContext` (`wgpu-hal` `device_from_raw`) and the `VkImage`s of `AVVkFrame` are read and written in place (see "Vulkan frames" below) | No trip through RAM when decoding/encoding with Vulkan |
 | P4 | **CUDA** interop (NVDEC/NVENC): `hwmap` CUDA → Vulkan (external memory) or `VK_KHR_external_memory` directly | Works with `-hwaccel cuda` |
 | P5 (done, untested on hardware) | **D3D12** frames in place on FFmpeg's `ID3D12Device`; **D3D11** through shared NT handles into wgpu's DX12 (see "D3D12 and D3D11 frames" below) | Works with `hwupload` on d3d12va/d3d11va; decoder frames with one GPU copy |
