@@ -288,6 +288,169 @@ pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig, f16: bool) -> String {
     o
 }
 
+/// The tensor core convolution (WGSL cooperative matrices, f16 products summed in f32) of stride 1, as an
+/// implicit GEMM: a workgroup is 4 subgroups of 32 lanes, one per output row, and computes `16 * mx` pixels of
+/// 4 rows for `16 * nb` output channels. Per 16 input channels and kernel tap, a subgroup multiplies the
+/// `16 px x 16 cin` block of the input (A) by the `16 cin x 16 cout` block of the weights (B). The input of
+/// `16 * kc` channels is staged in workgroup memory pixel-major (`[ch / 16][y][x][ch % 16]`, zero past the
+/// borders and the channels) so A is a plain strided load; the weights are f16 in their own buffer laid out
+/// `[tap][cin padded to 16][cout padded to 16]` (see `push_coop_weights`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CoopConfig {
+    /// 16-pixel blocks per row.
+    pub mx: u32,
+    /// 16-channel output blocks per workgroup.
+    pub nb: u32,
+    /// 16-channel input chunks staged at a time.
+    pub kc: u32,
+}
+
+/// Output rows per workgroup (one per subgroup) and the subgroup size the kernel is written for.
+pub(crate) const COOP_ROWS: u32 = 4;
+pub(crate) const COOP_LANES: u32 = 32;
+
+impl CoopConfig {
+    fn tile(&self, s: &ConvShape) -> (u32, u32) {
+        (COOP_ROWS + (s.kh - 1) * s.dh, 16 * self.mx + (s.kw - 1) * s.dw)
+    }
+
+    fn shared_bytes(&self, s: &ConvShape) -> u32 {
+        let (th, tw) = self.tile(s);
+        self.kc * th * tw * 16 * 2 + COOP_ROWS * 256 * self.mx * 4
+    }
+
+    /// Whether `s` takes the tensor core kernel: stride 1 (other strides keep the direct kernel).
+    pub fn supports(s: &ConvShape) -> bool {
+        s.sh == 1 && s.sw == 1 && Self::choose(s, 1, 16, 16).is_some()
+    }
+
+    /// The configuration for an output of `w` columns and `cout` channels (`cin` input channels), `None` when
+    /// even the smallest tile does not fit workgroup memory.
+    pub fn choose(s: &ConvShape, w: u32, cin: u32, cout: u32) -> Option<CoopConfig> {
+        let nb = cout.div_ceil(16).clamp(1, 4);
+        let chunks = cin.div_ceil(16).max(1);
+        let mxs: &[u32] = if w > 16 { &[2, 1] } else { &[1] };
+        mxs.iter()
+            .find_map(|&mx| (1..=chunks.min(4)).rev().map(|kc| CoopConfig { mx, nb, kc }).find(|c| c.shared_bytes(s) <= SHARED_BUDGET))
+    }
+
+    pub fn groups(&self, w: u32, h: u32, cout: u32) -> (u32, u32, u32) {
+        (w.div_ceil(16 * self.mx), h.div_ceil(COOP_ROWS), cout.div_ceil(16).div_ceil(self.nb))
+    }
+}
+
+/// Whether a device runs the tensor core convolutions: Vulkan with cooperative matrices and f16, subgroups of
+/// exactly 32 lanes (the kernel maps lanes to subgroups by index; NVIDIA), unless `GPUFX_NN_COOP=0`.
+pub(crate) fn coop_available(device: &wgpu::Device, info: &wgpu::AdapterInfo) -> bool {
+    let need = wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX | wgpu::Features::SHADER_F16;
+    info.backend == wgpu::Backend::Vulkan
+        && device.features().contains(need)
+        && info.subgroup_min_size == COOP_LANES
+        && info.subgroup_max_size == COOP_LANES
+        && std::env::var("GPUFX_NN_COOP").map_or(true, |v| v != "0")
+}
+
+/// The f16 weights of the tensor core kernels: binding 6 of their bind group layout.
+const COOP_WEIGHTS: &str = "@group(0) @binding(6) var<storage, read> wh: array<f16>;\n";
+
+/// The WGSL of the tensor core convolution (see [`CoopConfig`]). `p.w_off` is in f16 units of `wh`.
+pub(crate) fn coop_source(s: &ConvShape, c: &CoopConfig) -> String {
+    let (th, tw) = c.tile(s);
+    let nt = COOP_ROWS * COOP_LANES;
+    let chunk = th * tw * 16;
+    let tile_len = c.kc * chunk;
+    let scratch = 256 * c.mx;
+    let mut o = String::new();
+    o.push_str("enable f16;\nenable wgpu_cooperative_matrix;\n");
+    o.push_str(CONV_PARAMS);
+    o.push_str(COMMON);
+    o.push_str(COOP_WEIGHTS);
+    let _ = writeln!(o, "var<workgroup> tile: array<f16, {tile_len}>;");
+    let _ = writeln!(o, "var<workgroup> outs: array<f32, {}>;", COOP_ROWS * scratch);
+    let _ = writeln!(o, "@compute @workgroup_size({nt})");
+    o.push_str("fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {\n");
+    let _ = writeln!(o, "    let sg = li / {COOP_LANES}u;");
+    let _ = writeln!(o, "    let lane = li % {COOP_LANES}u;");
+    let _ = writeln!(o, "    let ox0 = wg.x * {}u;", 16 * c.mx);
+    let _ = writeln!(o, "    let oy0 = wg.y * {COOP_ROWS}u;");
+    let _ = writeln!(o, "    let cb0 = wg.z * {}u;", c.nb);
+    o.push_str("    let ix0 = i32(ox0) - i32(p.pad_l);\n");
+    o.push_str("    let iy0 = i32(oy0) - i32(p.pad_t);\n");
+    o.push_str("    let iplane = p.ih * p.iw;\n");
+    o.push_str("    let cinp = (p.cin + 15u) / 16u * 16u;\n");
+    o.push_str("    let coutp = (p.cout + 15u) / 16u * 16u;\n");
+    o.push_str("    let last_cb = coutp / 16u - 1u;\n");
+    for x in 0..c.mx {
+        for j in 0..c.nb {
+            let _ = writeln!(o, "    var acc{x}_{j} = coop_mat16x16<f32, C>();");
+        }
+    }
+    let _ = writeln!(o, "    for (var ci0 = 0u; ci0 < p.cin; ci0 += {}u) {{", 16 * c.kc);
+    o.push_str("        workgroupBarrier();\n");
+    let _ = writeln!(o, "        for (var i = li; i < {tile_len}u; i += {nt}u) {{");
+    let _ = writeln!(o, "            let ch = i / {}u;", th * tw);
+    let _ = writeln!(o, "            let r = i % {}u;", th * tw);
+    let _ = writeln!(o, "            let gy = iy0 + i32(r / {tw}u);");
+    let _ = writeln!(o, "            let gx = ix0 + i32(r % {tw}u);");
+    o.push_str("            var v = 0.0;\n");
+    o.push_str("            if (ci0 + ch < p.cin && gx >= 0 && gy >= 0 && gx < i32(p.iw) && gy < i32(p.ih)) {\n");
+    o.push_str("                v = src0[p.in_off + (ci0 + ch) * iplane + u32(gy) * p.iw + u32(gx)];\n");
+    o.push_str("            }\n");
+    // beyond the f16 range the value would become infinite
+    let _ = writeln!(o, "            tile[(ch / 16u) * {chunk}u + r * 16u + ch % 16u] = f16(clamp(v, -65504.0, 65504.0));");
+    o.push_str("        }\n");
+    o.push_str("        workgroupBarrier();\n");
+    let _ = writeln!(o, "        for (var kc = 0u; kc < {}u; kc++) {{", c.kc);
+    o.push_str("            let cc = ci0 + kc * 16u;\n");
+    o.push_str("            if (cc >= p.cin) { break; }\n");
+    let _ = writeln!(o, "            let tb = kc * {chunk}u + sg * {}u;", tw * 16);
+    for ky in 0..s.kh {
+        for kx in 0..s.kw {
+            let tap = ky * s.kw + kx;
+            for j in 0..c.nb {
+                // past the last output block: load the last one again (not written)
+                let _ =
+                    writeln!(o, "            let wb{tap}_{j} = p.w_off + ({tap}u * cinp + cc) * coutp + min(cb0 + {j}u, last_cb) * 16u;");
+                let _ = writeln!(o, "            let b{tap}_{j} = coopLoadT<coop_mat16x16<f16, B>>(&wh[wb{tap}_{j}], coutp);");
+            }
+            for x in 0..c.mx {
+                let off = (ky * s.dh * tw + kx * s.dw + 16 * x) * 16;
+                let _ = writeln!(o, "            let ab{tap}_{x} = tb + {off}u;");
+                let _ = writeln!(o, "            let a{tap}_{x} = coopLoadT<coop_mat16x16<f16, A>>(&tile[ab{tap}_{x}], 16u);");
+                for j in 0..c.nb {
+                    let _ = writeln!(o, "            acc{x}_{j} = coopMultiplyAdd(a{tap}_{x}, b{tap}_{j}, acc{x}_{j});");
+                }
+            }
+        }
+    }
+    o.push_str("        }\n");
+    o.push_str("    }\n");
+    o.push_str("    let plane = p.oh * p.ow;\n");
+    o.push_str("    let oy = oy0 + sg;\n");
+    for j in 0..c.nb {
+        o.push_str("    workgroupBarrier();\n");
+        for x in 0..c.mx {
+            // naga's SPIR-V writer needs the offset and stride of a store as `let`s
+            let _ = writeln!(o, "    let so{j}_{x} = sg * {scratch}u + {}u;", 256 * x);
+            let _ = writeln!(o, "    let sv{j}_{x} = acc{x}_{j};");
+            let _ = writeln!(o, "    coopStoreT(sv{j}_{x}, &outs[so{j}_{x}], 16u);");
+        }
+        o.push_str("    workgroupBarrier();\n");
+        let _ = writeln!(o, "    for (var e = lane; e < {}u; e += {COOP_LANES}u) {{", 64 * c.mx);
+        let _ = writeln!(o, "        let m = e % {}u;", 16 * c.mx);
+        let _ = writeln!(o, "        let q = e / {}u;", 16 * c.mx);
+        o.push_str("        let ox = ox0 + m;\n");
+        let _ = writeln!(o, "        let cq = (cb0 + {j}u) * 16u + q * 4u;");
+        o.push_str("        if (oy < p.oh && ox < p.ow && cq < p.cout) {\n");
+        let _ = writeln!(o, "            let s = sg * {scratch}u + (m / 16u) * 256u + (m % 16u) * 16u + q * 4u;");
+        epilogue(&mut o, "vec4f(outs[s], outs[s + 1u], outs[s + 2u], outs[s + 3u])", "cq", "oy * p.ow + ox");
+        o.push_str("        }\n");
+        o.push_str("    }\n");
+    }
+    o.push_str("}\n");
+    o
+}
+
 /// Transposed convolution as a gather, split by output phase: a thread computes the `sh x sw` output pixels
 /// `(by * sh + r, bx * sw + c)`. Output row `y` takes input row `i` through tap `ky` when
 /// `y + pad_top - ky * dh = i * sh` (the scatter of `docs/NN_MODEL_FORMAT.md` turned around); with
@@ -429,6 +592,8 @@ pub(crate) enum Fixed {
 pub(crate) enum Kernel {
     Fixed(Fixed),
     Conv(ConvShape, ConvConfig),
+    /// The tensor core convolution (bind group layout [`Kernels::coop_layout`]).
+    Coop(ConvShape, CoopConfig),
     /// shape, pad top and left modulo the stride
     Deconv(ConvShape, u32, u32),
 }
@@ -440,6 +605,10 @@ pub(crate) struct Kernels {
     cache: Option<Arc<ShaderCache>>,
     /// Convolutions compute in f16 (see [`conv_source`]).
     pub f16: bool,
+    /// The layout of the tensor core kernels (the common one plus the f16 weights), when the device runs them
+    /// (see [`coop_available`]).
+    pub coop_layout: Option<wgpu::BindGroupLayout>,
+    coop_pipeline_layout: Option<wgpu::PipelineLayout>,
     pipelines: std::sync::Mutex<HashMap<Kernel, wgpu::ComputePipeline>>,
 }
 
@@ -473,6 +642,9 @@ pub(crate) const fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 const ENTRIES: [wgpu::BindGroupLayoutEntry; 6] =
     [uniform_entry(0), storage(1, true), storage(2, true), storage(3, true), storage(4, true), storage(5, false)];
 
+const COOP_ENTRIES: [wgpu::BindGroupLayoutEntry; 7] =
+    [uniform_entry(0), storage(1, true), storage(2, true), storage(3, true), storage(4, true), storage(5, false), storage(6, true)];
+
 pub(crate) fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     storage(binding, read_only)
 }
@@ -493,14 +665,26 @@ pub(crate) fn compute_pipeline(
 }
 
 impl Kernels {
-    pub fn new(device: &wgpu::Device, cache: Option<Arc<ShaderCache>>, f16: bool) -> Self {
+    pub fn new(device: &wgpu::Device, cache: Option<Arc<ShaderCache>>, f16: bool, coop: bool) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx nn"), entries: &ENTRIES });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gpufx nn"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        Kernels { layout, pipeline_layout, cache, f16, pipelines: Default::default() }
+        let (coop_layout, coop_pipeline_layout) = if coop {
+            let l =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx nn coop"), entries: &COOP_ENTRIES });
+            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("gpufx nn coop"),
+                bind_group_layouts: &[Some(&l)],
+                immediate_size: 0,
+            });
+            (Some(l), Some(pl))
+        } else {
+            (None, None)
+        };
+        Kernels { layout, pipeline_layout, cache, f16, coop_layout, coop_pipeline_layout, pipelines: Default::default() }
     }
 
     /// The pipeline of `kernel`, compiled on first use.
@@ -514,9 +698,15 @@ impl Kernels {
                     Kernel::Fixed(Fixed::Warp) => ("gpufx nn warp", include_str!("warp.wgsl").to_string()),
                     Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
                     Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
+                    Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
                     Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
                 };
-                compute_pipeline(device, self.cache.as_deref(), label, &self.pipeline_layout, &ENTRIES, source)
+                let (layout, entries) = match (kernel, &self.coop_pipeline_layout) {
+                    (Kernel::Coop(..), Some(l)) => (l, &COOP_ENTRIES[..]),
+                    (Kernel::Coop(..), None) => panic!("tensor core kernel on a device without them"),
+                    _ => (&self.pipeline_layout, &ENTRIES[..]),
+                };
+                compute_pipeline(device, self.cache.as_deref(), label, layout, entries, source)
             })
             .clone()
     }
@@ -527,10 +717,12 @@ mod tests {
     use super::*;
 
     fn parse(src: &str) {
+        parse_with(src, naga::valid::Capabilities::SHADER_FLOAT16);
+    }
+
+    fn parse_with(src: &str, caps: naga::valid::Capabilities) {
         let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{}\n{src}", e.emit_to_string(src)));
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::SHADER_FLOAT16)
-            .validate(&module)
-            .unwrap_or_else(|e| panic!("{e:?}"));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), caps).validate(&module).unwrap_or_else(|e| panic!("{e:?}"));
     }
 
     #[test]
@@ -542,6 +734,17 @@ mod tests {
             parse(&conv_source(&shape, &c, true));
             for r in 0..s {
                 parse(&deconv_source(&shape, r, (r + 1) % s));
+            }
+        }
+        // tensor core kernels: naga takes cooperative matrix loads from workgroup memory
+        for (k, d) in [(3, 1), (1, 1), (3, 2)] {
+            let shape = ConvShape { kh: k, kw: k, sh: 1, sw: 1, dh: d, dw: d };
+            for (w, cin, cout) in [(1920, 64, 64), (8, 3, 48), (40, 17, 20)] {
+                let c = CoopConfig::choose(&shape, w, cin, cout).unwrap();
+                parse_with(
+                    &coop_source(&shape, &c),
+                    naga::valid::Capabilities::SHADER_FLOAT16 | naga::valid::Capabilities::COOPERATIVE_MATRIX,
+                );
             }
         }
         for src in [

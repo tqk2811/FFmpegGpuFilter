@@ -526,7 +526,9 @@ impl GpuContext {
             )
             .map_err(gpu_err)?;
         let mut ctx = GpuContext::from_device(device, queue, adapter.get_info(), None);
-        Arc::get_mut(&mut ctx).expect("new").vulkan_queue_family = Some(desc.queue_family);
+        let ctx_mut = Arc::get_mut(&mut ctx).expect("new");
+        ctx_mut.vulkan_queue_family = Some(desc.queue_family);
+        ctx_mut.coop_f16 = crate::runtime::coop_f16(&adapter);
         Ok(ctx)
     }
 }

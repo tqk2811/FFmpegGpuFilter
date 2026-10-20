@@ -55,6 +55,16 @@ pub(crate) const GPU_FEATURES: wgpu::Features = wgpu::Features::PIPELINE_CACHE
     // Tensor cores through WGSL `enable wgpu_cooperative_matrix;` (Vulkan only in wgpu 30).
     .union(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
 
+/// Whether `adapter` lists the 16x16x16 cooperative matrix with f16 A/B and an f32 accumulator.
+pub(crate) fn coop_f16(adapter: &wgpu::Adapter) -> bool {
+    use wgpu::CooperativeScalarType as T;
+    adapter.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX)
+        && adapter
+            .cooperative_matrix_properties()
+            .iter()
+            .any(|p| (p.m_size, p.n_size, p.k_size) == (16, 16, 16) && p.ab_type == T::F16 && p.cr_type == T::F32)
+}
+
 /// The high-performance adapter of `backend`, else its software fallback.
 pub(crate) fn request_adapter(backend: Backend) -> Result<wgpu::Adapter, Error> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -129,6 +139,9 @@ pub struct GpuContext {
     /// gpufx made itself.
     #[cfg_attr(not(any(windows, all(unix, not(target_vendor = "apple")))), allow(dead_code))]
     pub(crate) vulkan_queue_family: Option<u32>,
+    /// The adapter lists 16x16x16 cooperative matrices with f16 A/B and an f32 accumulator,
+    /// the shape of the tensor core convolutions (see `nn::kernels::coop_available`).
+    pub(crate) coop_f16: bool,
     /// Held while Vulkan frames stage their semaphores and submit; true once a submission
     /// failed (the device is then no longer used for Vulkan frames).
     #[cfg_attr(not(any(windows, all(unix, not(target_vendor = "apple")))), allow(dead_code))]
@@ -197,7 +210,9 @@ impl GpuContext {
             extra |= wgpu::Features::PASSTHROUGH_SHADERS;
         }
         let (device, queue) = open_device(adapter, label, extra)?;
-        Ok(Self::from_device(device, queue, adapter.get_info(), cache_dir))
+        let mut ctx = Self::from_device(device, queue, adapter.get_info(), cache_dir);
+        Arc::get_mut(&mut ctx).expect("new").coop_f16 = coop_f16(adapter);
+        Ok(ctx)
     }
 
     pub(crate) fn from_device(
@@ -221,6 +236,7 @@ impl GpuContext {
             pool: Default::default(),
             shader_cache,
             vulkan_queue_family: None,
+            coop_f16: false,
             vulkan_submit: std::sync::Mutex::new(false),
             #[cfg(target_vendor = "apple")]
             videotoolbox: None,
