@@ -51,7 +51,9 @@ impl Backend {
 pub(crate) const GPU_FEATURES: wgpu::Features = wgpu::Features::PIPELINE_CACHE
     .union(wgpu::Features::SHADER_F16)
     .union(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
-    .union(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+    .union(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+    // Tensor cores through WGSL `enable wgpu_cooperative_matrix;` (Vulkan only in wgpu 30).
+    .union(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
 
 /// The high-performance adapter of `backend`, else its software fallback.
 pub(crate) fn request_adapter(backend: Backend) -> Result<wgpu::Adapter, Error> {
@@ -87,6 +89,9 @@ fn open_device(adapter: &wgpu::Adapter, label: &str, extra: wgpu::Features) -> R
         // is created. The format features let GPU frames have 16-bit and r8/rg8
         // storage planes (see GpuFrame).
         required_features: adapter.features() & (crate::profile::features() | extra),
+        // SAFETY: it only unlocks EXPERIMENTAL_COOPERATIVE_MATRIX, which only shaders that
+        // `enable wgpu_cooperative_matrix;` use.
+        experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
         ..Default::default()
     }))
     .map_err(|e| Error::Gpu(e.to_string()))
@@ -169,7 +174,11 @@ impl GpuContext {
                 // defaults apply, which cover what effects use.
                 noop: wgpu::NoopBackendOptions {
                     enable: true,
-                    features: Some(GPU_FEATURES - wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+                    features: Some(
+                        GPU_FEATURES
+                            - wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                            - wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX,
+                    ),
                     ..Default::default()
                 },
                 ..Default::default()

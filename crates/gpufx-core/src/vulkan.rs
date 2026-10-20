@@ -519,6 +519,8 @@ impl GpuContext {
                     label: Some("gpufx (shared Vulkan device)"),
                     required_features: features,
                     required_limits: limits,
+                    // SAFETY: as in runtime::open_device.
+                    experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() },
                     ..Default::default()
                 },
             )
