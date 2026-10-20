@@ -539,7 +539,7 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
                 let shape = conv_shape(c);
                 let src1 = res.map_or(x.slot, |r| r.slot);
                 if m.coop_ops.contains(&step.op) {
-                    let cfg = CoopConfig::choose(&shape, out.w, x.c, out.c)
+                    let cfg = CoopConfig::choose(&shape, x.c, out.c)
                         .ok_or_else(|| Error::Unsupported(format!("op {}: kernel {:?} is too large", op.name, c.kernel)))?;
                     let groups = cfg.groups(out.w, out.h, out.c);
                     pend.push(Pending {
