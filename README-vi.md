@@ -34,7 +34,7 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
   Đã chạy trên NVIDIA RTX 4060 Laptop và Intel UHD Graphics (Windows 11); CI chỉ build.
 - Cache shader trên đĩa (tuỳ chọn): `GPUFX_SHADER_CACHE=<thư mục>` (pipeline cache của Vulkan; DXIL của D3D12 khi
   tìm thấy `dxcompiler.dll` trên đường tìm DLL). `gpufx pack --precompile` gói sẵn shader D3D12 vào gói, chỉ dùng khi
-  `GPUFX_TRUST_PRECOMPILED=1` (xem [thiết kế](docs/DESIGN-vi.md)).
+  `GPUFX_TRUST_PRECOMPILED=1` (xem [thiết kế](docs/design/DESIGN-vi.md)).
 
 ```sh
 # gpufx trả ra frame GPU: đưa cho nó một device (frame CPU ở input nó tự upload) và
@@ -105,7 +105,7 @@ filter chạy trên frame VideoToolbox (nv12, p010le) qua Metal, ví dụ
 `-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12"`;
 đường này chưa chạy trên máy Mac nào (xem bên dưới).
 
-Tài liệu: [thiết kế](docs/DESIGN-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)
+Tài liệu: [thiết kế](docs/design/DESIGN-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)
 
 ## Nội suy khung hình (`gpufx_ai_framerate`)
 

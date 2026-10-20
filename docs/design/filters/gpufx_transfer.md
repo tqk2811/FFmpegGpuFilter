@@ -11,7 +11,7 @@ the GPU work at the same time instead of taking turns. Vulkan only (source: `ffm
 Why they are faster: on NVIDIA, FFmpeg 9 cannot use host image copy or host memory import, so `hwupload` and
 `hwdownload` copy through a staging buffer and the CPU waits for every copy. These filters keep several copies in
 flight. The design background (staging ring, synchronization, queues, measurements) is in
-[DESIGN.md, Transfer filters](../../DESIGN.md#transfer-filters-gpufx_upload--gpufx_download-vulkan); the numbers are in
+[DESIGN.md, Transfer filters](../DESIGN.md#transfer-filters-gpufx_upload--gpufx_download-vulkan); the numbers are in
 [BENCHMARK.md](../../BENCHMARK.md). On Intel under Windows they are also the way to avoid FFmpeg 9's broken host image
 copies, see [INTEL_VULKAN.md](../../INTEL_VULKAN.md).
 
@@ -80,6 +80,6 @@ ffmpeg -init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 \
 
 ## See also
 
-- [DESIGN.md, Transfer filters](../../DESIGN.md#transfer-filters-gpufx_upload--gpufx_download-vulkan)
+- [DESIGN.md, Transfer filters](../DESIGN.md#transfer-filters-gpufx_upload--gpufx_download-vulkan)
 - [gpufx_ai_framerate](gpufx_ai_framerate.md), [gpufx_ai_upscale](gpufx_ai_upscale.md)
 - [INTEL_VULKAN.md](../../INTEL_VULKAN.md), [BENCHMARK.md](../../BENCHMARK.md)

@@ -11,7 +11,7 @@ song song thay vì thay phiên nhau chờ. Chỉ Vulkan (source: `ffmpeg/vf_gpuf
 Vì sao nhanh hơn: trên NVIDIA, FFmpeg 9 không dùng được host image copy và host memory import, nên `hwupload` và
 `hwdownload` copy qua staging buffer và CPU chờ từng lần copy. Hai filter này giữ nhiều lần copy chạy cùng lúc.
 Nền tảng thiết kế (ring staging, đồng bộ, queue, số đo) nằm ở
-[DESIGN-vi.md, Filter truyền frame](../../DESIGN-vi.md#filter-truyền-frame-gpufx_upload--gpufx_download-vulkan); số đo ở
+[DESIGN-vi.md, Filter truyền frame](../DESIGN-vi.md#filter-truyền-frame-gpufx_upload--gpufx_download-vulkan); số đo ở
 [BENCHMARK-vi.md](../../BENCHMARK-vi.md). Trên Intel dưới Windows, hai filter này cũng là cách tránh host image copy
 hỏng của FFmpeg 9, xem [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md).
 
@@ -78,6 +78,6 @@ ffmpeg -init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 \
 
 ## Xem thêm
 
-- [DESIGN-vi.md, Filter truyền frame](../../DESIGN-vi.md#filter-truyền-frame-gpufx_upload--gpufx_download-vulkan)
+- [DESIGN-vi.md, Filter truyền frame](../DESIGN-vi.md#filter-truyền-frame-gpufx_upload--gpufx_download-vulkan)
 - [gpufx_ai_framerate](gpufx_ai_framerate-vi.md), [gpufx_ai_upscale](gpufx_ai_upscale-vi.md)
 - [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md), [BENCHMARK-vi.md](../../BENCHMARK-vi.md)

@@ -68,7 +68,7 @@ vignette.zip
 └── textures/*.png       optional (LUT, mask, overlay)
 ```
 
-Details of the format and how to write shaders: [EFFECT_FORMAT.md](EFFECT_FORMAT.md).
+Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FORMAT.md).
 
 `manifest.json` summary:
 
@@ -117,7 +117,7 @@ headers (4096 a side, 64 M texels per package, the device limits) before anythin
 texture of the effect writing it; pooled textures with and without mips are kept apart), so nothing is
 copied. An `expr` parameter is compiled into the shaders as `gpufx_expr_<name>`, generated from a parsed
 tree; an effect whose expressions differ from the defaults builds its own pipelines when they change
-(the `Program` keeps the default ones). See [EFFECT_FORMAT.md](EFFECT_FORMAT.md).
+(the `Program` keeps the default ones). See [EFFECT_FORMAT.md](../EFFECT_FORMAT.md).
 
 Helper functions `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` are included.
 
@@ -141,9 +141,9 @@ initialize the graph instead of running incorrectly.
 
 ## 5. The `gpufx` FFmpeg filter
 
-Full reference (syntax, options, runtime commands, examples): [design/filters/gpufx.md](design/filters/gpufx.md).
-Other filters: [gpufx_upload / gpufx_download](design/filters/gpufx_transfer.md),
-[gpufx_ai_framerate](design/filters/gpufx_ai_framerate.md), [gpufx_ai_upscale](design/filters/gpufx_ai_upscale.md).
+Full reference (syntax, options, runtime commands, examples): [design/filters/gpufx.md](filters/gpufx.md).
+Other filters: [gpufx_upload / gpufx_download](filters/gpufx_transfer.md),
+[gpufx_ai_framerate](filters/gpufx_ai_framerate.md), [gpufx_ai_upscale](filters/gpufx_ai_upscale.md).
 
 Design rationale:
 
@@ -169,7 +169,7 @@ Design rationale:
 - **Strict checks at configuration**, with errors that name the effect, input and key, instead of silent conversion.
 
 The frame path behind this is in [section 6](#6-frame-path-and-performance). What a shader receives (prelude, bindings,
-dispatch, colour): [EFFECT_FORMAT.md](EFFECT_FORMAT.md#shader-reference-what-a-shader-receives).
+dispatch, colour): [EFFECT_FORMAT.md](../EFFECT_FORMAT.md#shader-reference-what-a-shader-receives).
 
 ## 6. Frame path and performance
 
@@ -264,7 +264,7 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
 - `graph='a.zip|b.zip'` is the linear graph: `EffectGraph::parse` builds it, and a single
   effect runs through the same code. `graph` is the only filter option.
 - Parameters are written inline after each package of a node (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`, see
-  "Inline parameters" in [design/filters/gpufx.md](design/filters/gpufx.md)), so a graph example with values reads
+  "Inline parameters" in [design/filters/gpufx.md](filters/gpufx.md)), so a graph example with values reads
   `graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=clip((t-1)/1.5\,0\,1)&enable=between(t\,1\,3)&bypass=auto[x]'`.
   `sendcmd` addresses values at run time as `node.name=value` over all packages of the graph in statement order
   (package label, 0-based index, bare name, or a node's output label: `ba.radius`, `gb.strength` finds the one
@@ -323,7 +323,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   sw_format is the source input's when the effect may output it, else the first format of the output pad
   that libgpufx converts and that FFmpeg can make storage images of. `out_format` replaces that choice
   (that format or a configuration error). Chains of separate filters keep RGBA in between with
-  `out_format=rgba` on all but the last (numbers in [BENCHMARK.md](BENCHMARK.md): faster than without it, still
+  `out_format=rgba` on all but the last (numbers in [BENCHMARK.md](../BENCHMARK.md): faster than without it, still
   slower than one `graph=`).
 - **Per frame**, no CPU wait: the filter locks each `AVVkFrame` once (`lock_frame`; a frame split upstream
   may sit on two pads), libgpufx wraps every image as a wgpu texture (`texture_from_raw`, external memory,
@@ -385,14 +385,14 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 ### Transfer filters `gpufx_upload` / `gpufx_download` (Vulkan)
 
-Usage and options: [design/filters/gpufx_transfer.md](design/filters/gpufx_transfer.md).
+Usage and options: [design/filters/gpufx_transfer.md](filters/gpufx_transfer.md).
 
 Drop-in replacements for `hwupload` / `hwdownload` on Vulkan devices (`ffmpeg/vf_gpufx_transfer.c`, plain C
 on FFmpeg's internal Vulkan helpers `libavutil/vulkan.h`, no libgpufx). Why: on NVIDIA FFmpeg 9.0 copies
 through a staging buffer (host image copy and host memory import are off), and `hwdownload` waits on the CPU
 for every copy (`ff_vk_exec_wait`), so CPU and GPU take turns. On the Intel Windows driver FFmpeg 9's host
 image copies are broken; the frames contexts gpufx creates drop the host-transfer usage, and `gpufx` refuses
-`hwupload` frames there ([INTEL_VULKAN.md](INTEL_VULKAN.md)).
+`hwupload` frames there ([INTEL_VULKAN.md](../INTEL_VULKAN.md)).
 
 - **gpufx_upload** (`depth`, default 3): the frames context is made on `-filter_hw_device` like `hwupload`
   (input formats: the device's sw formats whose planes map 1:1 to Vulkan planes). A ring of `depth`
@@ -428,7 +428,7 @@ image copies are broken; the frames contexts gpufx creates drop the host-transfe
   path; every frame comes out with `latency=4`. Also checked by hand: p010, the Vulkan validation layer
   (no VUID from the copies; plain `hwupload`/`hwdownload` give VUID-00174/00191 there).
 
-Measured on the 90 s clips (RTX 4060 Laptop, idle GPU): see [BENCHMARK.md](BENCHMARK.md).
+Measured on the 90 s clips (RTX 4060 Laptop, idle GPU): see [BENCHMARK.md](../BENCHMARK.md).
 
 ### D3D12 and D3D11 frames (built and cross-compiled, run only by the Windows CI job)
 
@@ -537,7 +537,7 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
 
 ### Frame interpolation `gpufx_ai_framerate` (RIFE, gpufx-nn packages)
 
-Usage and options: [design/filters/gpufx_ai_framerate.md](design/filters/gpufx_ai_framerate.md).
+Usage and options: [design/filters/gpufx_ai_framerate.md](filters/gpufx_ai_framerate.md).
 
 The `gpufx_ai_framerate` filter (`ffmpeg/vf_gpufx_ai_framerate.c`) raises the frame rate with a neural network run
 by libgpufx on the same GPU frames and devices as `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). The model is a
@@ -668,7 +668,7 @@ submodule with `--disable-everything` + every filter (`FFMPEG_FILTERS=all`, the 
   (win64: 440 filters instead of 62, `avfilter` dll 1.2 MB -> 6 MB, about one minute more build time).
   SIMD is enabled if `nasm` is available.
 - win64: `avfilter-12.dll` uses `msvcrt.dll` while the prebuilt uses UCRT (see
-  [Backlog-vi.md](Backlog-vi.md) (Vietnamese)).
+  [Backlog-vi.md](../Backlog-vi.md) (Vietnamese)).
 - win64: `bin/` holds `dxcompiler.dll` (DXC, downloaded from NuGet by
   `scripts/fetch-dxc.sh`, sha256 checked). wgpu finds it next to `ffmpeg.exe` to compile
   shaders for D3D12; without it wgpu falls back to the old FXC, which takes minutes on

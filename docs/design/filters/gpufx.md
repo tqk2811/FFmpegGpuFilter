@@ -5,7 +5,7 @@ Tiếng Việt: [gpufx-vi.md](gpufx-vi.md)
 `gpufx` runs one or more GPU effect packages (`.zip` or directory, see [EFFECT_FORMAT.md](../../EFFECT_FORMAT.md))
 inside FFmpeg's filter graph. It takes software or GPU frames (Vulkan, D3D12, D3D11, VideoToolbox) and returns GPU
 frames; the whole effect graph of one filter runs in a single GPU submit. Source: `ffmpeg/vf_gpufx.c`. Why it is
-built this way: [DESIGN.md](../../DESIGN.md#5-the-gpufx-ffmpeg-filter).
+built this way: [DESIGN.md](../DESIGN.md#5-the-gpufx-ffmpeg-filter).
 
 Related filters: [gpufx_upload / gpufx_download](gpufx_transfer.md), [gpufx_ai_framerate](gpufx_ai_framerate.md),
 [gpufx_ai_upscale](gpufx_ai_upscale.md).
@@ -82,7 +82,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   output frames context). It must be in the effect's output formats and converted on the GPU by libgpufx
   (`gpufx_format_supported`), and for GPU frames FFmpeg must make storage images of it; otherwise the
   filter fails at configuration. Default: the source input's format (for a software input, the format it
-  is uploaded in) when the effect may output it, else its first output format the GPU writes (see "Vulkan frames" in [DESIGN.md](../../DESIGN.md)). Use: `out_format=rgba` between separate `gpufx` filters, so the middle
+  is uploaded in) when the effect may output it, else its first output format the GPU writes (see "Vulkan frames" in [DESIGN.md](../DESIGN.md)). Use: `out_format=rgba` between separate `gpufx` filters, so the middle
   ones skip the YUV ↔ RGBA conversions (the last one goes back with `out_format=nv12`).
   Limits: one format for every output of the filter; on D3D frames only nv12, p010le, rgba and rgba64le; on VideoToolbox frames nv12 and p010le.
 - **passthrough** (`auto`, `off`; default `auto`): what the filter does while timeline `enable=`

@@ -4,7 +4,7 @@ English: [gpufx_ai_framerate.md](gpufx_ai_framerate.md)
 
 Tăng frame rate bằng model nội suy khung hình neural (RIFE v4.6, đã convert sang gói gpufx-nn) chạy trên GPU qua
 libgpufx. Làm việc trên cùng GPU frame và device với `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox).
-Source: `ffmpeg/vf_gpufx_ai_framerate.c`. Thiết kế: [DESIGN-vi.md, Nội suy khung hình](../../DESIGN-vi.md#nội-suy-khung-hình-gpufx_ai_framerate-rife-gói-gpufx-nn).
+Source: `ffmpeg/vf_gpufx_ai_framerate.c`. Thiết kế: [DESIGN-vi.md, Nội suy khung hình](../DESIGN-vi.md#nội-suy-khung-hình-gpufx_ai_framerate-rife-gói-gpufx-nn).
 
 Output có frame rate cố định (như `framerate` và `minterpolate`). Mỗi điểm lưới nằm giữa hai source frame được model
 tạo ra tại thời điểm tương ứng, điểm lưới trùng source frame thì chính là frame đó, và frame cuối kéo dài đến hết
@@ -80,5 +80,5 @@ Model không nằm trong git: bundle win64/linux64 có sẵn trong `models/`, ho
 ## Xem thêm
 
 - [README: Nội suy khung hình](../../../README-vi.md#nội-suy-khung-hình-gpufx_ai_framerate)
-- [NN_MODEL_FORMAT-vi.md](../../NN_MODEL_FORMAT-vi.md), [DESIGN-vi.md, Nội suy khung hình](../../DESIGN-vi.md#nội-suy-khung-hình-gpufx_ai_framerate-rife-gói-gpufx-nn)
+- [NN_MODEL_FORMAT-vi.md](../../NN_MODEL_FORMAT-vi.md), [DESIGN-vi.md, Nội suy khung hình](../DESIGN-vi.md#nội-suy-khung-hình-gpufx_ai_framerate-rife-gói-gpufx-nn)
 - [gpufx_transfer](gpufx_transfer-vi.md), [gpufx_ai_upscale](gpufx_ai_upscale-vi.md)
