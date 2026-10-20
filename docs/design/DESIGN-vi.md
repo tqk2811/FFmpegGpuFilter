@@ -215,7 +215,7 @@ Chi phí chính là upload/readback và chuyển màu trên CPU. Lộ trình b�
 | P1 (xong) | Chuyển YUV (NV12/P010/yuv420p…) ↔ RGBA trên GPU trong runtime; texture `rgba16float` khi có frame trên 8 bit | Bỏ `swscale`, hỗ trợ 10-bit/HDR |
 | P2 (xong, theo cách khác) | Filter `gpufx` chỉ xuất frame GPU nên không còn readback bên trong. Đọc về RAM do `gpufx_download` lo: nó gửi copy rồi chưa chờ ngay, giữ một vòng staging buffer (option `latency`, mặc định 2 frame) | Không chặn chờ frame trước khi đưa ra RAM |
 | P3 (xong) | **Zero-copy** với `AV_PIX_FMT_VULKAN`: wgpu device tạo từ `AVVulkanDeviceContext` (`wgpu-hal` `device_from_raw`), đọc và ghi thẳng các `VkImage` của `AVVkFrame` (xem "Frame Vulkan" dưới đây) | Không qua RAM khi decode/encode bằng Vulkan |
-| P4 | Interop **CUDA** (NVDEC/NVENC): `hwmap` CUDA → Vulkan (external memory) hoặc `VK_KHR_external_memory` trực tiếp | Dùng được với `-hwaccel cuda` |
+| P4 (bỏ) | Interop **CUDA** (NVDEC/NVENC). Không làm: cần thêm một device wgpu bên cạnh CUDA context của FFmpeg (tốn thêm VRAM và RAM), semaphore dùng chung giữa hai API và mỗi chiều một lần copy GPU, mà không được thêm sức tính: Tensor Core đã gọi được từ WGSL qua cooperative matrix của Vulkan. Encode NVENC thì dùng `gpufx_download` (NVENC tự upload frame) | — |
 | P5 (xong, chưa chạy trên phần cứng) | Frame **D3D12** tại chỗ trên `ID3D12Device` của FFmpeg; **D3D11** qua shared NT handle sang DX12 của wgpu (xem "Frame D3D12 và D3D11" bên dưới) | Dùng được với `hwupload` trên d3d12va/d3d11va; frame decoder tốn một lần copy GPU |
 | P6 (xong VideoToolbox, chưa chạy trên máy Mac) | VideoToolbox (`CVPixelBuffer` → IOSurface → `MTLTexture`, xem "Frame VideoToolbox" bên dưới); VAAPI/DRM-PRIME (Linux) | Phủ hết hwaccel phổ biến |
 
