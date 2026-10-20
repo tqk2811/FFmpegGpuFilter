@@ -247,6 +247,25 @@ unsafe fn core_bools(f: &mut vk::PhysicalDeviceFeatures) -> &mut [vk::Bool32] {
     std::slice::from_raw_parts_mut(f as *mut _ as *mut vk::Bool32, size_of::<vk::PhysicalDeviceFeatures>() / size_of::<vk::Bool32>())
 }
 
+/// `extensions` plus the feature-only extensions promoted to core by `api_version`: wgpu-hal queries their feature
+/// structs (16-bit storage, which `SHADER_F16` needs) only when the device lists the extension, and FFmpeg enables
+/// the core features instead of the extensions.
+fn with_promoted(extensions: &[String], api_version: u32) -> Vec<String> {
+    let mut all = extensions.to_vec();
+    let promoted: [(&CStr, u32); 3] = [
+        (ash::khr::_16bit_storage::NAME, vk::API_VERSION_1_1),
+        (ash::khr::storage_buffer_storage_class::NAME, vk::API_VERSION_1_1),
+        (ash::khr::shader_float16_int8::NAME, vk::API_VERSION_1_2),
+    ];
+    for (name, version) in promoted {
+        let name = name.to_string_lossy();
+        if api_version >= version && !all.iter().any(|e| *e == name) {
+            all.push(name.into_owned());
+        }
+    }
+    all
+}
+
 impl Enabled {
     unsafe fn read(chain: *const c_void, extensions: &[String]) -> Self {
         let mut core = vk::PhysicalDeviceFeatures::default();
@@ -443,7 +462,7 @@ impl GpuContext {
             st.features2 = Some(std::mem::transmute::<unsafe extern "system" fn(), vk::PFN_vkGetPhysicalDeviceFeatures2>(f2));
             st.features = Some(std::mem::transmute::<unsafe extern "system" fn(), vk::PFN_vkGetPhysicalDeviceFeatures>(f1));
             st.enum_ext = Some(std::mem::transmute::<unsafe extern "system" fn(), vk::PFN_vkEnumerateDeviceExtensionProperties>(ext));
-            let enabled = Enabled::read(desc.enabled_features, &desc.device_extensions);
+            let enabled = Enabled::read(desc.enabled_features, &with_promoted(&desc.device_extensions, desc.api_version));
             st.enabled.retain(|(d, _)| *d != phd.as_raw());
             st.enabled.push((phd.as_raw(), enabled));
             st.queues.retain(|(d, _, _)| *d != device.as_raw());
@@ -871,6 +890,24 @@ mod tests {
         assert_eq!(indexing.descriptor_binding_partially_bound, 0);
         assert_eq!(zero.shader_zero_initialize_workgroup_memory, 1);
         assert_eq!(robust.robust_buffer_access2, 0, "extension struct absent from the chain");
+    }
+
+    /// FFmpeg enables 16-bit storage as a Vulkan 1.1 core feature without listing VK_KHR_16bit_storage, and
+    /// wgpu-hal reads that feature (needed for SHADER_F16) only when the extension is listed.
+    #[test]
+    fn promoted_feature_extensions_are_listed() {
+        let ffmpeg = vec!["VK_KHR_cooperative_matrix".to_string()];
+        let all = with_promoted(&ffmpeg, vk::API_VERSION_1_3);
+        for name in
+            ["VK_KHR_cooperative_matrix", "VK_KHR_16bit_storage", "VK_KHR_storage_buffer_storage_class", "VK_KHR_shader_float16_int8"]
+        {
+            assert!(all.iter().any(|e| e == name), "{name}");
+        }
+        let v11 = with_promoted(&[], vk::API_VERSION_1_1);
+        assert!(v11.iter().any(|e| e == "VK_KHR_16bit_storage"));
+        assert!(!v11.iter().any(|e| e == "VK_KHR_shader_float16_int8"), "core only from 1.2");
+        let listed = with_promoted(&["VK_KHR_16bit_storage".to_string()], vk::API_VERSION_1_1);
+        assert_eq!(listed.iter().filter(|e| *e == "VK_KHR_16bit_storage").count(), 1);
     }
 
     /// wgpu exposes SHADER_F16 only with shaderFloat16 and 16-bit storage access: on FFmpeg's device they read as
