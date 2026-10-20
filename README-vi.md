@@ -68,7 +68,7 @@ nêu tên effect và key.
   hay không là tuỳ effect: README của từng effect ghi rõ với mỗi tham số là alpha bị bỏ qua, dùng làm độ đậm, hay
   được ghi ra đầu ra.
 - `sendcmd` là lệnh lúc chạy, không phải option của filter: `sendcmd=c='0.5 gpufx@g params gb.strength=0.2'` đặt
-  các cặp `node.name=value` (cách nhau bởi `|`) trong khi stream đang chạy; xem [design](docs/DESIGN-vi.md).
+  các cặp `node.name=value` (cách nhau bởi `|`) trong khi stream đang chạy; xem [tham chiếu filter](docs/design/filters/gpufx-vi.md).
 
 ```sh
 # một chuỗi: gpufx đầu tiên upload, mọi hiệu ứng chạy trên device Vulkan của FFmpeg, download một lần

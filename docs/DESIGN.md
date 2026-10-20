@@ -141,260 +141,35 @@ initialize the graph instead of running incorrectly.
 
 ## 5. The `gpufx` FFmpeg filter
 
-```
-gpufx=graph='<zip|directory>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
-gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
-```
+Full reference (syntax, options, runtime commands, examples): [design/filters/gpufx.md](design/filters/gpufx.md).
+Other filters: [gpufx_upload / gpufx_download](design/filters/gpufx_transfer.md),
+[gpufx_ai_framerate](design/filters/gpufx_ai_framerate.md), [gpufx_ai_upscale](design/filters/gpufx_ai_upscale.md).
 
-- **graph**: the only option. A single effect is `graph=a.zip`; a chain is `graph='a.zip|b.zip|c.zip'`; a whole
-  graph with several inputs and outputs is written with labels (see "GPU graph inside one filter" in section 6).
-  The filter's number of inputs comes from the manifest of the first effect (or, in a graph, the highest pad read plus one; for a `repeat` input, the number of labels the node reads).
-  Statements need no labels, as in an FFmpeg filtergraph: an unlabelled input binds to the lowest input pad no
-  label of the graph names, and an unlabelled output becomes a graph output (exact rules in section 6).
-- **Effect chain** `graph='a.zip|b.zip|c.zip'`: runs one after another like three chained filters, but
-  all passes fit in a single GPU submit, without intermediate frames.
-  The filter's inputs are the inputs of the first effect; only the first effect may have multiple inputs. The output
-  follows the rules of the last effect. The rules of the later effects are checked as when chaining filters:
-  the format is the first one in the previous effect's `output.formats` that the next effect accepts,
-  and the size is the one the previous effect writes (the first input's, or the stacked size with `output.size`). The frame stays RGBA on the GPU and is not converted to that format.
-  Each effect takes its own inline parameters (`graph='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, see
-  "Inline parameters" below). Spaces around `|` are ignored.
-- **GPU frames out only**, like the `*_cuda` filters: every output is a Vulkan, D3D12, D3D11 or VideoToolbox frame, so
-  `hwdownload,format=<fmt>` or `gpufx_download,format=<fmt>` must come before CPU filters and encoders. Inputs
-  may be GPU frames of that API or software frames, which the filter uploads itself (`av_hwframe_transfer_data`
-  into its own frames context per input): as they are when the device takes the format, else as nv12/p010le
-  (4:2:0 YUV) or RGBA converted by swscale; frames whose matrix the GPU does not convert go up as RGBA. The
-  device is the one of the GPU inputs, else
-  `-filter_hw_device` (`AVFILTER_FLAG_HWDEVICE`), and its type picks the API; with software inputs only and
-  no device the filter fails and names the options to add. A `-filter_hw_device` of another API than the
-  GPU inputs is refused (it sets the output format); one of the same API but another device is ignored
-  (their device wins, software inputs are uploaded there, with a warning). The `backend` option is for testing only (`auto` follows the frames); `backend=metal` is refused except on macOS (the library and the
-  CLI keep it). Adding an API is one entry in `hw_apis[]` plus
-  its cases in the per-API switches of `vf_gpufx.c`.
-- **out_format**: forces the pixel format of every output (on Vulkan/D3D frames: the sw_format of the
-  output frames context). It must be in the effect's output formats and converted on the GPU by libgpufx
-  (`gpufx_format_supported`), and for GPU frames FFmpeg must make storage images of it; otherwise the
-  filter fails at configuration. Default: the source input's format (for a software input, the format it
-  is uploaded in) when the effect may output it, else its first output format the GPU writes (see "Vulkan frames"). Use: `out_format=rgba` between separate `gpufx` filters, so the middle
-  ones skip the YUV ↔ RGBA conversions (the last one goes back with `out_format=nv12`).
-  Limits: one format for every output of the filter; on D3D frames only nv12, p010le, rgba and rgba64le; on VideoToolbox frames nv12 and p010le.
-- **passthrough** (`auto`, `off`; default `auto`): what the filter does while timeline `enable=`
-  turns it off. `auto` hands each output its source input's texture relabelled as an output frame
-  (the input's buffers with the output link's frames context, no GPU copy) when the GPU copy would
-  leave the pixels unchanged and the next filter is `gpufx`, `gpufx_download` or `hwdownload`
-  (filters that read a frame only through its frames context and texture). It needs a GPU frame not
-  uploaded by gpufx; the same size, sw_format, device, colorspace, range and alpha mode as the
-  output link; `out_format` unset or the same; and textures the output's frames context can
-  describe: Vulkan same tiling, plane formats, frame flags (but the multiplane one), create flags and layers and at
-  least the usage readers need (sampled, transfer source, host transfer when the output context
-  has it); D3D12 same DXGI format, no texture array; D3D11 any (hwdownload copies the frame's
-  texture and index); VideoToolbox never. With several outputs, all of them or none. Other next
-  filters (encoders, `null`, ...) and `off` get the GPU copy as before. The output frames context
-  holds the frames context of every texture it relabelled, so the textures outlive every frame and
-  every gpufx downstream that keeps wrappers of them.
-- **bypass** (`0`, `auto`; default `0`): which input a filter disabled by timeline `enable=` passes
-  (relabelled or copied as above). `0`: each output's source input pad (input 0 for one effect).
-  `auto`: that pad until the filter has been enabled for one frame, then the last input pad; made
-  for transitions (input 0 fading into the last input) that should go on showing the clip they
-  ended on: `[a][b]gpufx=graph=xfade.zip:enable='between(t,2,3)':bypass=auto`. After the first
-  window it keeps the last input, also before later windows. The chosen pad must have the size of
-  the output, else the event fails with an error (`EINVAL`), never another input.
-- **Inline parameters**: written right after the package name, like the options of a native FFmpeg filter:
-  `pkg.zip=key=value:key2=value2`, in `graph=` (also in a chain: `graph='a.zip=k=1|b.zip'`) and in every node of
-  `graph=` (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`). Keys are named (no positional values). A value is
-  a literal (`0.5`, `1,0,0`, `#ff8800`) or an **FFmpeg expression** in `t`, `n`, `w`, `h`, `a` (`w/h`), `sar`,
-  `dar` (`a*sar`), re-evaluated for every frame. This is how you do keyframes/transitions without external tools.
-  An unknown key is an error naming the effect and the key; so is a key given twice. The filter has no
-  `params` option; to change values while the stream runs use the `sendcmd` command below.
-  - **Escaping.** Put the whole `graph=` value in `'...'`. FFmpeg's own option parser splits the filter
-    options at `:` *after* it removes those quotes, so in an ffmpeg command line inline keys are separated by `&`
-    (needs no escaping; the FFmpeg-style `:` is also accepted but must be written `\:`, e.g. `a=1\:b=2`; a single
-    key needs no separator), and commas in expressions keep the usual `\,`:
-    `-vf "gpufx=graph='wipe.zip=progress=clip(t/2\,0\,1)&angle=45'"`,
-    `graph='vignette.zip=strength=0.7'`. Inside the graph string itself (after FFmpeg's unescaping),
-    `\` escapes one of `\ ' : & ; | = [ ]` (`\&` is a literal `&` in a value; before any other character the `\` stays literal, so Windows paths
-    work) and `'...'` quotes a value; commas need no escaping at this level.
-- **Inline `enable=<expr>`** on an effect switches that effect per frame (on while the expression is not 0; a
-  constant is an expression too): `graph='a.zip|b.zip=enable=lt(t\,2)'`. In a graph node of several effects
-  (`grayscale.zip|vignette.zip`) put `enable` on each effect that should switch. It is not the filter's own
-  timeline option `enable=`, which stays outside the effect string. No package may declare a parameter named
-  `enable`. An effect switched off copies its first input into its output texture
-  (its output has the first input's size; with `output.size` `hstack`/`vstack` it does not, and switching off fails), so the plan, the pooled textures and the bindings of the
-  rest of the graph stay as they are and toggling allocates nothing. Switching an effect off saves
-  its shader work but not all of it: the copy is still one compute pass, and the effect keeps its
-  output texture. With every effect off, the event is handled as a disabled filter (relabel when
-  `passthrough` allows, else the GPU bypass), and `n` still counts.
-- **Inline `bypass=0|auto`** on an effect: the input an effect switched off copies. `0` (default) its first
-  input; `auto` its first input until its `enable` expression has been true once, then its last input (an effect
-  of one input keeps it); any other value is an error. Any input may be copied, so the plan keeps every input of
-  an effect alive until the effect's last pass. An input of another size than the effect's output makes the
-  frame fail (so an effect with `output.size` `hstack`/`vstack` cannot be bypassed). With every effect off, the outputs are the input pads the chosen inputs lead to. No package may
-  declare a parameter named `bypass`. This is not the filter option `bypass=` (which sets the input a filter
-  disabled by `enable=` passes).
-  `auto` rests on the history of the frames processed: an `enable` window shorter than one frame
-  interval, or a stream whose first frame is already past the window (trim, seek), never sets it and
-  stays on input 0; it is not reset on a seek; after the first window it is always the last input.
-  FFI (also `gpufx_effect_node_effects`): `gpufx_effect_set_node_bypass`,
-  `gpufx_effect_set_bypass`, `gpufx_effect_bypass_pad`.
-- **sendcmd / zmq**: `params` is a runtime command (not a filter option) that changes values while the stream
-  runs, for example `sendcmd=c='2.0 gpufx@fx params strength=0.2'`. It takes `node.name=value` pairs separated
-  by `|`; a node is the package label, the 0-based index, a graph output label or the bare name, as in a chain
-  or graph. It also accepts `<node>.enable=<expr>` and `<node>.bypass=0|auto`, which set every effect the node
-  names and replace any inline value. These two keys exist only in this `params` runtime command (sendcmd/zmq);
-  they are not filter options.
-- **timeline** (`enable='between(t,1,3)'`) is supported.
-- Multiple inputs use `framesync`: the first input decides the length and frame rate (an input with a
-  different fps has its frames repeated or dropped). Another input that has not started yet is a black GPU frame (opaque for formats with alpha); one that has
-  ended holds its last frame (or use `shortest=1`).
-- The output takes the SAR and frame rate of the first input (in a graph, of the input pad its source comes from) and its size from `gpufx_effect_output_size` (the first input's, or the stacked size of a `hstack`/`vstack` effect); colorspace/range/alpha are the values
-  negotiated on the output link. Color-dependent side data (HDR metadata, film grain...), motion
-  vectors and video enc params are dropped because the pixels have changed.
-- If an input's size or pixel format changes midstream, that is an error (`ffmpeg` rebuilds the
-  graph itself, so you only hit this when using libavfilter directly).
-- Warnings (non-blocking): different SARs across inputs, inputs above 10 bits (effects work in half
-  float, about 11 bits), HDR PQ/HLG inputs (the shader treats them as SDR), interlaced inputs (the shader
-  sees two fields as one frame). Shaders work with straight alpha: libgpufx divides premultiplied inputs
-  (EXR, JPEG XL...) by alpha on the GPU and multiplies again when the output needs it.
+Design rationale:
 
-Examples:
+- **One option, `graph`.** An effect, a chain (`a.zip|b.zip`) and a whole labelled graph with several inputs and
+  outputs are one string, parsed by one code path (a single effect is the linear graph of one node). The number of
+  input and output pads comes from the graph, so FFmpeg's own `-filter_complex` wires the filter like any other.
+- **One GPU submit per event.** All passes of all effects of the filter, with the intermediate textures taken from a
+  pool, run in one submission; between effects no frame leaves the GPU and nothing is converted. Several `gpufx`
+  filters in a row also keep the frame on the GPU (`out_format=rgba` skips the YUV conversions between them).
+- **GPU frames out only**, like the `*_cuda` filters: the output is a hardware frame of the API of the device (Vulkan,
+  D3D12, D3D11, VideoToolbox), so `hwdownload` / `gpufx_download` goes before CPU filters and encoders. Software inputs
+  are uploaded by the filter itself, so a one-filter pipeline needs no `hwupload`. The device comes from the GPU inputs,
+  else `-filter_hw_device`; its type picks the API. Adding an API is one entry in `hw_apis[]` plus its cases in the
+  per-API switches of `vf_gpufx.c`.
+- **Parameters are FFmpeg expressions**, written inline next to the package and evaluated per frame (`t`, `n`, `w`, `h`...),
+  so keyframes and transitions need no external tool; `sendcmd` / `zmq` change them while the stream runs.
+- **Switching an effect off allocates nothing.** Inline `enable=` / `bypass=` turn an effect into a copy of one of its
+  inputs, so the plan, the pooled textures and the bindings stay as they are and toggling is free of allocation. The
+  filter-level `enable=` can hand the input textures on without any GPU copy (`passthrough`), and `bypass=auto` serves
+  transitions that should keep showing the clip they ended on.
+- **Framesync for several inputs.** The first input decides the length, frame rate, SAR and (unless an effect stacks
+  inputs with `output.size`) the size; other inputs repeat, drop or hold frames to follow it.
+- **Strict checks at configuration**, with errors that name the effect, input and key, instead of silent conversion.
 
-```sh
-VK="-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk"   # or d3d12va=dx ... dx
-
-# 1 input, parameter animated over time (gpufx uploads the frame, hwdownload brings it back)
-ffmpeg $VK -i in.mp4 -vf "gpufx=graph='vignette.zip=strength=clip(t/2\,0\,1)&color=#200040',hwdownload,format=yuv420p" out.mp4
-
-# 2-input transition
-ffmpeg $VK -i a.mp4 -i b.mp4 -filter_complex \
-  "[0][1]gpufx=graph='wipe-transition.zip=progress=clip((t-1)/1.5\,0\,1)&angle=45',hwdownload,format=yuv420p" out.mp4
-
-# chaining several effects: two filters, the frame stays on the GPU between them
-ffmpeg $VK -i in.mp4 -vf "gpufx=graph=gaussian-blur.zip,gpufx=graph='gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
-
-# same result in one filter: one GPU submission
-ffmpeg $VK -i in.mp4 -vf "gpufx=graph='gaussian-blur.zip|gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
-```
-
-### 5.1 Reference: options of the FFmpeg filters
-
-The library defines three filters (`ffmpeg/vf_gpufx.c`, `ffmpeg/vf_gpufx_transfer.c`). The bullets above
-describe the behaviour; the tables below list every option and key in one place.
-
-**Filter `gpufx`** (dynamic inputs and outputs, `AVFILTER_FLAG_HWDEVICE`, timeline supported internally)
-
-| Option | Type | Default | Range / values | Meaning and constraints |
-|--------|------|---------|----------------|-------------------------|
-| `graph` | string | none | an effect path, a `\|` chain or a labelled graph | Required: the filter fails at init without it. The number of input pads is the number of inputs of the first effect for an unlabelled chain (for a `repeat` input, `default`), else the highest pad read (labelled or bound implicitly) plus one; the number of output pads is the number of graph outputs |
-| `backend` | string | `auto` | `auto`, `vulkan` (`vk`), `dx12` (`d3d12`, `directx`), `metal` (`mtl`); not case sensitive | Testing only: `auto` follows the device of the frames. `gl` is refused; `metal` is refused unless the build has VideoToolbox support (macOS). Any other name fails when the graph is opened |
-| `shortest` | bool | `0` | `0`, `1` | `0`: only input 0 decides the end (other inputs hold their last frame, and show a blank frame before their first frame). `1`: the output ends when any input ends |
-| `out_format` | pix_fmt | none (chosen from the input) | any FFmpeg pixel format name | Forces the format of every output (the `sw_format` of GPU frames). It must be in the effect's `output.formats`, written by libgpufx and storable by the device, else configuration fails. One format for all outputs |
-| `passthrough` | int (enum) | `auto` | `auto`, `off` | While `enable=` turns the filter off: `auto` relabels the input textures as output frames without a GPU copy when that leaves the pixels unchanged and the next filter is `gpufx`, `gpufx_download` or `hwdownload`; `off` always copies |
-| `bypass` | int (enum) | `0` | `0`, `auto` | Input passed on while the filter is disabled by `enable=`: `0` the source input pad of each output, `auto` that pad until the filter has been enabled for one frame, then the last input pad. The chosen pad must have the output's size, else `EINVAL` |
-| `enable` | string (expression) | none | FFmpeg timeline expression | The generic FFmpeg timeline option (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): when it is 0 the filter takes the disabled path described under `passthrough`/`bypass`. Not the same as the inline `enable=` of an effect |
-
-The old `effect` option is removed: `graph` is the only way to name an effect. Other facts that are not options:
-
-| Item | Value |
-|------|-------|
-| Pad names | Named by libgpufx (`gpufx_effect_input_name`, `gpufx_effect_output_name`) |
-| Runtime commands (`process_command`, `sendcmd`, zmq) | Only `params`; any other command returns `ENOSYS` (the generic timeline command `enable` is handled by FFmpeg itself) |
-| `params` argument | `node.name=value` pairs separated by `\|`; also `node.enable=<expr>` and `node.bypass=0\|auto`, or a bare `enable`/`bypass` (see 5.2) |
-| Output frames | GPU frames only (Vulkan, D3D12, D3D11, VideoToolbox) |
-
-**Filter `gpufx_upload`** (one input, one output; software frames in, Vulkan frames out; `AVFILTER_FLAG_HWDEVICE`) and
-**filter `gpufx_download`** (Vulkan frames in, software frames out). Neither supports the timeline or runtime commands.
-
-| Filter | Option | Type | Default | Range | Meaning |
-|--------|--------|------|---------|-------|---------|
-| `gpufx_upload` | `depth` | int | `3` | 1..16 | Staging buffers in the ring: copies in flight before the CPU waits. The Vulkan frame pool starts at `depth + 2 + extra_hw_frames` frames |
-| `gpufx_download` | `latency` | int | `2` | 0..16 | Frames kept in flight: frame N is sent on after frame N+`latency` was submitted (`0` waits for each frame). Output is delayed by `latency` frames, flushed at the end of the stream |
-
-### 5.2 Reference: keys inside the `graph` string
-
-Parsed by `parse_effect_item` (`crates/gpufx-core/src/graph.rs`) for each effect: `path[=key=value[:key=value...]]`.
-
-| Item | Rule |
-|------|------|
-| Separators between keys | `:` (FFmpeg style) or `&`; on the ffmpeg command line `&` needs no escaping, `:` must be written `\:` |
-| Key names | A parameter name of the package, `enable` or `bypass`. Any other key is an error naming the effect and the keys it knows; a key given twice is an error; a token without `=` is an error |
-| Escape and quote | `\` escapes one of `\ ' : & ; \| = [ ]` (before any other character it stays literal, so Windows paths work); `'...'` quotes a value; an unclosed `'` is an error |
-| `enable=<expr>` | Per frame, on while the expression is not 0 (a constant is an expression). Off: the effect copies one input into its output texture (one compute pass, nothing is reallocated). No package may declare a parameter `enable` |
-| `bypass=0\|auto` | Which input an effect switched off copies: `0` its first input, `auto` its first input until `enable` has been true once, then its last input. Any other value is an error (also when the copied input and the output differ in size, as for a stack effect). No package may declare a parameter `bypass` |
-| Parameter constants | A literal that parses as the parameter's type (`0.5`, `1,0,0`, `#ff8800`, `true`) is set when the graph opens and clamped to `min`/`max`; an `expr` parameter takes its expression text the same way |
-| Parameter expressions | Any other value is an FFmpeg expression evaluated for each frame in `t` (seconds, `NaN` before the first timestamp, passed to the shader as 0), `n` (frame count of this filter), `w`, `h` (output size), `a` (`w/h`), `sar`, `dar` (`a*sar`) |
-| Graph statements | `;` separates statements; labels `[0]`, `[1]`... name the filter's input pads, other labels (letters, digits, `_`, `-`) connect effects. On each side of a statement labels are left out entirely or all given. Unlabelled inputs take the lowest input pads that no label names anywhere in the graph, later statements included (`ffmpeg -filter_complex` binds the first unused stream in order without looking ahead; gpufx looks ahead because a pad may be read only once). Unlabelled outputs become graph outputs `out0`, `out1`..., skipping labels the graph uses; an unlabelled `split` writes two. Only one fully unlabelled statement whose node is a package chain (not `split`/`null`) is the old chain: pads named after the first manifest's inputs, output `default`; any label switches to pads `in0`, `in1`... and outputs `out0`... A lone `null` is a valid no-op |
-| Runtime (`params` command) | `node.name=value` replaces a parameter (node = package label, 0-based index, graph output label or bare name); `node.enable=`/`node.bypass=` replace the inline values of every effect the node names |
-
-### 5.3 Reference: what a shader receives besides its parameters
-
-Every pass is a compute shader. The runtime writes a prelude in front of the author's code (`prelude` and
-`glsl_with_prelude` in `crates/gpufx-core/src/runtime.rs`); the author's code must not redeclare these names.
-Layout details and examples: [EFFECT_FORMAT.md](EFFECT_FORMAT.md).
-
-**Built-in uniform block `globals`** (binding 0, 32 bytes, rewritten for every frame of every effect)
-
-| Field | WGSL type | GLSL type | Offset | Meaning |
-|-------|-----------|-----------|--------|---------|
-| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The output size of the effect (the first input's, or the stacked size with `output.size` `hstack`/`vstack`); the same for all its passes |
-| `time` | `f32` | `float` | 8 | Presentation time in seconds (`t` of the filter). Loses precision on long clips (about 0.008 s steps after one day) |
-| `frame` | `u32` | `uint` | 12 | Frame count of this filter instance (also the `n` of expressions); restarts on a seek, so not for time-based motion |
-| `time_int` | `i32` | `int` | 16 | Whole seconds of the time (floor; saturates beyond the i32 range) |
-| `time_frac` | `f32` | `float` | 20 | Fraction of the time in [0, 1), also for negative times. `time_int + time_frac` is the exact time |
-| `pixel_aspect` | `f32` | `float` | 24 | Sample aspect ratio (width / height of a pixel); 1 for square pixels or when invalid |
-| `gpufx_reserved` | `f32` | `float` | 28 | Always 0; reserved |
-
-A non-finite time becomes 0.
-
-**Uniform block `params`** (binding 1): `GpufxParams`, one field per manifest parameter in manifest order, named as the parameter.
-
-| Manifest type | WGSL | GLSL | Align / size (bytes) | Notes |
-|---------------|------|------|----------------------|-------|
-| `float` | `f32` | `float` | 4 / 4 | |
-| `int` | `i32` | `int` | 4 / 4 | Rounded to the nearest integer |
-| `bool` | `u32` | `uint` | 4 / 4 | 0 or 1 |
-| `vec2` | `vec2f` | `vec2` | 8 / 8 | |
-| `vec3` | `vec3f` | `vec3` | 16 / 12 | A scalar may follow in the fourth slot |
-| `vec4`, `color` | `vec4f` | `vec4` | 16 / 16 | `color` is RGBA 0..1 |
-| `expr` | no field | no field | none | Becomes the function `gpufx_expr_<name>(<vars>)` taking and returning `f32`/`float` (arguments in the order of `vars`); NaN and infinities come out as 0 |
-
-The struct size is rounded up to 16 bytes. With no uniform parameter the struct holds one `_unused` float. Details of `expr`
-(allowed functions, limits, rebuild of pipelines): [EFFECT_FORMAT.md](EFFECT_FORMAT.md#expression-parameters).
-
-**Bindings** (bind group 0 for every pass)
-
-| Binding | WGSL / GLSL name | Kind | Contents |
-|---------|------------------|------|----------|
-| 0 | `globals` | uniform buffer | `GpufxGlobals` (above) |
-| 1 | `params` | uniform buffer | `GpufxParams` (above) |
-| 2 | `out_tex` | write-only storage texture, 2D | The pass output. `rgba8unorm` (`rgba8` in GLSL), or `rgba16float` (`rgba16f`) when an input or the output of the chain has more than 8 bits |
-| 3 | `smp` | filtering sampler | Linear, clamped to the edge, linear between mip levels; in GLSL a separate `sampler` (use `sampler2D(tex, smp)`) |
-| 4 + i | the i-th name of the pass `inputs` | sampled texture, float, filterable | `texture_2d<f32>` (`texture2D`), or `texture_2d_array<f32>` (`texture2DArray`) for a package texture with `layers`/`grid`. Without `inputs` in the manifest the list is every manifest input, then every package texture |
-
-What a name in `inputs` resolves to, checked in this order: a manifest input (the converted frame; level 0 only unless the
-input declares `mipmaps`, then the whole mip chain), a package texture (`rgba8unorm`, loaded once, mip chain made on the CPU when
-`mipmaps` is set), or the output of a previous pass (level 0). A pass cannot read `out_tex`.
-
-**Dispatch and coordinates**
-
-| Item | Value |
-|------|-------|
-| Dispatch | One `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)` per pass, in manifest order, all in one compute pass; `w`, `h` = output size. The shader declares `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); the runtime does not check it. Threads past the edge must return: `gpufx_in_bounds(id)` |
-| Pixel coordinates | `id.xy` of `global_invocation_id`, integers, origin at the top-left, y down; `textureLoad`/`imageStore` use `vec2i(x, y)` |
-| Normalised coordinates | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, the pixel centre, 0..1, v down |
-| Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores). GLSL versions take `uvec3` |
-| Derivatives | Not available in compute shaders: use `textureSampleLevel` / `textureLod` or `textureLoad` |
-| Reserved names | `globals`, `params`, `out_tex`, `smp`, anything starting with `gpufx`; no parameter named `enable` or `bypass` |
-
-**Colour**
-
-| Item | Value |
-|------|-------|
-| Channel order and alpha | RGBA, straight (not premultiplied) alpha; libgpufx divides premultiplied inputs by alpha before the shader and multiplies again on output when needed |
-| Range | 0..1 floats (`unorm` 8 bit, or half float above 8 bits) |
-| Transfer | No gamma conversion: values are those of the video (sRGB / BT.709 style), not linear light; HDR PQ/HLG is treated as SDR |
-| Format conversion | YUV or other formats are converted to and from RGBA on the GPU outside the shader; the shader never sees the source format |
-| Package textures | Always `rgba8unorm`; straight alpha unless `premultiply: true` (premultiplied; filtered correctly); mip levels are alpha-weighted either way |
-| Input mip levels | Made on the GPU every frame as the alpha-weighted average of 2x2 texels |
+The frame path behind this is in [section 6](#6-frame-path-and-performance). What a shader receives (prelude, bindings,
+dispatch, colour): [EFFECT_FORMAT.md](EFFECT_FORMAT.md#shader-reference-what-a-shader-receives).
 
 ## 6. Frame path and performance
 
@@ -489,7 +264,7 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
 - `graph='a.zip|b.zip'` is the linear graph: `EffectGraph::parse` builds it, and a single
   effect runs through the same code. `graph` is the only filter option.
 - Parameters are written inline after each package of a node (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`, see
-  "Inline parameters" in section 5), so a graph example with values reads
+  "Inline parameters" in [design/filters/gpufx.md](design/filters/gpufx.md)), so a graph example with values reads
   `graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=clip((t-1)/1.5\,0\,1)&enable=between(t\,1\,3)&bypass=auto[x]'`.
   `sendcmd` addresses values at run time as `node.name=value` over all packages of the graph in statement order
   (package label, 0-based index, bare name, or a node's output label: `ba.radius`, `gb.strength` finds the one
@@ -517,7 +292,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   -vf "format=nv12,hwupload,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,hwdownload,format=nv12" out.mp4
 ```
 
-- Every input pad also takes `AV_PIX_FMT_VULKAN`, and output pads take only GPU formats (section 5).
+- Every input pad also takes `AV_PIX_FMT_VULKAN`, and output pads take only GPU formats ([section 5](#5-the-gpufx-ffmpeg-filter)).
   Inputs may mix Vulkan and software frames (the filter uploads the software ones on the same device).
   The sw_format of each Vulkan input must be one libgpufx converts (`nv12`, `p010le`, `yuv420p`, `rgba`...) and
   is checked against the manifest rules like a software format. The filter is `FF_FILTER_FLAG_HWFRAME_AWARE`.
@@ -610,10 +385,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 ### Transfer filters `gpufx_upload` / `gpufx_download` (Vulkan)
 
-```sh
-ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
-```
+Usage and options: [design/filters/gpufx_transfer.md](design/filters/gpufx_transfer.md).
 
 Drop-in replacements for `hwupload` / `hwdownload` on Vulkan devices (`ffmpeg/vf_gpufx_transfer.c`, plain C
 on FFmpeg's internal Vulkan helpers `libavutil/vulkan.h`, no libgpufx). Why: on NVIDIA FFmpeg 9.0 copies
@@ -764,6 +536,8 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
   fails unless FFmpeg cannot create the device or there is no Metal adapter.
 
 ### Frame interpolation `gpufx_ai_framerate` (RIFE, gpufx-nn packages)
+
+Usage and options: [design/filters/gpufx_ai_framerate.md](design/filters/gpufx_ai_framerate.md).
 
 The `gpufx_ai_framerate` filter (`ffmpeg/vf_gpufx_ai_framerate.c`) raises the frame rate with a neural network run
 by libgpufx on the same GPU frames and devices as `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). The model is a

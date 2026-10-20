@@ -233,6 +233,77 @@ void main() {
 }
 ```
 
+## Tham chiếu shader: shader nhận gì ngoài parameter
+
+Mỗi pass là một compute shader. Runtime ghi một prelude trước code của tác giả (`prelude` và `glsl_with_prelude` trong
+`crates/gpufx-core/src/runtime.rs`); code của tác giả không được khai báo lại các tên này.
+Dạng ngắn của prelude nằm ở [Viết shader WGSL](#viết-shader-wgsl); các bảng dưới đây là tham chiếu đầy đủ.
+
+**Uniform block `globals` có sẵn** (binding 0, 32 byte, ghi lại cho mỗi frame của mỗi effect)
+
+| Field | Kiểu WGSL | Kiểu GLSL | Offset | Ý nghĩa |
+|-------|-----------|-----------|--------|---------|
+| `size` | `vec2f` | `vec2` | 0 | Size output tính bằng pixel (rộng, cao) dạng float. Là size output của effect (của input đầu, hoặc size xếp chồng với `output.size` `hstack`/`vstack`); giống nhau cho mọi pass của nó |
+| `time` | `f32` | `float` | 8 | Thời điểm hiển thị tính bằng giây (`t` của filter). Mất độ chính xác với clip dài (bước khoảng 0.008 s sau một ngày) |
+| `frame` | `u32` | `uint` | 12 | Số frame của instance filter này (cũng là `n` trong expression); về 0 khi seek, nên không dùng cho chuyển động theo thời gian |
+| `time_int` | `i32` | `int` | 16 | Số giây nguyên của thời gian (floor; bão hòa ngoài khoảng i32) |
+| `time_frac` | `f32` | `float` | 20 | Phần lẻ của thời gian trong [0, 1), kể cả khi thời gian âm. `time_int + time_frac` là thời gian chính xác |
+| `pixel_aspect` | `f32` | `float` | 24 | Sample aspect ratio (rộng / cao của một pixel); 1 với pixel vuông hoặc khi giá trị không hợp lệ |
+| `gpufx_reserved` | `f32` | `float` | 28 | Luôn bằng 0; để dành |
+
+Thời gian không hữu hạn thành 0.
+
+**Uniform block `params`** (binding 1): `GpufxParams`, mỗi parameter của manifest một field theo thứ tự manifest, tên như parameter.
+
+| Kiểu trong manifest | WGSL | GLSL | Align / size (byte) | Ghi chú |
+|---------------------|------|------|---------------------|---------|
+| `float` | `f32` | `float` | 4 / 4 | |
+| `int` | `i32` | `int` | 4 / 4 | Làm tròn tới số nguyên gần nhất |
+| `bool` | `u32` | `uint` | 4 / 4 | 0 hoặc 1 |
+| `vec2` | `vec2f` | `vec2` | 8 / 8 | |
+| `vec3` | `vec3f` | `vec3` | 16 / 12 | Một scalar có thể nằm ở ô thứ tư |
+| `vec4`, `color` | `vec4f` | `vec4` | 16 / 16 | `color` là RGBA 0..1 |
+| `expr` | không có field | không có field | không | Thành hàm `gpufx_expr_<name>(<vars>)` nhận và trả `f32`/`float` (đối số theo thứ tự `vars`); NaN và vô cực thành 0 |
+
+Size struct làm tròn lên bội của 16 byte. Không có uniform parameter nào thì struct chứa một float `_unused`. Chi tiết về `expr`
+(hàm cho phép, giới hạn, build lại pipeline): [Tham số biểu thức](#tham-số-biểu-thức).
+
+**Binding** (bind group 0 cho mọi pass)
+
+| Binding | Tên WGSL / GLSL | Loại | Nội dung |
+|---------|-----------------|------|----------|
+| 0 | `globals` | uniform buffer | `GpufxGlobals` (ở trên) |
+| 1 | `params` | uniform buffer | `GpufxParams` (ở trên) |
+| 2 | `out_tex` | storage texture 2D chỉ ghi | Output của pass. `rgba8unorm` (`rgba8` trong GLSL), hoặc `rgba16float` (`rgba16f`) khi một input hoặc output của chuỗi quá 8 bit |
+| 3 | `smp` | sampler filtering | Linear, clamp ở mép, linear giữa các mip level; trong GLSL là `sampler` riêng (dùng `sampler2D(tex, smp)`) |
+| 4 + i | tên thứ i trong `inputs` của pass | texture đọc, float, filterable | `texture_2d<f32>` (`texture2D`), hoặc `texture_2d_array<f32>` (`texture2DArray`) với texture của package có `layers`/`grid`. Manifest không có `inputs` thì danh sách là mọi input của manifest, rồi mọi texture của package |
+
+Một tên trong `inputs` được tra theo thứ tự: input của manifest (frame đã chuyển đổi; chỉ level 0, trừ khi input khai báo
+`mipmaps` thì cả chuỗi mip), texture của package (`rgba8unorm`, nạp một lần, chuỗi mip tạo trên CPU khi có `mipmaps`), hoặc
+output của pass trước (level 0). Pass không đọc được `out_tex`.
+
+**Dispatch và tọa độ**
+
+| Mục | Giá trị |
+|-----|---------|
+| Dispatch | Mỗi pass một lần `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)`, theo thứ tự trong manifest, tất cả trong một compute pass; `w`, `h` = size output. Shader khai báo `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); runtime không kiểm tra điều này. Thread vượt mép phải `return`: `gpufx_in_bounds(id)` |
+| Tọa độ pixel | `id.xy` của `global_invocation_id`, số nguyên, gốc ở góc trên trái, y hướng xuống; `textureLoad`/`imageStore` dùng `vec2i(x, y)` |
+| Tọa độ chuẩn hóa | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, tâm pixel, 0..1, v hướng xuống |
+| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi). Bản GLSL nhận `uvec3` |
+| Đạo hàm | Compute shader không có: dùng `textureSampleLevel` / `textureLod` hoặc `textureLoad` |
+| Tên dành riêng | `globals`, `params`, `out_tex`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable` hay `bypass` |
+
+**Màu**
+
+| Mục | Giá trị |
+|-----|---------|
+| Thứ tự kênh và alpha | RGBA, alpha thẳng (straight, không premultiplied); libgpufx chia input premultiplied cho alpha trước shader và nhân lại ở output khi cần |
+| Dải giá trị | Float 0..1 (`unorm` 8 bit, hoặc half float khi trên 8 bit) |
+| Transfer | Không chuyển gamma: giá trị như trong video (kiểu sRGB / BT.709), không phải ánh sáng tuyến tính; HDR PQ/HLG bị coi như SDR |
+| Chuyển format | YUV hay format khác được chuyển sang/từ RGBA trên GPU, ngoài shader; shader không bao giờ thấy format nguồn |
+| Texture của package | Luôn `rgba8unorm`; alpha thẳng trừ khi `premultiply: true` (premultiplied; filter đúng); mip level luôn tính theo trọng số alpha |
+| Mip level của input | Tạo trên GPU mỗi frame bằng trung bình có trọng số alpha của 2x2 texel |
+
 ## Texture
 
 Mỗi phần tử `textures` tạo một texture `rgba8unorm` chỉ đọc từ các file PNG trong gói, gắn theo `name`

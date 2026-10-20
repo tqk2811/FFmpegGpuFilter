@@ -235,6 +235,77 @@ void main() {
 }
 ```
 
+## Shader reference: what a shader receives
+
+Every pass is a compute shader. The runtime writes a prelude in front of the author's code (`prelude` and
+`glsl_with_prelude` in `crates/gpufx-core/src/runtime.rs`); the author's code must not redeclare these names.
+The short form of the prelude is under [Writing WGSL shaders](#writing-wgsl-shaders); the tables below are the full reference.
+
+**Built-in uniform block `globals`** (binding 0, 32 bytes, rewritten for every frame of every effect)
+
+| Field | WGSL type | GLSL type | Offset | Meaning |
+|-------|-----------|-----------|--------|---------|
+| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The output size of the effect (the first input's, or the stacked size with `output.size` `hstack`/`vstack`); the same for all its passes |
+| `time` | `f32` | `float` | 8 | Presentation time in seconds (`t` of the filter). Loses precision on long clips (about 0.008 s steps after one day) |
+| `frame` | `u32` | `uint` | 12 | Frame count of this filter instance (also the `n` of expressions); restarts on a seek, so not for time-based motion |
+| `time_int` | `i32` | `int` | 16 | Whole seconds of the time (floor; saturates beyond the i32 range) |
+| `time_frac` | `f32` | `float` | 20 | Fraction of the time in [0, 1), also for negative times. `time_int + time_frac` is the exact time |
+| `pixel_aspect` | `f32` | `float` | 24 | Sample aspect ratio (width / height of a pixel); 1 for square pixels or when invalid |
+| `gpufx_reserved` | `f32` | `float` | 28 | Always 0; reserved |
+
+A non-finite time becomes 0.
+
+**Uniform block `params`** (binding 1): `GpufxParams`, one field per manifest parameter in manifest order, named as the parameter.
+
+| Manifest type | WGSL | GLSL | Align / size (bytes) | Notes |
+|---------------|------|------|----------------------|-------|
+| `float` | `f32` | `float` | 4 / 4 | |
+| `int` | `i32` | `int` | 4 / 4 | Rounded to the nearest integer |
+| `bool` | `u32` | `uint` | 4 / 4 | 0 or 1 |
+| `vec2` | `vec2f` | `vec2` | 8 / 8 | |
+| `vec3` | `vec3f` | `vec3` | 16 / 12 | A scalar may follow in the fourth slot |
+| `vec4`, `color` | `vec4f` | `vec4` | 16 / 16 | `color` is RGBA 0..1 |
+| `expr` | no field | no field | none | Becomes the function `gpufx_expr_<name>(<vars>)` taking and returning `f32`/`float` (arguments in the order of `vars`); NaN and infinities come out as 0 |
+
+The struct size is rounded up to 16 bytes. With no uniform parameter the struct holds one `_unused` float. Details of `expr`
+(allowed functions, limits, rebuild of pipelines): [Expression parameters](#expression-parameters).
+
+**Bindings** (bind group 0 for every pass)
+
+| Binding | WGSL / GLSL name | Kind | Contents |
+|---------|------------------|------|----------|
+| 0 | `globals` | uniform buffer | `GpufxGlobals` (above) |
+| 1 | `params` | uniform buffer | `GpufxParams` (above) |
+| 2 | `out_tex` | write-only storage texture, 2D | The pass output. `rgba8unorm` (`rgba8` in GLSL), or `rgba16float` (`rgba16f`) when an input or the output of the chain has more than 8 bits |
+| 3 | `smp` | filtering sampler | Linear, clamped to the edge, linear between mip levels; in GLSL a separate `sampler` (use `sampler2D(tex, smp)`) |
+| 4 + i | the i-th name of the pass `inputs` | sampled texture, float, filterable | `texture_2d<f32>` (`texture2D`), or `texture_2d_array<f32>` (`texture2DArray`) for a package texture with `layers`/`grid`. Without `inputs` in the manifest the list is every manifest input, then every package texture |
+
+What a name in `inputs` resolves to, checked in this order: a manifest input (the converted frame; level 0 only unless the
+input declares `mipmaps`, then the whole mip chain), a package texture (`rgba8unorm`, loaded once, mip chain made on the CPU when
+`mipmaps` is set), or the output of a previous pass (level 0). A pass cannot read `out_tex`.
+
+**Dispatch and coordinates**
+
+| Item | Value |
+|------|-------|
+| Dispatch | One `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)` per pass, in manifest order, all in one compute pass; `w`, `h` = output size. The shader declares `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); the runtime does not check it. Threads past the edge must return: `gpufx_in_bounds(id)` |
+| Pixel coordinates | `id.xy` of `global_invocation_id`, integers, origin at the top-left, y down; `textureLoad`/`imageStore` use `vec2i(x, y)` |
+| Normalised coordinates | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, the pixel centre, 0..1, v down |
+| Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores). GLSL versions take `uvec3` |
+| Derivatives | Not available in compute shaders: use `textureSampleLevel` / `textureLod` or `textureLoad` |
+| Reserved names | `globals`, `params`, `out_tex`, `smp`, anything starting with `gpufx`; no parameter named `enable` or `bypass` |
+
+**Colour**
+
+| Item | Value |
+|------|-------|
+| Channel order and alpha | RGBA, straight (not premultiplied) alpha; libgpufx divides premultiplied inputs by alpha before the shader and multiplies again on output when needed |
+| Range | 0..1 floats (`unorm` 8 bit, or half float above 8 bits) |
+| Transfer | No gamma conversion: values are those of the video (sRGB / BT.709 style), not linear light; HDR PQ/HLG is treated as SDR |
+| Format conversion | YUV or other formats are converted to and from RGBA on the GPU outside the shader; the shader never sees the source format |
+| Package textures | Always `rgba8unorm`; straight alpha unless `premultiply: true` (premultiplied; filtered correctly); mip levels are alpha-weighted either way |
+| Input mip levels | Made on the GPU every frame as the alpha-weighted average of 2x2 texels |
+
 ## Textures
 
 Each element of `textures` makes one read-only `rgba8unorm` texture from PNG files in the package, bound
