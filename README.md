@@ -71,7 +71,7 @@ frame and `bypass=0|auto` picks the input it copies while off. They are separate
   alpha is used depends on the effect: its README says, per parameter, if alpha is ignored, sets a strength, or is
   written to the output.
 - `sendcmd` is a runtime command, not a filter option: `sendcmd=c='0.5 gpufx@g params gb.strength=0.2'` sets
-  `node.name=value` pairs (separated by `|`) while the stream runs; see [design](docs/DESIGN.md).
+  `node.name=value` pairs (separated by `|`) while the stream runs; see [filter reference](docs/design/filters/gpufx.md).
 
 ```sh
 # a chain: the first gpufx uploads, every effect runs on FFmpeg's Vulkan device, one download
