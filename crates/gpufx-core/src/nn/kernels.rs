@@ -289,8 +289,9 @@ pub(crate) fn conv_source(s: &ConvShape, c: &ConvConfig, f16: bool) -> String {
 }
 
 /// The tensor core convolution (WGSL cooperative matrices, f16 products summed in f32) of stride 1, as an
-/// implicit GEMM: a workgroup is 4 subgroups of 32 lanes, one per output row, and computes `16 * mx` pixels of
-/// 4 rows for `16 * nb` output channels. Per 16 input channels and kernel tap, a subgroup multiplies the
+/// implicit GEMM: a workgroup is 4 subgroups of 32 lanes and computes `16 * mx` pixels of 4 rows for `16 * nb`
+/// output channels, `sc` subgroups splitting the output blocks and `4 / sc` the rows (a subgroup takes `sc`
+/// rows and `nb / sc` blocks). Per 16 input channels and kernel tap, a subgroup multiplies the
 /// `16 px x 16 cin` block of the input (A) by the `16 cin x 16 cout` block of the weights (B). The input of
 /// `16 * kc` channels is staged in workgroup memory pixel-major (`[ch / 16][y][x][ch % 16]`, zero past the
 /// borders and the channels) so A is a plain strided load; the weights are f16 in their own buffer laid out
@@ -303,9 +304,11 @@ pub(crate) struct CoopConfig {
     pub nb: u32,
     /// 16-channel input chunks staged at a time.
     pub kc: u32,
+    /// Subgroups splitting the `nb` output blocks (the other `4 / sc` split the rows).
+    pub sc: u32,
 }
 
-/// Output rows per workgroup (one per subgroup) and the subgroup size the kernel is written for.
+/// Output rows per workgroup (also its subgroup count) and the subgroup size the kernel is written for.
 pub(crate) const COOP_ROWS: u32 = 4;
 pub(crate) const COOP_LANES: u32 = 32;
 
@@ -321,17 +324,27 @@ impl CoopConfig {
 
     /// Whether `s` takes the tensor core kernel: stride 1 (other strides keep the direct kernel).
     pub fn supports(s: &ConvShape) -> bool {
-        s.sh == 1 && s.sw == 1 && Self::choose(s, 1, 16, 16).is_some()
+        s.sh == 1 && s.sw == 1 && Self::choose(s, 16, 16).is_some()
     }
 
-    /// The configuration for an output of `w` columns and `cout` channels (`cin` input channels), `None` when
-    /// even the smallest tile does not fit workgroup memory.
-    pub fn choose(s: &ConvShape, w: u32, cin: u32, cout: u32) -> Option<CoopConfig> {
-        let nb = cout.div_ceil(16).clamp(1, 4);
+    /// The configuration for `cout` output channels and `cin` input channels, `None` when even the smallest tile
+    /// does not fit workgroup memory. Measured on an RTX 4060 (Real-ESRGAN, 64 channels): one 16-pixel block per
+    /// row, the subgroups split over the output blocks and 2 input chunks per stage (~20% faster than 2 pixel
+    /// blocks with the subgroups over the rows); more pixel blocks, rows or chunks (more registers or workgroup
+    /// memory, fewer workgroups in flight) were slower.
+    pub fn choose(s: &ConvShape, cin: u32, cout: u32) -> Option<CoopConfig> {
+        let blocks = cout.div_ceil(16).max(1);
+        // as few workgroups along the channels as with 4 blocks each, with the blocks spread evenly (cout 80:
+        // 2 x 3 blocks rather than 4 + 1 of which 3 are wasted)
+        let nb = blocks.div_ceil(blocks.div_ceil(4));
+        let sc = [4u32, 2, 1].into_iter().find(|&v| nb.is_multiple_of(v)).unwrap_or(1);
+        // chunks dividing the input channels: a last stage of fewer chunks would still stage all of them
         let chunks = cin.div_ceil(16).max(1);
-        let mxs: &[u32] = if w > 16 { &[2, 1] } else { &[1] };
-        mxs.iter()
-            .find_map(|&mx| (1..=chunks.min(4)).rev().map(|kc| CoopConfig { mx, nb, kc }).find(|c| c.shared_bytes(s) <= SHARED_BUDGET))
+        (1..=chunks.min(4))
+            .rev()
+            .filter(|k| chunks.is_multiple_of(*k))
+            .map(|kc| CoopConfig { mx: 1, nb, kc, sc })
+            .find(|c| c.shared_bytes(s) <= SHARED_BUDGET)
     }
 
     pub fn groups(&self, w: u32, h: u32, cout: u32) -> (u32, u32, u32) {
@@ -380,9 +393,16 @@ pub(crate) fn coop_source(s: &ConvShape, c: &CoopConfig) -> String {
     o.push_str("    let cinp = (p.cin + 15u) / 16u * 16u;\n");
     o.push_str("    let coutp = (p.cout + 15u) / 16u * 16u;\n");
     o.push_str("    let last_cb = coutp / 16u - 1u;\n");
-    for x in 0..c.mx {
-        for j in 0..c.nb {
-            let _ = writeln!(o, "    var acc{x}_{j} = coop_mat16x16<f32, C>();");
+    // subgroup `sg` computes rows `row0..row0 + sc` and output blocks `cbs..cbs + nbs`
+    let rows_per = c.sc;
+    let nbs = c.nb / c.sc;
+    let _ = writeln!(o, "    let row0 = (sg / {}u) * {rows_per}u;", c.sc);
+    let _ = writeln!(o, "    let cbs = cb0 + (sg % {}u) * {nbs}u;", c.sc);
+    for r in 0..rows_per {
+        for x in 0..c.mx {
+            for j in 0..nbs {
+                let _ = writeln!(o, "    var acc{r}_{x}_{j} = coop_mat16x16<f32, C>();");
+            }
         }
     }
     let _ = writeln!(o, "    for (var ci0 = 0u; ci0 < p.cin; ci0 += {}u) {{", 16 * c.kc);
@@ -403,22 +423,24 @@ pub(crate) fn coop_source(s: &ConvShape, c: &CoopConfig) -> String {
     let _ = writeln!(o, "        for (var kc = 0u; kc < {}u; kc++) {{", c.kc);
     o.push_str("            let cc = ci0 + kc * 16u;\n");
     o.push_str("            if (cc >= p.cin) { break; }\n");
-    let _ = writeln!(o, "            let tb = kc * {chunk}u + sg * {}u;", tw * 16);
+    let _ = writeln!(o, "            let tb = kc * {chunk}u + row0 * {}u;", tw * 16);
     for ky in 0..s.kh {
         for kx in 0..s.kw {
             let tap = ky * s.kw + kx;
-            for j in 0..c.nb {
+            for j in 0..nbs {
                 // past the last output block: load the last one again (not written)
                 let _ =
-                    writeln!(o, "            let wb{tap}_{j} = p.w_off + ({tap}u * cinp + cc) * coutp + min(cb0 + {j}u, last_cb) * 16u;");
+                    writeln!(o, "            let wb{tap}_{j} = p.w_off + ({tap}u * cinp + cc) * coutp + min(cbs + {j}u, last_cb) * 16u;");
                 let _ = writeln!(o, "            let b{tap}_{j} = coopLoadT<coop_mat16x16<f16, B>>(&wh[wb{tap}_{j}], coutp);");
             }
-            for x in 0..c.mx {
-                let off = (ky * s.dh * tw + kx * s.dw + 16 * x) * 16;
-                let _ = writeln!(o, "            let ab{tap}_{x} = tb + {off}u;");
-                let _ = writeln!(o, "            let a{tap}_{x} = coopLoadT<coop_mat16x16<f16, A>>(&tile[ab{tap}_{x}], 16u);");
-                for j in 0..c.nb {
-                    let _ = writeln!(o, "            acc{x}_{j} = coopMultiplyAdd(a{tap}_{x}, b{tap}_{j}, acc{x}_{j});");
+            for r in 0..rows_per {
+                for x in 0..c.mx {
+                    let off = ((r + ky * s.dh) * tw + kx * s.dw + 16 * x) * 16;
+                    let _ = writeln!(o, "            let ab{tap}_{r}_{x} = tb + {off}u;");
+                    let _ = writeln!(o, "            let a{tap}_{r}_{x} = coopLoadT<coop_mat16x16<f16, A>>(&tile[ab{tap}_{r}_{x}], 16u);");
+                    for j in 0..nbs {
+                        let _ = writeln!(o, "            acc{r}_{x}_{j} = coopMultiplyAdd(a{tap}_{r}_{x}, b{tap}_{j}, acc{r}_{x}_{j});");
+                    }
                 }
             }
         }
@@ -426,26 +448,30 @@ pub(crate) fn coop_source(s: &ConvShape, c: &CoopConfig) -> String {
     o.push_str("        }\n");
     o.push_str("    }\n");
     o.push_str("    let plane = p.oh * p.ow;\n");
-    o.push_str("    let oy = oy0 + sg;\n");
-    for j in 0..c.nb {
-        o.push_str("    workgroupBarrier();\n");
-        for x in 0..c.mx {
-            // naga's SPIR-V writer needs the offset and stride of a store as `let`s
-            let _ = writeln!(o, "    let so{j}_{x} = sg * {scratch}u + {}u;", 256 * x);
-            let _ = writeln!(o, "    let sv{j}_{x} = acc{x}_{j};");
-            let _ = writeln!(o, "    coopStoreT(sv{j}_{x}, &outs[so{j}_{x}], 16u);");
+    for r in 0..rows_per {
+        for j in 0..nbs {
+            o.push_str("    workgroupBarrier();\n");
+            for x in 0..c.mx {
+                // naga's SPIR-V writer needs the offset and stride of a store as `let`s
+                let _ = writeln!(o, "    let so{r}_{j}_{x} = sg * {scratch}u + {}u;", 256 * x);
+                let _ = writeln!(o, "    let sv{r}_{j}_{x} = acc{r}_{x}_{j};");
+                let _ = writeln!(o, "    coopStoreT(sv{r}_{j}_{x}, &outs[so{r}_{j}_{x}], 16u);");
+            }
+            o.push_str("    workgroupBarrier();\n");
+            o.push_str("    {\n");
+            let _ = writeln!(o, "    let oy = oy0 + row0 + {r}u;");
+            let _ = writeln!(o, "    for (var e = lane; e < {}u; e += {COOP_LANES}u) {{", 64 * c.mx);
+            let _ = writeln!(o, "        let m = e % {}u;", 16 * c.mx);
+            let _ = writeln!(o, "        let q = e / {}u;", 16 * c.mx);
+            o.push_str("        let ox = ox0 + m;\n");
+            let _ = writeln!(o, "        let cq = (cbs + {j}u) * 16u + q * 4u;");
+            o.push_str("        if (oy < p.oh && ox < p.ow && cq < p.cout) {\n");
+            let _ = writeln!(o, "            let s = sg * {scratch}u + (m / 16u) * 256u + (m % 16u) * 16u + q * 4u;");
+            epilogue(&mut o, "vec4f(outs[s], outs[s + 1u], outs[s + 2u], outs[s + 3u])", "cq", "oy * p.ow + ox");
+            o.push_str("        }\n");
+            o.push_str("    }\n");
+            o.push_str("    }\n");
         }
-        o.push_str("    workgroupBarrier();\n");
-        let _ = writeln!(o, "    for (var e = lane; e < {}u; e += {COOP_LANES}u) {{", 64 * c.mx);
-        let _ = writeln!(o, "        let m = e % {}u;", 16 * c.mx);
-        let _ = writeln!(o, "        let q = e / {}u;", 16 * c.mx);
-        o.push_str("        let ox = ox0 + m;\n");
-        let _ = writeln!(o, "        let cq = (cb0 + {j}u) * 16u + q * 4u;");
-        o.push_str("        if (oy < p.oh && ox < p.ow && cq < p.cout) {\n");
-        let _ = writeln!(o, "            let s = sg * {scratch}u + (m / 16u) * 256u + (m % 16u) * 16u + q * 4u;");
-        epilogue(&mut o, "vec4f(outs[s], outs[s + 1u], outs[s + 2u], outs[s + 3u])", "cq", "oy * p.ow + ox");
-        o.push_str("        }\n");
-        o.push_str("    }\n");
     }
     o.push_str("}\n");
     o
@@ -716,6 +742,22 @@ impl Kernels {
 mod tests {
     use super::*;
 
+    /// Output blocks spread evenly over the workgroups, subgroups split over them when they divide, input
+    /// chunks dividing the channels (a partial last stage would still stage every chunk).
+    #[test]
+    fn coop_config_wastes_no_blocks() {
+        let s = ConvShape { kh: 3, kw: 3, sh: 1, sw: 1, dh: 1, dw: 1 };
+        let c = |cin, cout| CoopConfig::choose(&s, cin, cout).unwrap();
+        assert_eq!((c(64, 64).nb, c(64, 64).sc, c(64, 64).kc), (4, 4, 2));
+        assert_eq!((c(64, 80).nb, c(64, 80).sc), (3, 1));
+        assert_eq!(c(64, 80).groups(16, 4, 80).2, 2);
+        assert_eq!((c(64, 96).nb, c(64, 96).groups(16, 4, 96).2), (3, 2));
+        assert_eq!((c(64, 32).nb, c(64, 32).sc), (2, 2));
+        assert_eq!(c(48, 64).kc, 3);
+        assert_eq!(c(80, 64).kc, 1, "5 chunks: only 1 divides them within 4");
+        assert_eq!(c(3, 48).kc, 1);
+    }
+
     fn parse(src: &str) {
         parse_with(src, naga::valid::Capabilities::SHADER_FLOAT16);
     }
@@ -739,8 +781,8 @@ mod tests {
         // tensor core kernels: naga takes cooperative matrix loads from workgroup memory
         for (k, d) in [(3, 1), (1, 1), (3, 2)] {
             let shape = ConvShape { kh: k, kw: k, sh: 1, sw: 1, dh: d, dw: d };
-            for (w, cin, cout) in [(1920, 64, 64), (8, 3, 48), (40, 17, 20)] {
-                let c = CoopConfig::choose(&shape, w, cin, cout).unwrap();
+            for (cin, cout) in [(64, 64), (3, 48), (17, 20), (64, 80), (64, 32)] {
+                let c = CoopConfig::choose(&shape, cin, cout).unwrap();
                 parse_with(
                     &coop_source(&shape, &c),
                     naga::valid::Capabilities::SHADER_FLOAT16 | naga::valid::Capabilities::COOPERATIVE_MATRIX,
