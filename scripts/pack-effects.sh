@@ -18,7 +18,13 @@ while [ $# -gt 0 ]; do
         *) break ;;
     esac
 done
-[ $# -gt 0 ] || set -- "$ROOT"/packages/effects/*/*/
+# A package is any folder with a manifest.json below packages/effects, at any depth.
+if [ $# -eq 0 ]; then
+    OLD_IFS=$IFS; IFS="
+"
+    set -- $(find "$ROOT/packages/effects" -name manifest.json | sort | sed 's|/manifest.json$||')
+    IFS=$OLD_IFS
+fi
 
 cargo build --release --quiet --manifest-path "$ROOT/Cargo.toml" -p gpufx-cli
 GPUFX=$ROOT/target/release/gpufx
@@ -29,7 +35,7 @@ for dir in "$@"; do
     dir=${dir%/}
     [ -f "$dir/manifest.json" ] || { echo "$dir: no manifest.json" >&2; exit 1; }
     [ "$CHECK" = 1 ] && "$GPUFX" check "$dir"
-    # Effects of packages/effects keep their group folder (out/<group>/<name>.zip);
+    # Effects of packages/effects keep their group folder (out/<group>/<name>.zip, a nested group keeps all its folders);
     # other folders are packed flat (out/<name>.zip).
     dir=$(cd "$dir" && pwd)
     case "$dir" in

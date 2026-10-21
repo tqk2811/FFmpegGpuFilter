@@ -38,4 +38,4 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 
 ## Notes
 
-Port of FFmpeg's `xfade` transition `radial`. The sweep angle is 2 * (pi + 1) instead of FFmpeg's 2.5 * pi so that the second clip is shown completely at `progress` 1 (FFmpeg's last frame still blends the pixels straight above the center). For a hard-edged hand see [clock-wipe](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/packages/effects/ffmpeg/clock-wipe/README.md).
+Port of FFmpeg's `xfade` transition `radial`. The sweep angle is 2 * (pi + 1) instead of FFmpeg's 2.5 * pi so that the second clip is shown completely at `progress` 1 (FFmpeg's last frame still blends the pixels straight above the center). For a hard-edged hand see [clock-wipe](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/packages/effects/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe/README.md).

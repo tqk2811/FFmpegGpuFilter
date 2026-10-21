@@ -4,7 +4,7 @@
 
 mod common;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpufx_core::{ColorInfo, Effect, EffectGraph, Frame, FrameInfo, FrameMut, GpuContext, GpuFrame, Matrix, Package, PixelFormat, Range};
@@ -33,15 +33,22 @@ fn examples() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects")
 }
 
-/// Every example effect directory (inside the ffmpeg, slideshow and standalone groups), sorted.
-fn example_dirs() -> Vec<PathBuf> {
-    let mut all = Vec::new();
-    for group in std::fs::read_dir(examples()).unwrap() {
-        let group = group.unwrap().path();
-        if group.is_dir() {
-            all.extend(std::fs::read_dir(group).unwrap().map(|e| e.unwrap().path()).filter(|p| p.join("manifest.json").exists()));
+/// Pushes every package directory (one with a `manifest.json`) below `dir`, at any depth.
+fn collect_packages(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.join("manifest.json").exists() {
+            out.push(p);
+        } else if p.is_dir() {
+            collect_packages(&p, out);
         }
     }
+}
+
+/// Every example effect directory (in any group folder, at any depth), sorted.
+fn example_dirs() -> Vec<PathBuf> {
+    let mut all = Vec::new();
+    collect_packages(&examples(), &mut all);
     all.sort();
     all
 }

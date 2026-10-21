@@ -540,7 +540,7 @@ their numbers.
 
 ## Included examples
 
-The examples live in three group folders under `packages/effects/`: `ffmpeg/` (equivalents of FFmpeg built-in filters and `xfade`), `slideshow/` (ports of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)) and `standalone/` (our own effects). See [packages/effects/README.md](../packages/effects/README.md). The group is only a folder: a package is still referred to by its own name.
+The examples live in group folders under `packages/effects/`: `ffmpeg/` (equivalents of FFmpeg built-in filters and `xfade`), `slideshow/` (ports of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (recreations of CapCut transitions), `standalone/` (our own effects) and the nested group `tqk2811/TqkLibrary.FFmpegTransition/` (ports of [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). A group can sit at any depth: a package is any folder with a `manifest.json`. See [packages/effects/README.md](../packages/effects/README.md). The group is only a folder: a package is still referred to by its own name.
 
 | Package | Demonstrates |
 |---------|--------------|
@@ -561,15 +561,15 @@ The examples live in three group folders under `packages/effects/`: `ffmpeg/` (e
 | `packages/effects/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
 | `packages/effects/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
 | `packages/effects/ffmpeg/hstack`, `packages/effects/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and `output.size` `hstack`/`vstack`, an output larger than the inputs |
-| `packages/effects/ffmpeg/crossfade`, `packages/effects/ffmpeg/slide-transition`, `packages/effects/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
-| `packages/effects/ffmpeg/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/effects/ffmpeg/slide-transition`, `packages/effects/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
 | `packages/effects/ffmpeg/blend` | 2 inputs, an `int` `mode` choosing one of 40 formulas |
 | `packages/effects/ffmpeg/masked-merge` | 3 inputs (base, overlay, mask) with the `same_size` **rule** |
 | `packages/effects/ffmpeg/selectivecolor` | `vec4` parameters |
 | `packages/effects/ffmpeg/box-blur` | 6 passes; rounds above `power` copy their input through |
 | `packages/effects/ffmpeg/displace` | 3 inputs, two of them used as displacement maps |
-| `packages/effects/slideshow/collapse`, `packages/effects/slideshow/expand` | The first clip shrinks into the center / the second clip grows out of the center: horizontal, vertical, box, circle (`mode`) |
-| `packages/effects/ffmpeg/dip-to-color` | Fade to a color (black by default), then reveal the second clip |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/collapse`, `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/expand` | The first clip shrinks into the center / the second clip grows out of the center: horizontal, vertical, box, circle (`mode`) |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/dip-to-color` | Fade to a color (black by default), then reveal the second clip |
 | `packages/effects/ffmpeg/dissolve` | Random particles (integer hash, identical on every GPU) |
 | `packages/effects/ffmpeg/pixelize-transition`, `packages/effects/ffmpeg/zoom-transition`, `packages/effects/ffmpeg/fade-grays`, `packages/effects/slideshow/blinds` | `xfade`-style transitions: pixel break-up, zoom, through grayscale, blinds |
 | `packages/effects/slideshow/checkerboard`, `packages/effects/slideshow/push-box`, `packages/effects/slideshow/push-film`, `packages/effects/slideshow/photo-collection` | Slideshow transitions after [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (written anew as shaders): growing squares, shrink-push-grow boxes, a procedural perforated film strip, a photo that flies in spinning and lands tilted on the first clip (chain it to stack photos) |

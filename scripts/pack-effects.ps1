@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path $root "dist/effects" }
-if (-not $Dirs) { $Dirs = Get-ChildItem -Directory (Join-Path $root "packages/effects") | Get-ChildItem -Directory | ForEach-Object FullName }
+if (-not $Dirs) { $Dirs = Get-ChildItem -Recurse -File -Filter manifest.json (Join-Path $root "packages/effects") | Sort-Object FullName | ForEach-Object { $_.Directory.FullName } }
 
 cargo build --release --quiet --manifest-path (Join-Path $root "Cargo.toml") -p gpufx-cli
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
