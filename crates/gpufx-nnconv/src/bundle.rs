@@ -65,6 +65,17 @@ impl VariantFiles {
         let scale = io.get("scale").and_then(Value::as_u64).ok_or_else(|| crate::Error("io.json has no integer \"scale\"".into()))?;
         Ok((kind.to_string(), scale))
     }
+
+    /// `used_for` of this variant's model.json, checked against its kind.
+    fn used_for(&self, kind: &str) -> Result<Vec<String>> {
+        let m: Value = serde_json::from_slice(&self.model_json).map_err(|e| crate::Error(format!("model.json: {e}")))?;
+        let list: Vec<String> = match m.get("used_for") {
+            Some(v) => serde_json::from_value(v.clone()).map_err(|e| crate::Error(format!("model.json: used_for: {e}")))?,
+            None => return fail("model.json has no used_for: convert the model again with --used-for"),
+        };
+        crate::package::check_used_for(&list, Some(kind)).map_err(|e| crate::Error(format!("model.json: {}", e.0)))?;
+        Ok(list)
+    }
 }
 
 struct Variant {
@@ -91,6 +102,7 @@ impl Bundle {
         }
         let mut variants = Vec::new();
         let mut kind: Option<String> = None;
+        let mut used_for: Option<Vec<String>> = None;
         for (dir, files) in inputs {
             if dir.is_empty() || dir.contains('/') || dir.contains('\\') {
                 return fail(format!("variant directory \"{dir}\" must be a simple name"));
@@ -100,7 +112,15 @@ impl Bundle {
                 Some(existing) if *existing != k => {
                     return fail(format!("variant \"{dir}\" has kind \"{k}\", expected \"{existing}\""));
                 }
-                None => kind = Some(k),
+                None => kind = Some(k.clone()),
+                _ => {}
+            }
+            let u = files.used_for(&k).map_err(|e| crate::Error(format!("variant \"{dir}\": {}", e.0)))?;
+            match &used_for {
+                Some(existing) if *existing != u => {
+                    return fail(format!("variant \"{dir}\" is for {}, expected {}", u.join(", "), existing.join(", ")));
+                }
+                None => used_for = Some(u),
                 _ => {}
             }
             if variants.iter().any(|v: &Variant| v.dir == dir) {
@@ -250,7 +270,9 @@ mod tests {
         let mut bin = vec![0u8; 4];
         bin.extend(1.0f32.to_le_bytes());
         bin.extend(2.0f32.to_le_bytes());
-        let converted = convert_ncnn(param, &bin, name).unwrap();
+        let mut converted = convert_ncnn(param, &bin, name).unwrap();
+        converted.model.used_for = vec!["gpufx_ai_upscale".into()];
+
         let io = format!(r#"{{"kind":"super_resolution","scale":{scale}}}"#);
         Package::new(&converted, io.into_bytes(), None, None).unwrap().write(dir).unwrap();
     }
@@ -305,6 +327,30 @@ mod tests {
             Ok(_) => panic!("duplicate scale should fail"),
         }
         assert!(Bundle::new("f", vec![], None, None).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn variants_need_one_used_for() {
+        let root = scratch("used-for");
+        pkg_dir(&root.join("p2"), "m", 2);
+        pkg_dir(&root.join("p4"), "m", 4);
+        let model = root.join("p4/model.json");
+        let mut json: Value = serde_json::from_slice(&std::fs::read(&model).unwrap()).unwrap();
+        json["used_for"] = serde_json::json!(["gpufx_ai_upscale", "gpufx_ai_framerate"]);
+        std::fs::write(&model, serde_json::to_vec(&json).unwrap()).unwrap();
+        let inputs = |root: &Path| {
+            vec![
+                ("x2".to_string(), VariantFiles::load(&root.join("p2")).unwrap()),
+                ("x4".to_string(), VariantFiles::load(&root.join("p4")).unwrap()),
+            ]
+        };
+        let e = Bundle::new("f", inputs(&root), None, None).err().unwrap().0;
+        assert!(e.contains("runs frame_interp models"), "{e}");
+        json.as_object_mut().unwrap().remove("used_for");
+        std::fs::write(&model, serde_json::to_vec(&json).unwrap()).unwrap();
+        let e = Bundle::new("f", inputs(&root), None, None).err().unwrap().0;
+        assert!(e.contains("variant \"x4\": model.json has no used_for"), "{e}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -8,7 +8,9 @@
 #
 # A source.json with a "variants" array is a multi-scale bundle: each variant has a dir, io, url_param,
 # sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/models/<name>.zip.
-# A flat source.json (url_param/url_bin/io.json) stays a single-model package.
+# A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
+# filters the model is for) is passed to gpufx-nnconv --used-for.
+
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=
@@ -34,6 +36,11 @@ sha256() {
 # Value of a flat string key of source.json (one key per line).
 json_get() {
     sed -n 's/^[[:space:]]*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+}
+
+# A flat array of strings of source.json (one key per line) as "a,b", for --used-for.
+json_list() {
+    sed -n 's/^[[:space:]]*"'"$2"'"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' "$1" | head -n 1 | tr -d '" '
 }
 
 # One line "dir|io|url_param|sha256_param|url_bin|sha256_bin" per variant object of a "variants" array.
@@ -91,6 +98,8 @@ for name in "$@"; do
     [ -f "$src" ] || { echo "$name: no models/$name/source.json" >&2; exit 1; }
     dir=$ROOT/build/models/$name
     mkdir -p "$dir"
+    used_for=$(json_list "$src" used_for)
+    [ -n "$used_for" ] || { echo "$name: models/$name/source.json has no \"used_for\"" >&2; exit 1; }
 
     license=
     if [ -n "$(json_get "$src" license_url)" ]; then
@@ -110,7 +119,7 @@ for name in "$@"; do
             fetch "$vurl_param" "$vsha_param" "$vd/model.param"
             fetch "$vurl_bin" "$vsha_bin" "$vd/model.bin"
             convert ncnn --param "$vd/model.param" --bin "$vd/model.bin" --io "$ROOT/models/$name/$vio" \
-                --name "$name-$vdir" -o "$dir/pkg-$vdir"
+                --used-for "$used_for" --name "$name-$vdir" -o "$dir/pkg-$vdir"
             echo "$vdir|$dir/pkg-$vdir" >> "$dir/.variants"
         done
         [ -f "$dir/.variants" ] || { echo "$name: no variants parsed" >&2; exit 1; }
@@ -126,6 +135,6 @@ for name in "$@"; do
         fetch "$(json_get "$src" url_param)" "$(json_get "$src" sha256_param)" "$dir/flownet.param"
         fetch "$(json_get "$src" url_bin)" "$(json_get "$src" sha256_bin)" "$dir/flownet.bin"
         convert ncnn --param "$dir/flownet.param" --bin "$dir/flownet.bin" --io "$ROOT/models/$name/io.json" \
-            ${license:+--license "$license"} ${readme:+--readme "$readme"} --name "$name" -o "$ROOT/build/models/$name.zip"
+            --used-for "$used_for" ${license:+--license "$license"} ${readme:+--readme "$readme"} --name "$name" -o "$ROOT/build/models/$name.zip"
     fi
 done

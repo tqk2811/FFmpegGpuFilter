@@ -7,6 +7,8 @@ pub struct Model {
     pub format: &'static str,
     pub version: u32,
     pub name: String,
+    /// The FFmpeg filters the model is for (`--used-for`), checked by [`crate::Package::new`].
+    pub used_for: Vec<String>,
     pub source: Source,
     pub weights: WeightsFile,
     pub inputs: Vec<TensorRef>,

@@ -10,19 +10,22 @@ use gpufx_nnconv::{convert_ncnn, frames, Package};
 const USAGE: &str = "\
 usage:
   gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json>
+                    --used-for <filter>[,<filter>]
                     [--license <file>] [--readme <file>] [--name <name>]
                     -o <out.zip|out_dir>
              converts an ncnn model to a gpufx-nn package: model.json, weights.bin,
              io.json (copied as given), README.md (--readme, else a minimal generated
              one) and LICENSE. -o ending in .zip writes a zip,
              anything else a directory. The name defaults to the output file stem.
+             --used-for lists the FFmpeg filters the model is for (gpufx_ai_upscale
+             for super_resolution, gpufx_ai_framerate for frame_interp).
   gpufx-nnconv bundle --variant <dir>=<pkg.zip|dir> [--variant ...]
                       [--license <file>] [--readme <file>] [--name <name>]
                       -o <out.zip|out_dir>
              bundles several scale variants of one model family into one package:
              package.json, LICENSE, README.md and one directory per variant. Each
              variant's scale and kind come from its io.json; all must share a kind and
-             have distinct scales.
+             used_for and have distinct scales.
   gpufx-nnconv run-ref --model <pkg.zip|dir> --frame0 <a.png> --frame1 <b.png> [--t 0.5] -o <out.png>
              dev tool: interpolates with the CPU reference executor (slow, golden semantics).
   gpufx-nnconv run-ref --model <pkg.zip|dir> --input <in.png> [--scale N] -o <out.png>
@@ -49,13 +52,15 @@ fn main() -> ExitCode {
 }
 
 fn ncnn(args: &[String]) -> Result<(), String> {
-    let (mut param, mut bin, mut io, mut license, mut readme, mut name, mut out) = (None, None, None, None, None, None, None);
+    let (mut param, mut bin, mut io, mut used_for, mut license, mut readme, mut name, mut out) =
+        (None, None, None, None, None, None, None, None);
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let slot = match flag.as_str() {
             "--param" => &mut param,
             "--bin" => &mut bin,
             "--io" => &mut io,
+            "--used-for" => &mut used_for,
             "--license" => &mut license,
             "--readme" => &mut readme,
             "--name" => &mut name,
@@ -65,12 +70,17 @@ fn ncnn(args: &[String]) -> Result<(), String> {
         *slot = Some(it.next().ok_or_else(|| format!("{flag} needs a value"))?.clone());
     }
     let (Some(param), Some(bin), Some(io), Some(out)) = (param, bin, io, out) else { return Err(USAGE.to_string()) };
+    let Some(used_for) = used_for else {
+        return Err(format!("--used-for is required: the filters the model is for (gpufx_ai_upscale or gpufx_ai_framerate)\n{USAGE}"));
+    };
     let out = PathBuf::from(out);
     let name = name.unwrap_or_else(|| out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
 
     let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
     let param_text = String::from_utf8(read(&param)?).map_err(|e| format!("{param}: {e}"))?;
-    let converted = convert_ncnn(&param_text, &read(&bin)?, &name).map_err(|e| format!("{param}: {e}"))?;
+    let mut converted = convert_ncnn(&param_text, &read(&bin)?, &name).map_err(|e| format!("{param}: {e}"))?;
+    converted.model.used_for = gpufx_nnconv::package::parse_used_for(&used_for);
+
     let license = license.as_deref().map(read).transpose()?;
     let readme = readme.as_deref().map(read).transpose()?;
     let package = Package::new(&converted, read(&io)?, license, readme).map_err(|e| e.to_string())?;
