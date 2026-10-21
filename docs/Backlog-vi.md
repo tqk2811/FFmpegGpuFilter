@@ -22,6 +22,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] Test bundle D3D11 "software input equals hwupload" chập chờn
+- **Vấn đề**: chạy `REQUIRE_D3D=1 bash scripts/test-bundle.sh dist/win64` 2 lần trên cùng bundle thì 1 lần đỏ: phía hwupload D3D11 trả md5 rỗng (ffmpeg không ra frame), không có log GPU; lần sau qua hết. Bài D3D12 tương tự và các bài D3D11 khác đều qua.
+- **Vị trí**: [test-bundle.sh:927](../scripts/test-bundle.sh#L927)
+- **Vì sao**: lỗi chập chờn làm kết quả test bundle khó tin; cần chạy lặp riêng lệnh đó để lấy stderr (có thể lỗi đua hoặc lỗi driver D3D11).
+- **Ngày ghi**: 2026-10-21
+
 ### [Thấp] Runtime nn: conv chiếm ~70% thời gian, 1080p còn 44–46 ms/frame
 - **Vấn đề**: trên RTX 4060 Laptop (Vulkan) RIFE v4.6 1080p mất 44–46 ms/frame, conv khoảng 31 ms; chưa xuống dưới 40 ms.
 - **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs)
