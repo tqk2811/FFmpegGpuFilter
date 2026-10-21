@@ -40,7 +40,7 @@ impl Package {
         let manifest = parsed.with_input_count(None)?;
         let template = parsed.repeat().is_some().then(|| Box::new(parsed));
         let pkg = Package { manifest, template, files };
-        for pass in &pkg.manifest.passes {
+        for pass in pkg.manifest.passes.iter().chain(pkg.manifest.groups.iter().flat_map(|g| &g.passes)) {
             pkg.file(&pass.shader)?;
         }
         for tex in &pkg.manifest.textures {
@@ -61,6 +61,16 @@ impl Package {
             None => self.manifest.with_input_count(Some(count))?,
         };
         Ok(Package { manifest, template: self.template.clone(), files: self.files.clone() })
+    }
+
+    /// The package with the passes of manifest group `g` as its passes and no groups
+    /// (see [`Manifest::with_group`]).
+    pub fn with_group(&self, g: usize) -> Self {
+        Package {
+            manifest: self.manifest.with_group(g),
+            template: self.template.as_ref().map(|t| Box::new(t.with_group(g))),
+            files: self.files.clone(),
+        }
     }
 
     /// The manifest has a repeated input (see [`Package::with_input_count`]).

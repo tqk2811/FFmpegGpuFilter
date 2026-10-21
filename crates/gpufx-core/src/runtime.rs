@@ -277,6 +277,19 @@ impl GpuContext {
         format!("{} ({:?})", self.info.name, self.info.backend)
     }
 
+    /// What the `requires` of manifest pass groups are matched against.
+    pub fn target(&self) -> crate::requires::Target {
+        crate::requires::Target {
+            os: crate::requires::Target::current_os(),
+            backend: self.info.backend,
+            vendor: self.info.vendor,
+            name: self.info.name.clone(),
+            features: self.device.features(),
+            coop_f16: self.coop_f16,
+            is_noop: self.info.backend == wgpu::Backend::Noop,
+        }
+    }
+
     /// The adapter lists 16x16x16 cooperative matrices with f16 A/B and an f32 accumulator.
     /// Metal exposes cooperative matrices too, but only 8x8.
     pub fn has_coop_f16(&self) -> bool {
@@ -390,7 +403,26 @@ pub struct Program {
 }
 
 impl Program {
+    /// A manifest with pass groups is compiled with the first group matching the device,
+    /// which becomes the passes of [`Program::package`]. On the noop device (see
+    /// [`GpuContext::noop`]) every group of this OS is compiled, to check its shaders, and
+    /// the first one kept.
     pub fn new(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
+        if package.manifest.groups.is_empty() {
+            return Self::compile(ctx, package);
+        }
+        let target = ctx.target();
+        let found = package.manifest.matching_groups(&target)?;
+        if target.is_noop {
+            for &g in &found[1..] {
+                Self::compile(ctx.clone(), package.with_group(g))?;
+            }
+        }
+        Self::compile(ctx, package.with_group(found[0]))
+    }
+
+    /// [`Program::new`] for a package without groups.
+    fn compile(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
         // Only the layout of the block matters for compiling; values live in each Effect.
         let params = ParamBlock::new(&package.manifest.params)?;
         let device = &ctx.device;

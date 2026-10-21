@@ -623,11 +623,20 @@ impl Manifest {
         if self.groups.is_empty() {
             return Ok(vec![self.clone()]);
         }
+        Ok(self.matching_groups(target)?.into_iter().map(|g| self.with_group(g)).collect())
+    }
+
+    /// Indices of the groups whose `requires` match `target` (see [`Manifest::resolve`]),
+    /// empty for a manifest without groups.
+    pub fn matching_groups(&self, target: &Target) -> Result<Vec<usize>, Error> {
+        if self.groups.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut found = Vec::new();
         let mut why = String::new();
         for (g, group) in self.groups.iter().enumerate() {
             match group.requires.rejects(target) {
-                None => found.push(self.with_group(g)),
+                None => found.push(g),
                 Some(r) => why.push_str(&format!(
                     "
   {}: {r}",
