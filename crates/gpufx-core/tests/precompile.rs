@@ -107,6 +107,13 @@ fn only_d3d12_groups_are_precompiled() {
         Ok(n) => assert!(n > 0),
         Err(e) => eprintln!("skipping: {e}"),
     }
+    // A group needing features the precompile device lacks is skipped, not an error.
+    let n =
+        pack(r#"{"requires":{"features":["cooperative-matrix-f16"]},"passes":[{"shader":"bad.wgsl"}]},{"passes":[{"shader":"ok.wgsl"}]}"#);
+    match n {
+        Ok(n) => assert!(n > 0),
+        Err(e) => eprintln!("skipping: {e}"),
+    }
     assert_eq!(pack(r#"{"requires":{"backend":["vulkan","metal"]},"passes":[{"shader":"bad.wgsl"}]}"#).unwrap(), 0);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(dir.with_extension("zip"));

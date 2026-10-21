@@ -406,14 +406,30 @@ impl Program {
     /// A manifest with pass groups is compiled with the first group matching the device,
     /// which becomes the passes of [`Program::package`]. On the noop device (see
     /// [`GpuContext::noop`]) every group of this OS is compiled, to check its shaders, and
-    /// the first one kept.
+    /// the first one kept; a group needing features the noop device lacks is left out, its
+    /// shaders could not be checked there.
     pub fn new(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
         if package.manifest.groups.is_empty() {
             return Self::compile(ctx, package);
         }
         let target = ctx.target();
-        let found = package.manifest.matching_groups(&target)?;
+        let mut found = package.manifest.matching_groups(&target)?;
         if target.is_noop {
+            let mut missing = Vec::new();
+            found.retain(|&g| {
+                let m = package.manifest.groups[g].requires.features_missing(&target);
+                missing.extend(m.iter().map(|f| f.to_string()));
+                m.is_empty()
+            });
+            if found.is_empty() {
+                missing.sort();
+                missing.dedup();
+                return Err(Error::Unsupported(format!(
+                    "effect `{}`: every group needs features the device is not known to have yet ({})",
+                    package.manifest.name,
+                    missing.join(", ")
+                )));
+            }
             for &g in &found[1..] {
                 Self::compile(ctx.clone(), package.with_group(g))?;
             }
@@ -423,6 +439,7 @@ impl Program {
 
     /// [`Program::new`] for a package without groups.
     fn compile(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
+        debug_assert!(package.manifest.groups.is_empty(), "only a package resolved to one group is compiled (see Program::new)");
         // Only the layout of the block matters for compiling; values live in each Effect.
         let params = ParamBlock::new(&package.manifest.params)?;
         let device = &ctx.device;

@@ -129,6 +129,13 @@ impl Requires {
         (!why.is_empty()).then(|| why.join("; "))
     }
 
+    /// The `features` of the group that `target` lacks, whatever the target is (a noop
+    /// target included, unlike [`Requires::rejects`]).
+    pub fn features_missing(&self, target: &Target) -> Vec<&str> {
+        let has = |f: &str| FEATURES.iter().find(|(n, _)| *n == f).is_some_and(|(_, c)| c(target));
+        self.features.iter().map(String::as_str).filter(|f| !has(f)).collect()
+    }
+
     /// The group may run on D3D12 on Windows, whatever the vendor and features (what
     /// `gpufx pack --precompile` compiles).
     pub fn allows_d3d12(&self) -> bool {
