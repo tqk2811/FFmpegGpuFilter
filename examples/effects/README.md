@@ -127,6 +127,7 @@ Equivalents of FFmpeg built-in filters and `xfade` transitions.
 - [xstack](ffmpeg/xstack/README.md)
 - [yaepblur](ffmpeg/yaepblur/README.md)
 - [zoom-pan](ffmpeg/zoom-pan/README.md)
+- [zoom-canvas](ffmpeg/zoom-canvas/README.md)
 
 ## slideshow
 
