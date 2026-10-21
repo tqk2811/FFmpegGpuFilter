@@ -1,0 +1,106 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.geq",
+  "name": "Generic Equation",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Per-pixel red, green, blue and alpha expressions of the position, the time and the pixel's own channel values.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "fps",
+      "type": "float",
+      "default": 25,
+      "min": 1,
+      "max": 240,
+      "description": "Frame rate used to compute N from the time"
+    },
+    {
+      "name": "r",
+      "type": "expr",
+      "vars": [
+        "X",
+        "Y",
+        "W",
+        "H",
+        "T",
+        "N",
+        "R",
+        "G",
+        "B",
+        "A"
+      ],
+      "default": "R",
+      "description": "Red expression, result 0..255"
+    },
+    {
+      "name": "g",
+      "type": "expr",
+      "vars": [
+        "X",
+        "Y",
+        "W",
+        "H",
+        "T",
+        "N",
+        "R",
+        "G",
+        "B",
+        "A"
+      ],
+      "default": "G",
+      "description": "Green expression, result 0..255"
+    },
+    {
+      "name": "b",
+      "type": "expr",
+      "vars": [
+        "X",
+        "Y",
+        "W",
+        "H",
+        "T",
+        "N",
+        "R",
+        "G",
+        "B",
+        "A"
+      ],
+      "default": "B",
+      "description": "Blue expression, result 0..255"
+    },
+    {
+      "name": "a",
+      "type": "expr",
+      "vars": [
+        "X",
+        "Y",
+        "W",
+        "H",
+        "T",
+        "N",
+        "R",
+        "G",
+        "B",
+        "A"
+      ],
+      "default": "A",
+      "description": "Alpha expression, result 0..255"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/geq.wgsl"
+        }
+      ]
+    }
+  ]
+}

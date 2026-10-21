@@ -1,0 +1,86 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.lutrgb",
+  "name": "LUT RGB",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Per-channel look-up by expression: each of red, green, blue and alpha is replaced by an expression of its own value.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "r",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Red result for the input value `val`, 0..255"
+    },
+    {
+      "name": "g",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Green result for `val`, 0..255"
+    },
+    {
+      "name": "b",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Blue result for `val`, 0..255"
+    },
+    {
+      "name": "a",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Alpha result for `val`, 0..255"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/lutrgb.wgsl"
+        }
+      ]
+    }
+  ]
+}

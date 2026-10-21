@@ -1,0 +1,58 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.scroll",
+  "name": "Scroll",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Scroll the picture horizontally and vertically at a constant speed, wrapping around.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "hspeed",
+      "type": "float",
+      "default": 0,
+      "min": -10,
+      "max": 10,
+      "description": "Horizontal speed in frame widths per second; positive moves the picture to the left"
+    },
+    {
+      "name": "vspeed",
+      "type": "float",
+      "default": 0,
+      "min": -10,
+      "max": 10,
+      "description": "Vertical speed in frame heights per second; positive moves the picture up"
+    },
+    {
+      "name": "hpos",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Initial horizontal position, 0..1"
+    },
+    {
+      "name": "vpos",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Initial vertical position, 0..1"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/scroll.wgsl"
+        }
+      ]
+    }
+  ]
+}

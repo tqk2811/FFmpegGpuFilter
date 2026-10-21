@@ -1,0 +1,79 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.zoom-pan",
+  "name": "Zoom and Pan",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Zoom and pan with the zoom, x and y given as expressions of the time (Ken Burns).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "fps",
+      "type": "float",
+      "default": 25,
+      "min": 1,
+      "max": 240,
+      "description": "Frame rate used to compute `on` (output frame number) from the time"
+    },
+    {
+      "name": "zoom",
+      "type": "expr",
+      "vars": [
+        "iw",
+        "ih",
+        "ow",
+        "oh",
+        "time",
+        "on"
+      ],
+      "default": "1",
+      "description": "Zoom, clipped to 1..10. iw, ih input size, ow, oh output size (pixels), time seconds, on frame number"
+    },
+    {
+      "name": "x",
+      "type": "expr",
+      "vars": [
+        "iw",
+        "ih",
+        "ow",
+        "oh",
+        "time",
+        "on",
+        "zoom"
+      ],
+      "default": "0",
+      "description": "Left edge of the shown area in input pixels, clipped to 0..iw-iw/zoom. Variables of `zoom` plus `zoom` (the value just computed)"
+    },
+    {
+      "name": "y",
+      "type": "expr",
+      "vars": [
+        "iw",
+        "ih",
+        "ow",
+        "oh",
+        "time",
+        "on",
+        "zoom",
+        "x"
+      ],
+      "default": "0",
+      "description": "Top edge of the shown area in input pixels, clipped to 0..ih-ih/zoom. Variables of `x` plus `x`"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/zoom_pan.wgsl"
+        }
+      ]
+    }
+  ]
+}
