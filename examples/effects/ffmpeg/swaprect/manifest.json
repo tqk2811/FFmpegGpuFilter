@@ -1,0 +1,30 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.swaprect",
+  "name": "Swap Rectangles",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Swaps two rectangles of the frame, like FFmpeg's swaprect.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    { "name": "w", "type": "float", "default": 0.5, "min": 0, "max": 1, "description": "Rectangle width, fraction of the frame width (FFmpeg w, default w/2)" },
+    { "name": "h", "type": "float", "default": 0.5, "min": 0, "max": 1, "description": "Rectangle height, fraction of the frame height (FFmpeg h, default h/2)" },
+    { "name": "x1", "type": "float", "default": 0.5, "min": 0, "max": 1, "description": "First rectangle left edge, fraction of the frame width (FFmpeg x1)" },
+    { "name": "y1", "type": "float", "default": 0.5, "min": 0, "max": 1, "description": "First rectangle top edge, fraction of the frame height (FFmpeg y1)" },
+    { "name": "x2", "type": "float", "default": 0, "min": 0, "max": 1, "description": "Second rectangle left edge, fraction of the frame width (FFmpeg x2)" },
+    { "name": "y2", "type": "float", "default": 0, "min": 0, "max": 1, "description": "Second rectangle top edge, fraction of the frame height (FFmpeg y2)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/swaprect.wgsl"
+        }
+      ]
+    }
+  ]
+}

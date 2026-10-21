@@ -1,0 +1,26 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.stereo3d",
+  "name": "Stereo3D",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Converts between stereoscopic 3D layouts (side by side, above below, interleaved) and anaglyph or checkerboard output at the same frame size, like FFmpeg's stereo3d.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    { "name": "input", "type": "int", "default": 0, "min": 0, "max": 7, "description": "Input layout: 0 sbsl (side by side, left eye first), 1 sbsr, 2 abl (above below, left eye first), 3 abr, 4 irl (interleaved rows, left eye on even rows), 5 irr, 6 icl (interleaved columns), 7 icr" },
+    { "name": "output", "type": "int", "default": 3, "min": 0, "max": 25, "description": "Output layout: 0 arcg, 1 arch, 2 arcc, 3 arcd, 4 agmg, 5 agmh, 6 agmc, 7 agmd, 8 aybg, 9 aybh, 10 aybc, 11 aybd, 12 arbg, 13 argg (anaglyphs, FFmpeg names), 14 ml, 15 mr, 16 irl, 17 irr, 18 sbsl, 19 sbsr, 20 abl, 21 abr, 22 chl, 23 chr, 24 icl, 25 icr" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/stereo3d.wgsl"
+        }
+      ]
+    }
+  ]
+}
