@@ -1,0 +1,136 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.gradients",
+  "name": "Gradients",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Rotating multi-color gradients: linear, radial, circular, spiral, square (generator).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "nb_colors",
+      "type": "int",
+      "default": 2,
+      "min": 2,
+      "max": 8,
+      "description": "How many of the colors `c0`..`c7` are used"
+    },
+    {
+      "name": "kind",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "description": "Gradient type: 0 linear, 1 radial, 2 circular, 3 spiral, 4 square"
+    },
+    {
+      "name": "p0",
+      "type": "vec2",
+      "default": [
+        0.1,
+        0.2
+      ],
+      "min": 0,
+      "max": 1,
+      "description": "Start point of the gradient line, as a fraction of the picture size"
+    },
+    {
+      "name": "p1",
+      "type": "vec2",
+      "default": [
+        0.9,
+        0.8
+      ],
+      "min": 0,
+      "max": 1,
+      "description": "End point of the gradient line, as a fraction of the picture size"
+    },
+    {
+      "name": "speed",
+      "type": "float",
+      "default": 0.01,
+      "min": 0,
+      "max": 1,
+      "description": "Rotation of the line around the picture center, radians per frame at `rate` frames per second"
+    },
+    {
+      "name": "rate",
+      "type": "float",
+      "default": 25,
+      "min": 1,
+      "max": 240,
+      "description": "Frame rate that `speed` refers to"
+    },
+    {
+      "name": "c0",
+      "type": "color",
+      "default": "#ff3b30",
+      "description": "1st color"
+    },
+    {
+      "name": "c1",
+      "type": "color",
+      "default": "#007aff",
+      "description": "2nd color"
+    },
+    {
+      "name": "c2",
+      "type": "color",
+      "default": "#34c759",
+      "description": "3rd color"
+    },
+    {
+      "name": "c3",
+      "type": "color",
+      "default": "#ffcc00",
+      "description": "4th color"
+    },
+    {
+      "name": "c4",
+      "type": "color",
+      "default": "#af52de",
+      "description": "5th color"
+    },
+    {
+      "name": "c5",
+      "type": "color",
+      "default": "#00c7be",
+      "description": "6th color"
+    },
+    {
+      "name": "c6",
+      "type": "color",
+      "default": "#ff2d55",
+      "description": "7th color"
+    },
+    {
+      "name": "c7",
+      "type": "color",
+      "default": "#ffffff",
+      "description": "8th color"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/gradients.wgsl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.palbars",
+  "name": "PAL Bars",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "PAL 75% or 100% color bars (generator).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "full",
+      "type": "bool",
+      "default": false,
+      "description": "false: 75% bars (pal75bars), true: 100% bars (pal100bars)"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/palbars.wgsl"
+        }
+      ]
+    }
+  ]
+}

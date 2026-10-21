@@ -1,0 +1,74 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.waveform",
+  "name": "Waveform",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Waveform monitor of the luma or of R, G, B, per column or per row (scope).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "mode",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "0 column (levels up the picture, one waveform column per input column), 1 row (levels across, one trace row per input row)"
+    },
+    {
+      "name": "components",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "0 luma (BT.709) in white, 1 red, green and blue in their colors"
+    },
+    {
+      "name": "display",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "With `components`=1: 0 overlay, 1 parade (the three components side by side or stacked)"
+    },
+    {
+      "name": "intensity",
+      "type": "float",
+      "default": 0.04,
+      "min": 0.001,
+      "max": 1,
+      "description": "Brightness added by one pixel on a 256-level scale (as FFmpeg), so ~25 equal pixels reach white"
+    },
+    {
+      "name": "max_samples",
+      "type": "int",
+      "default": 540,
+      "min": 16,
+      "max": 4096,
+      "description": "Samples per input line; lines longer than this are sampled at even steps, which bounds the work of each output pixel"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/waveform.wgsl"
+        }
+      ]
+    }
+  ]
+}

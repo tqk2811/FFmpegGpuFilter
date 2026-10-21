@@ -1,0 +1,106 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.mandelbrot",
+  "name": "Mandelbrot",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Mandelbrot set zooming in over time (generator).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "start_x",
+      "type": "float",
+      "default": -0.7436438870371587,
+      "min": -2,
+      "max": 2,
+      "description": "Real part of the zoom center"
+    },
+    {
+      "name": "start_y",
+      "type": "float",
+      "default": -0.13182590420531198,
+      "min": -2,
+      "max": 2,
+      "description": "Imaginary part of the zoom center"
+    },
+    {
+      "name": "start_scale",
+      "type": "float",
+      "default": 3,
+      "min": 0.00001,
+      "max": 100,
+      "description": "View height in the complex plane at time 0"
+    },
+    {
+      "name": "end_scale",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.00001,
+      "max": 100,
+      "description": "View height in the complex plane at `end_time`"
+    },
+    {
+      "name": "end_time",
+      "type": "float",
+      "default": 16,
+      "min": 0.001,
+      "max": 100000,
+      "description": "Seconds to go from `start_scale` to `end_scale` (exponentially; goes on past it)"
+    },
+    {
+      "name": "maxiter",
+      "type": "int",
+      "default": 255,
+      "min": 1,
+      "max": 2000,
+      "description": "Iteration limit per pixel (capped at 2000)"
+    },
+    {
+      "name": "bailout",
+      "type": "float",
+      "default": 10,
+      "min": 2,
+      "max": 1000,
+      "description": "Escape radius"
+    },
+    {
+      "name": "inner_mode",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "description": "Points inside the set: 0 black, 1 white, 2 colored by the last z"
+    },
+    {
+      "name": "outer_mode",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "description": "Points outside: 0 iteration count, 1 smooth iteration count, 2 white, 3 colored by the escaping z"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/mandelbrot.wgsl"
+        }
+      ]
+    }
+  ]
+}

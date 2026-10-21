@@ -1,0 +1,74 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.vectorscope",
+  "name": "Vectorscope",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Chroma vectorscope: Cb/Cr density plot (scope).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "intensity",
+      "type": "float",
+      "default": 0.004,
+      "min": 0.0001,
+      "max": 1,
+      "description": "Brightness added by one pixel (of 1), as FFmpeg's `intensity`; 250 pixels in a cell reach white"
+    },
+    {
+      "name": "samples",
+      "type": "int",
+      "default": 128,
+      "min": 8,
+      "max": 256,
+      "description": "The plot is taken from a grid of samples x samples input pixels (bounded cost; 128 gives 16384 samples per cell)"
+    },
+    {
+      "name": "color_mode",
+      "type": "bool",
+      "default": false,
+      "description": "Tint the plot with the chroma color of its position (false: white)"
+    },
+    {
+      "name": "graticule",
+      "type": "bool",
+      "default": true,
+      "description": "Draw a crosshair and a circle"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/count.wgsl",
+          "inputs": [
+            "src"
+          ],
+          "output": "tmp"
+        },
+        {
+          "shader": "shaders/draw.wgsl",
+          "inputs": [
+            "src",
+            "tmp"
+          ],
+          "output": "out"
+        }
+      ]
+    }
+  ]
+}

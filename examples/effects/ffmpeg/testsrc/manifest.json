@@ -1,0 +1,42 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.testsrc",
+  "name": "Test Source",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "FFmpeg testsrc test pattern: color bars, circle, sliding gradient, clock (generator).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "decimals",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "description": "Decimals of the clock"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/testsrc.wgsl"
+        }
+      ]
+    }
+  ]
+}

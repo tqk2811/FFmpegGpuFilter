@@ -1,0 +1,42 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.testsrc2",
+  "name": "Test Source 2",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "FFmpeg testsrc2 test pattern: bands, gradient strip, clock hands, rectangles, noise, bouncing square (generator).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "rate",
+      "type": "float",
+      "default": 25,
+      "min": 1,
+      "max": 240,
+      "description": "Frames per second that the frame counter `pts` of the noise follows (the motion itself uses the time `t`)"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/testsrc2.wgsl"
+        }
+      ]
+    }
+  ]
+}
