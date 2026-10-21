@@ -42,7 +42,7 @@ scripts/pack-effects.sh --check -o out my-fx    # biên dịch shader trên GPU 
 | `output` | `{formats, size}` | không (`rgba` và mọi format chuyển trên GPU; kích thước input đầu) | Pixel format output được phép và kích thước output |
 | `params` | mảng | không | Tham số, xem bên dưới |
 | `textures` | mảng | không | Ảnh PNG đi kèm (LUT, mask, sprite), xem [Texture](#texture) |
-| `passes` | mảng | có | Các pass compute, chạy theo thứ tự |
+| `groups` | mảng | có | Các group pass, mỗi group có pass compute và thiết bị nó cần; dùng group đầu tiên khớp thiết bị, xem [Nhóm pass và yêu cầu thiết bị](#nhóm-pass-và-yêu-cầu-thiết-bị) |
 
 ## Quy tắc input/output
 
@@ -130,7 +130,7 @@ Kiểu trong shader: `float`→`f32`/`float`, `int`→`i32`/`int`, `bool`→`u32
 `vecN`→`vecNf`/`vecN`, `color`→`vec4f`/`vec4` (RGBA 0..1). `expr` không nằm trong `params` mà trở
 thành một hàm, xem [Tham số biểu thức](#tham-số-biểu-thức).
 
-Mỗi phần tử `passes`:
+Mỗi phần tử `passes` (của một group):
 
 | Trường | Mặc định | Ý nghĩa |
 |--------|----------|---------|
@@ -165,6 +165,77 @@ fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad của input i
 ```
 
 Xem `examples/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
+
+## Nhóm pass và yêu cầu thiết bị
+
+`groups` (bắt buộc, không rỗng) liệt kê các bộ pass thay thế nhau cho cùng một effect. Mỗi phần tử:
+
+| Trường | Mặc định | Ý nghĩa |
+|--------|----------|---------|
+| `name` | không có | Nhãn trong thông báo lỗi và `gpufx info`. Nếu có thì không được rỗng và không trùng giữa các group |
+| `requires` | `{}` (mọi thiết bị) | Thiết bị mà group này chạy được, xem bên dưới |
+| `passes` | | Các pass của group này (không rỗng), như mô tả ở trên |
+
+Group **đầu tiên** có `requires` khớp thiết bị sẽ được dùng; nên đặt group cụ thể nhất lên đầu và group chung ở cuối. Đầu ra là
+pass cuối của group đó. `inputs`, `output`, `params` và `textures` dùng chung cho mọi group, nên các group là một effect với một bộ
+tham số; chỉ phần pass khác nhau, và số pass của các group có thể khác nhau. `passes` ở cấp trên cùng của manifest cũ đã bị bỏ: bọc các pass vào một group.
+Group dùng được với mọi giá trị `api`.
+
+Các khoá của `requires` (bỏ qua = `"*"`):
+
+| Khoá | Giá trị | Khớp với |
+|------|---------|----------|
+| `os` | `windows`, `linux`, `macos`, `web` | Hệ điều hành |
+| `backend` | `vulkan`, `d3d12`, `metal`, `gl`, `webgpu` | Backend wgpu của thiết bị |
+| `vendor` | `nvidia`, `amd`, `intel` | Hãng GPU (vendor id bằng 0 thì đoán từ tên adapter) |
+| `features` | `shader-f16`, `cooperative-matrix`, `cooperative-matrix-f16` | Feature của thiết bị |
+
+- `os`, `backend`, `vendor` nhận `"*"` (mọi giá trị) hoặc một danh sách không rỗng, khớp **một trong** các giá trị (OR). `"*"` nằm trong danh sách
+  và chuỗi trần khác `"*"` (`"vendor": "nvidia"`; phải viết `["nvidia"]`) đều là lỗi, giá trị hay khoá không biết cũng vậy.
+- `features` là danh sách và cần **tất cả** (AND).
+- Không group nào khớp thì mở effect lỗi, thông báo liệt kê lý do của từng group (vd `needs backend d3d12; needs feature shader-f16`).
+
+```json
+{
+  "id": "io.github.tqk2811.glow",
+  "name": "Glow",
+  "inputs": [{ "name": "src" }],
+  "params": [{ "name": "radius", "type": "float", "default": 8, "min": 0, "max": 64 }],
+  "groups": [
+    {
+      "name": "dx12",
+      "requires": { "os": ["windows"], "backend": ["d3d12"] },
+      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": "out" }]
+    },
+    {
+      "name": "tensor-core",
+      "requires": { "backend": ["vulkan"], "vendor": ["nvidia"], "features": ["cooperative-matrix-f16"] },
+      "passes": [
+        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": "out" }
+      ]
+    },
+    {
+      "name": "generic",
+      "passes": [
+        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": "out" }
+      ]
+    }
+  ]
+}
+```
+
+Cách chọn group:
+
+- `gpufx_effect_open` mở effect trước trên **device noop** (pad và format phải biết trước khi có device GPU). Ở đó chỉ kiểm
+  `os`: mọi group khớp OS mà noop device có đủ `features` đều được compile để kiểm shader. Group cần feature noop device
+  không có (vd `cooperative-matrix`) bị bỏ qua; nếu **mọi** group đều cần feature như vậy thì mở lỗi.
+  Đây là hạn chế đã biết (xem [Backlog-vi.md](Backlog-vi.md)).
+- Trên device thật (device Vulkan của FFmpeg, hoặc device mặc định) group được chọn theo đủ các khoá `requires`.
+- `gpufx pack --precompile` chỉ precompile các group cho phép `d3d12` trên `windows` (cache shader D3D12); group cần
+  feature mà WARP không có bị bỏ qua, gói không có group nào như vậy thì không precompile gì cả.
+  `gpufx info` liệt kê các group của gói cùng `requires`.
 
 ## Viết shader WGSL
 

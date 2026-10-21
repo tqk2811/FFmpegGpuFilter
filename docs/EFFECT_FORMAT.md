@@ -42,7 +42,7 @@ scripts/pack-effects.sh --check -o out my-fx    # compile the shaders on the GPU
 | `output` | `{formats, size}` | no (`rgba` and every format converted on the GPU; the size of the first input) | Allowed output pixel formats and the output size |
 | `params` | array | no | Parameters, see below |
 | `textures` | array | no | Bundled PNG images (LUT, mask, sprites), see [Textures](#textures) |
-| `passes` | array | yes | The compute passes, run in order |
+| `groups` | array | yes | Pass groups, each with its compute passes and the devices it needs; the first group matching the device is used, see [Pass groups and device requirements](#pass-groups-and-device-requirements) |
 
 ## Input/output rules
 
@@ -132,7 +132,7 @@ Types in the shader: `float`→`f32`/`float`, `int`→`i32`/`int`, `bool`→`u32
 `vecN`→`vecNf`/`vecN`, `color`→`vec4f`/`vec4` (RGBA 0..1). An `expr` is not in `params`: it becomes a
 function, see [Expression parameters](#expression-parameters).
 
-Each element of `passes`:
+Each element of `passes` (of a group):
 
 | Field | Default | Meaning |
 |-------|---------|---------|
@@ -167,6 +167,77 @@ fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad of input i at
 ```
 
 See `examples/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
+
+## Pass groups and device requirements
+
+`groups` (required, not empty) lists alternative sets of passes for the same effect. Each element:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `name` | none | Label in errors and in `gpufx info`. When given it must be non-empty and unique among the groups |
+| `requires` | `{}` (any device) | The devices this group runs on, see below |
+| `passes` | | The passes of this group (not empty), as described above |
+
+The **first** group whose `requires` match the device is used; put the most specific group first and a
+generic one last. The output is the last pass of that group. `inputs`, `output`, `params` and `textures` are shared by every
+group, so all groups are one effect with one set of parameters; only the passes differ, and groups may have different
+numbers of passes. The top-level `passes` of older manifests is gone: wrap the passes in one group. Groups work with any `api` value.
+
+`requires` keys (omitted = `"*"`):
+
+| Key | Values | Matches |
+|-----|--------|---------|
+| `os` | `windows`, `linux`, `macos`, `web` | The operating system |
+| `backend` | `vulkan`, `d3d12`, `metal`, `gl`, `webgpu` | The wgpu backend of the device |
+| `vendor` | `nvidia`, `amd`, `intel` | The GPU vendor (when the vendor id is 0, it is guessed from the adapter name) |
+| `features` | `shader-f16`, `cooperative-matrix`, `cooperative-matrix-f16` | Device features |
+
+- `os`, `backend` and `vendor` take `"*"` (any) or a non-empty list of values, **any** of which matches (OR). `"*"` inside a list
+  and a bare string other than `"*"` (`"vendor": "nvidia"`; write `["nvidia"]`) are errors, as are unknown values or keys.
+- `features` is a list and **all** of them are needed (AND).
+- When no group matches, the open fails and the error lists the reason for each group (for example `needs backend d3d12; needs feature shader-f16`).
+
+```json
+{
+  "id": "io.github.tqk2811.glow",
+  "name": "Glow",
+  "inputs": [{ "name": "src" }],
+  "params": [{ "name": "radius", "type": "float", "default": 8, "min": 0, "max": 64 }],
+  "groups": [
+    {
+      "name": "dx12",
+      "requires": { "os": ["windows"], "backend": ["d3d12"] },
+      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": "out" }]
+    },
+    {
+      "name": "tensor-core",
+      "requires": { "backend": ["vulkan"], "vendor": ["nvidia"], "features": ["cooperative-matrix-f16"] },
+      "passes": [
+        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": "out" }
+      ]
+    },
+    {
+      "name": "generic",
+      "passes": [
+        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": "out" }
+      ]
+    }
+  ]
+}
+```
+
+How the group is chosen:
+
+- `gpufx_effect_open` first opens the effect on a **noop device** (the pads and formats must be known before a GPU device exists). There only
+  `os` is checked: every group matching the OS whose `features` the noop device has is compiled, to check its shaders. A group that
+  needs features the noop device lacks (for example `cooperative-matrix`) is skipped; if **every** group needs such features, the open fails.
+  This is a known limitation (see [Backlog-vi.md](Backlog-vi.md)).
+- On the real device (FFmpeg's Vulkan device, or the default device) the group is chosen with all the `requires` keys.
+- `gpufx pack --precompile` only precompiles the groups that allow `d3d12` on `windows` (the D3D12 shader cache); groups
+  needing features the WARP device lacks are skipped, and a package with no such group precompiles nothing.
+  `gpufx info` lists the groups of a package with their `requires`.
 
 ## Writing WGSL shaders
 
