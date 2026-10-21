@@ -152,6 +152,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
         format: "gpufx-nn",
         version: 1,
         name: name.to_string(),
+        used_for: Vec::new(),
         source: Source { kind: "ncnn" },
         weights: WeightsFile { file: "weights.bin" },
         inputs,
