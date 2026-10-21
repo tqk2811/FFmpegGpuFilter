@@ -78,13 +78,31 @@ Tóm tắt `manifest.json`:
   "id": "io.github.tqk2811.gaussian-blur",
   "name": "Gaussian Blur",
   "used_for": ["gpufx"],
-  "inputs": [{ "name": "src" }],
-  "params": [{ "name": "radius", "type": "float", "default": 6, "min": 0, "max": 48 }],
+  "inputs": [
+    { "name": "src" }
+  ],
+  "params": [
+    {
+      "name": "radius",
+      "type": "float",
+      "default": 6,
+      "min": 0,
+      "max": 48
+    }
+  ],
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+        {
+          "shader": "shaders/blur_h.wgsl",
+          "inputs": ["src"],
+          "output": "tmp"
+        },
+        {
+          "shader": "shaders/blur_v.wgsl",
+          "inputs": ["tmp"],
+          "output": "out"
+        }
       ]
     }
   ]

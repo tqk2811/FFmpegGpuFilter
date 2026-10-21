@@ -389,6 +389,10 @@ rejects "inline key given twice" "given twice" -i "$A" -an -vf "gpufx=graph='$FX
 # shellcheck disable=SC2086
 rejects "inline option that is not key=value" "is not key=value" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip=0'" $NULL
 # shellcheck disable=SC2086
+rejects "enum number that is not a value" "Invalid value for 'transition'" -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/xfade.zip=transition=99'" $NULL
+# shellcheck disable=SC2086
+rejects "enum name the package does not have" "unknown value .wipeup2." -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/xfade.zip=transition=wipeup2'" $NULL
+# shellcheck disable=SC2086
 rejects "the params option is gone" "params" -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip:params='amount=0'" $NULL
 # shellcheck disable=SC2086
 rejects "only the first effect takes two inputs" "takes 2 inputs" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip|$FX/ffmpeg/crossfade.zip'" $NULL
