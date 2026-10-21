@@ -1,0 +1,56 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.maskedthreshold",
+  "name": "Masked Threshold",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's maskedthreshold filter: pick source or reference pixels by comparing their difference with a threshold.",
+  "inputs": [
+    {
+      "name": "source",
+      "description": "Source clip"
+    },
+    {
+      "name": "reference",
+      "description": "Reference clip (same size as the source)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "threshold",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 255,
+      "description": "Threshold on the 0..255 (8-bit) scale"
+    },
+    {
+      "name": "planes",
+      "type": "int",
+      "default": 15,
+      "min": 0,
+      "max": 15,
+      "description": "Bit mask of the channels to filter (1 = R, 2 = G, 4 = B, 8 = A); the others are copied from the first input"
+    },
+    {
+      "name": "mode",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "0 = abs (|source - reference| <= threshold keeps the source, else the reference), 1 = diff (reference - source <= threshold gives max(reference - threshold, 0), else the source)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/maskedthreshold.wgsl"
+        }
+      ]
+    }
+  ]
+}

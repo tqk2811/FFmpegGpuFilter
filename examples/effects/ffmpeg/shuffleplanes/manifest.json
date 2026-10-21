@@ -1,0 +1,58 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.shuffleplanes",
+  "name": "Shuffle Planes",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's shuffleplanes filter: reorder or duplicate the color channels (R, G, B, A).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "map0",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "description": "Source channel (0 = R, 1 = G, 2 = B, 3 = A) of the output R channel"
+    },
+    {
+      "name": "map1",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "description": "Source channel of the output G channel"
+    },
+    {
+      "name": "map2",
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 3,
+      "description": "Source channel of the output B channel"
+    },
+    {
+      "name": "map3",
+      "type": "int",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "description": "Source channel of the output A channel"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/shuffleplanes.wgsl"
+        }
+      ]
+    }
+  ]
+}

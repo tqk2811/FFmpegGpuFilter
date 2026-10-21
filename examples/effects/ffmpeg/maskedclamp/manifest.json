@@ -1,0 +1,61 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.maskedclamp",
+  "name": "Masked Clamp",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's maskedclamp filter: clamp the base clip between the dark and bright clips.",
+  "inputs": [
+    {
+      "name": "base",
+      "description": "Base clip"
+    },
+    {
+      "name": "dark",
+      "description": "Lower bound clip (same size as the base)",
+      "same_size": true
+    },
+    {
+      "name": "bright",
+      "description": "Upper bound clip (same size as the base)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "undershoot",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 255,
+      "description": "How far below the dark clip the output may go, on the 0..255 (8-bit) scale"
+    },
+    {
+      "name": "overshoot",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 255,
+      "description": "How far above the bright clip the output may go, on the 0..255 scale"
+    },
+    {
+      "name": "planes",
+      "type": "int",
+      "default": 15,
+      "min": 0,
+      "max": 15,
+      "description": "Bit mask of the channels to filter (1 = R, 2 = G, 4 = B, 8 = A); the others are copied from the first input"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/maskedclamp.wgsl"
+        }
+      ]
+    }
+  ]
+}

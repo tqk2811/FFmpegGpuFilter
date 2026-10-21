@@ -1,0 +1,34 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.extractplanes",
+  "name": "Extract Planes",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's extractplanes filter: output one plane or channel (y, u, v, r, g, b, a) as a gray picture.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "plane",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "description": "Plane to extract: 0 = y, 1 = u, 2 = v, 3 = r, 4 = g, 5 = b, 6 = a"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/extractplanes.wgsl"
+        }
+      ]
+    }
+  ]
+}
