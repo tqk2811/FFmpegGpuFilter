@@ -276,6 +276,12 @@ impl GpuContext {
     pub fn description(&self) -> String {
         format!("{} ({:?})", self.info.name, self.info.backend)
     }
+
+    /// The adapter lists 16x16x16 cooperative matrices with f16 A/B and an f32 accumulator.
+    /// Metal exposes cooperative matrices too, but only 8x8.
+    pub fn has_coop_f16(&self) -> bool {
+        self.coop_f16
+    }
 }
 
 /// A tightly or loosely packed RGBA8 image in CPU memory. [`Frame`] takes other formats.

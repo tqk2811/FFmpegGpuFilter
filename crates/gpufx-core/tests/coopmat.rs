@@ -1,6 +1,6 @@
 //! Tensor cores through WGSL cooperative matrices (`enable wgpu_cooperative_matrix;`): a
 //! 64x64x64 matmul, f16 inputs and f32 accumulation, against the CPU. Skipped without a
-//! device or when it lacks EXPERIMENTAL_COOPERATIVE_MATRIX (DX12, Metal, older GPUs).
+//! device or when it lacks EXPERIMENTAL_COOPERATIVE_MATRIX (DX12, Metal, Metal only has 8x8, older GPUs).
 
 mod common;
 
@@ -52,8 +52,8 @@ fn coop_matmul_matches_cpu() {
         Err(e) => return eprintln!("skipping: {e}"),
     };
     let device = ctx.device();
-    if !device.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX) {
-        return eprintln!("skipping: {} has no cooperative matrix", ctx.description());
+    if !ctx.has_coop_f16() {
+        return eprintln!("skipping: {} has no 16x16 f16 cooperative matrix", ctx.description());
     }
     let n = N as usize;
     let a: Vec<f32> = (0..n * n).map(|i| ((i * 7 + 3) % 17) as f32 / 8.0 - 1.0).collect();
