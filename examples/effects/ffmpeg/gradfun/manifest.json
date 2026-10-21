@@ -1,0 +1,21 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.gradfun",
+  "name": "Gradfun",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Debanding that fits a smooth gradient to flat areas and dithers the result.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "strength", "type": "float", "default": 1.2, "min": 0.51, "max": 64, "description": "Maximum amount by which a pixel changes, in 8-bit levels" },
+    { "name": "radius", "type": "int", "default": 16, "min": 4, "max": 32, "description": "Size of the neighbourhood the gradient is fitted to" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/gradfun_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/gradfun_v.wgsl", "inputs": ["tmp", "src"], "output": "out" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.box-blur",
+  "name": "Box Blur",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Box blur with a horizontal and a vertical radius, applied one to three times.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "radius", "type": "int", "default": 2, "min": 0, "max": 64, "description": "Horizontal radius in pixels: the box is 2 * radius + 1 wide (`lr` of boxblur, `sizeX` of avgblur)" },
+    { "name": "radius_v", "type": "int", "default": -1, "min": -1, "max": 64, "description": "Vertical radius; -1 = same as `radius` (`sizeY` of avgblur)" },
+    { "name": "power", "type": "int", "default": 2, "min": 1, "max": 3, "description": "How many times the box blur is applied (`lp` of boxblur; 1 gives avgblur)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/box_1_h.wgsl", "inputs": ["src"], "output": "t1" },
+        { "shader": "shaders/box_2_v.wgsl", "inputs": ["t1"], "output": "t2" },
+        { "shader": "shaders/box_3_h.wgsl", "inputs": ["t2"], "output": "t3" },
+        { "shader": "shaders/box_4_v.wgsl", "inputs": ["t3"], "output": "t4" },
+        { "shader": "shaders/box_5_h.wgsl", "inputs": ["t4"], "output": "t5" },
+        { "shader": "shaders/box_6_v.wgsl", "inputs": ["t5"], "output": "out" }
+      ]
+    }
+  ]
+}

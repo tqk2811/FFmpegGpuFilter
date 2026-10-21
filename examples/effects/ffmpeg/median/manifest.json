@@ -1,0 +1,21 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.median",
+  "name": "Median",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Median (or any percentile) filter over a rectangular window, per channel.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "radius", "type": "int", "default": 1, "min": 1, "max": 5, "description": "Horizontal radius in pixels: the window is 2 * radius + 1 wide" },
+    { "name": "radius_v", "type": "int", "default": -1, "min": -1, "max": 5, "description": "Vertical radius; -1 = same as `radius` (`radiusV`)" },
+    { "name": "percentile", "type": "float", "default": 0.5, "min": 0, "max": 1, "description": "Rank of the chosen value: 0 = minimum, 0.5 = median, 1 = maximum" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/median.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

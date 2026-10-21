@@ -1,0 +1,20 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.directional-blur",
+  "name": "Directional Blur",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Gaussian blur along a straight line at a given angle.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "angle", "type": "float", "default": 45, "min": 0, "max": 360, "description": "Direction of the blur in degrees (0 = along +x, 90 = down the picture)" },
+    { "name": "radius", "type": "float", "default": 5, "min": 0, "max": 32, "description": "Blur radius in pixels (the sigma of the gaussian)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/dblur.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

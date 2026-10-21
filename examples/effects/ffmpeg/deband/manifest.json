@@ -1,0 +1,23 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.deband",
+  "name": "Deband",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Removes banding by averaging four pseudo-random neighbours when they are close to the pixel.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "threshold", "type": "float", "default": 0.02, "min": 0.00003, "max": 0.5, "description": "Difference (0..1 of full range) below which a pixel counts as banding (`1thr`..`3thr`)" },
+    { "name": "range", "type": "int", "default": 16, "min": -4096, "max": 4096, "description": "Distance in pixels of the reference points (`r`); a positive value is the maximum (random per pixel), a negative one the exact distance" },
+    { "name": "direction", "type": "float", "default": 6.283185307, "min": -6.283185307, "max": 6.283185307, "description": "Direction of the reference points in radians (`d`); a positive value is the maximum (random per pixel), a negative one the exact angle" },
+    { "name": "blur", "type": "bool", "default": true, "description": "1 = compare the average of the four points with the pixel, 0 = compare each point (`b`)" },
+    { "name": "coupling", "type": "bool", "default": false, "description": "1 = all of R, G, B must pass for the pixel to change (`c`)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/deband.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.smart-blur",
+  "name": "Smart Blur",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Edge-preserving gaussian blur: a threshold decides which differences are smoothed.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "luma_radius", "type": "float", "default": 1, "min": 0.1, "max": 5, "description": "Luma gaussian radius (sigma) (`lr`)" },
+    { "name": "luma_strength", "type": "float", "default": 1, "min": -1, "max": 1, "description": "Luma blur strength (`ls`): 1 = full blur, negative sharpens" },
+    { "name": "luma_threshold", "type": "int", "default": 0, "min": -30, "max": 30, "description": "Luma threshold (`lt`) in 8-bit levels: positive smooths only small differences, negative smooths only large ones, 0 = everywhere" },
+    { "name": "chroma_radius", "type": "float", "default": -1, "min": -1, "max": 5, "description": "Chroma radius (`cr`); below 0.1 (default -1) = same as luma" },
+    { "name": "chroma_strength", "type": "float", "default": -2, "min": -2, "max": 1, "description": "Chroma strength (`cs`); below -1 (default -2) = same as luma" },
+    { "name": "chroma_threshold", "type": "int", "default": -31, "min": -31, "max": 30, "description": "Chroma threshold (`ct`); below -30 (default -31) = same as luma" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/smartblur_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/smartblur_v.wgsl", "inputs": ["tmp", "src"], "output": "out" }
+      ]
+    }
+  ]
+}
