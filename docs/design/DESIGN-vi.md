@@ -79,9 +79,13 @@ Tóm tắt `manifest.json`:
   "name": "Gaussian Blur",
   "inputs": [{ "name": "src" }],
   "params": [{ "name": "radius", "type": "float", "default": 6, "min": 0, "max": 48 }],
-  "passes": [
-    { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
-    { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+      ]
+    }
   ]
 }
 ```
@@ -96,6 +100,10 @@ Tóm tắt `manifest.json`:
   uniform của WGSL/std140; tác giả chỉ việc dùng `params.radius`.
 - `passes` chạy tuần tự; output của pass trước là texture đọc được ở pass sau; pass cuối là
   đầu ra.
+- Effect có `groups`, các bộ pass thay thế nhau kèm `requires` về thiết bị (xem
+  [EFFECT_FORMAT-vi.md](../EFFECT_FORMAT-vi.md#nhóm-pass-và-yêu-cầu-thiết-bị)). `Program::new` chọn group đầu tiên khớp
+  thiết bị; trên device noop chỉ kiểm `os` và compile mọi group khớp OS mà noop device compile được để kiểm shader, nên việc mở
+  gồm hai bước: device noop ở `gpufx_effect_open`, device thật sau đó.
 
 ## 4. Mô hình shader (trọng tâm)
 

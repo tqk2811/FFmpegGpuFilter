@@ -43,3 +43,7 @@ Vùng pixel input mà một pixel output của mạng có thể "nhìn thấy": 
 ## f16
 
 Số thực dấu phẩy động 16 bit (half precision, 11 bit mantissa, tối đa 65504). Tính convolution bằng f16 nhanh hơn f32 trên nhiều GPU (ít băng thông workgroup memory và thanh ghi hơn) nhưng sai số lớn hơn; WGSL cần `enable f16` và thiết bị có tính năng `SHADER_F16`.
+
+## Pass group
+
+Một bộ pass trong `groups` của manifest effect, kèm `requires` (os, backend, vendor, feature) nói thiết bị nào chạy được. Runtime dùng group đầu tiên khớp thiết bị; các group chia sẻ input, output, param và texture nhưng có thể có số pass khác nhau. Xem [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md#nhóm-pass-và-yêu-cầu-thiết-bị).

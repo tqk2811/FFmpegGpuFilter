@@ -79,9 +79,13 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   "name": "Gaussian Blur",
   "inputs": [{ "name": "src" }],
   "params": [{ "name": "radius", "type": "float", "default": 6, "min": 0, "max": 48 }],
-  "passes": [
-    { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
-    { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+      ]
+    }
   ]
 }
 ```
@@ -96,6 +100,10 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   WGSL/std140 uniform alignment rules; the author just uses `params.radius`.
 - `passes` run sequentially; the output of one pass is a readable texture in the next; the last pass is the
   final output.
+- Effects have `groups`, alternative sets of passes with device `requires` (see
+  [EFFECT_FORMAT.md](../EFFECT_FORMAT.md#pass-groups-and-device-requirements)). `Program::new` chooses the first group matching the
+  device; on the noop device only `os` is checked and every OS-matching group the noop device can compile is compiled to check its
+  shaders, so opening is two steps: the noop device at `gpufx_effect_open`, the real device later.
 
 ## 4. Shader model (the core)
 
