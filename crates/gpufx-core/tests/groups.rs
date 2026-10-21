@@ -164,6 +164,30 @@ fn the_noop_device_checks_every_group_of_this_os() {
 }
 
 #[test]
+fn the_noop_device_skips_groups_needing_features_it_lacks() {
+    let ctx = match GpuContext::noop() {
+        Ok(ctx) => ctx,
+        Err(e) => return eprintln!("skipping: {e}"),
+    };
+    // The cooperative matrix group comes first but cannot be checked on the noop device.
+    let pkg = TempPackage::new(
+        "noop-coop",
+        &manifest(
+            r#"{"requires":{"features":["cooperative-matrix","cooperative-matrix-f16"]},"passes":[{"shader":"bad.wgsl"}]},{"passes":[{"shader":"green.wgsl"}]}"#,
+        ),
+    );
+    let fx = Effect::new(ctx.clone(), pkg.open()).unwrap();
+    assert_eq!(fx.package().manifest.passes[0].shader, "green.wgsl");
+    // Only such groups: nothing can be checked.
+    let only = TempPackage::new(
+        "noop-only-coop",
+        &manifest(r#"{"requires":{"features":["cooperative-matrix-f16"]},"passes":[{"shader":"red.wgsl"}]}"#),
+    );
+    let err = Effect::new(ctx, only.open()).err().expect("must fail").to_string();
+    assert!(err.contains("every group needs features the device is not known to have yet (cooperative-matrix-f16)"), "{err}");
+}
+
+#[test]
 fn shader_files_of_every_group_must_exist() {
     let dir = TempPackage::new("missing", &manifest(r#"{"passes":[{"shader":"red.wgsl"}]},{"passes":[{"shader":"nope.wgsl"}]}"#));
     let err = Package::open(&dir.0).unwrap_err().to_string();

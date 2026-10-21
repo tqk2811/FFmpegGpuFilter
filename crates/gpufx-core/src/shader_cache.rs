@@ -598,10 +598,13 @@ impl ShaderCache {
 /// a package without one has nothing to precompile (an empty list).
 pub fn precompile(pkg: &Package) -> Result<Vec<(String, Vec<u8>)>, crate::Error> {
     let groups = &pkg.manifest.groups;
-    let packages: Vec<Package> = if groups.is_empty() {
-        vec![pkg.clone()]
+    let packages: Vec<(Package, Vec<String>)> = if groups.is_empty() {
+        vec![(pkg.clone(), Vec::new())]
     } else {
-        (0..groups.len()).filter(|&g| groups[g].requires.allows_d3d12()).map(|g| pkg.with_group(g)).collect()
+        (0..groups.len())
+            .filter(|&g| groups[g].requires.allows_d3d12())
+            .map(|g| (pkg.with_group(g), groups[g].requires.features.clone()))
+            .collect()
     };
     if packages.is_empty() {
         return Ok(Vec::new());
@@ -609,9 +612,20 @@ pub fn precompile(pkg: &Package) -> Result<Vec<(String, Vec<u8>)>, crate::Error>
     #[cfg(windows)]
     {
         let ctx = crate::GpuContext::for_precompile()?;
-        for p in packages {
+        let target = ctx.target();
+        let mut compiled = 0;
+        for (p, features) in packages {
+            // A group needing features this device lacks cannot be compiled here: skipped.
+            let needs = crate::requires::Requires { features, ..Default::default() };
+            if !needs.features_missing(&target).is_empty() {
+                continue;
+            }
             let program = crate::Program::new(ctx.clone(), p)?;
             program.passes(true)?;
+            compiled += 1;
+        }
+        if compiled == 0 {
+            return Ok(Vec::new());
         }
         let cache = ctx.shader_cache().expect("made with a recorder");
         let files = std::mem::take(&mut *cache.record.as_ref().expect("recorder").lock().unwrap_or_else(|e| e.into_inner()));

@@ -465,8 +465,13 @@ impl Manifest {
             if group.passes.is_empty() {
                 return bad(format!("group {label}: a group needs at least one pass"));
             }
-            if group.name.as_ref().is_some_and(|n| n.is_empty() || self.groups[..g].iter().any(|x| x.name.as_ref() == Some(n))) {
-                return bad(format!("group {g}: empty or duplicate name"));
+            if let Some(n) = &group.name {
+                if n.is_empty() {
+                    return bad(format!("group {g}: empty name"));
+                }
+                if self.groups[..g].iter().any(|x| x.name.as_ref() == Some(n)) {
+                    return bad(format!("group {g}: duplicate name `{n}`"));
+                }
             }
             group.requires.validate().map_err(|e| Error::Manifest(format!("group {label}: {e}")))?;
         }
@@ -637,11 +642,7 @@ impl Manifest {
         for (g, group) in self.groups.iter().enumerate() {
             match group.requires.rejects(target) {
                 None => found.push(g),
-                Some(r) => why.push_str(&format!(
-                    "
-  {}: {r}",
-                    self.group_label(g)
-                )),
+                Some(r) => why.push_str(&format!("\n  {}: {r}", self.group_label(g))),
             }
         }
         if found.is_empty() {
