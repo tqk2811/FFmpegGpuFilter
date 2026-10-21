@@ -77,3 +77,37 @@ fn precompiled_shaders_are_used_only_when_trusted() {
     assert_eq!(trusted, plain);
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// Pass groups: only those that may run on D3D12 are precompiled; a package without one
+/// has nothing to precompile.
+#[test]
+fn only_d3d12_groups_are_precompiled() {
+    if let Err(e) = GpuContext::new(Backend::Dx12) {
+        eprintln!("skipping: {e}");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("gpufx-precompile-groups-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("ok.wgsl"),
+        "@compute @workgroup_size(8, 8)\nfn main(@builtin(global_invocation_id) id: vec3u) {\n    if (!gpufx_in_bounds(id)) { return; }\n    gpufx_write(id, vec4f(1.0));\n}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("bad.wgsl"), "@compute @workgroup_size(8,8) fn main() { let x = undefined_thing; }").unwrap();
+    let pack = |groups: &str| {
+        std::fs::write(dir.join("manifest.json"), format!(r#"{{"id":"t.g","name":"G","groups":[{groups}]}}"#)).unwrap();
+        Package::pack(&dir, &dir.with_extension("zip"), true)
+    };
+    // The vendor and features of a D3D12 group do not matter; the Metal group is not compiled.
+    let n = pack(
+        r#"{"requires":{"backend":["metal"]},"passes":[{"shader":"bad.wgsl"}]},{"requires":{"os":["windows"],"backend":["d3d12"],"vendor":["nvidia"],"features":["cooperative-matrix-f16"]},"passes":[{"shader":"ok.wgsl"}]}"#,
+    );
+    match n {
+        Ok(n) => assert!(n > 0),
+        Err(e) => eprintln!("skipping: {e}"),
+    }
+    assert_eq!(pack(r#"{"requires":{"backend":["vulkan","metal"]},"passes":[{"shader":"bad.wgsl"}]}"#).unwrap(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(dir.with_extension("zip"));
+}
