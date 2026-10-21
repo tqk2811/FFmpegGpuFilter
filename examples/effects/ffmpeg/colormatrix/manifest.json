@@ -1,0 +1,42 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colormatrix",
+  "name": "Color Matrix",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Converts the colors between the YUV color matrices BT.709, FCC, BT.601, SMPTE 240M and BT.2020.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "src",
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 4,
+      "description": "Source matrix: 0 bt709, 1 fcc, 2 bt601 (bt470, bt470bg, smpte170m), 3 smpte240m, 4 bt2020"
+    },
+    {
+      "name": "dst",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "description": "Destination matrix, same numbering as `src`"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colormatrix.wgsl"
+        }
+      ]
+    }
+  ]
+}
