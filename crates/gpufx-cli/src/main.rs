@@ -76,7 +76,14 @@ fn info(path: &str) -> Result<(), String> {
         };
         println!("  {} : {:?} = {default}{range}  {}", p.name, p.kind, p.description);
     }
-    println!("passes: {}", m.passes.len());
+    if m.groups.is_empty() {
+        println!("passes: {}", m.passes.len());
+    } else {
+        println!("groups (the first matching the device runs):");
+        for (g, group) in m.groups.iter().enumerate() {
+            println!("  {}: requires {}, {} pass(es)", m.group_label(g), group.requires.describe(), group.passes.len());
+        }
+    }
     Ok(())
 }
 
@@ -117,10 +124,10 @@ fn check(path: &str, args: &[String]) -> Result<(), String> {
         _ => return Err(USAGE.to_string()),
     };
     let pkg = Package::open(path).map_err(|e| e.to_string())?;
-    let passes = pkg.manifest.passes.len();
     let ctx = GpuContext::new(backend).map_err(|e| e.to_string())?;
     let device = ctx.description();
-    Effect::new(ctx, pkg).map_err(|e| e.to_string())?;
+    // With pass groups, the passes of the group chosen for the device.
+    let passes = Effect::new(ctx, pkg).map_err(|e| e.to_string())?.package().manifest.passes.len();
     println!("ok: {passes} pass(es) compiled on {device}");
     Ok(())
 }

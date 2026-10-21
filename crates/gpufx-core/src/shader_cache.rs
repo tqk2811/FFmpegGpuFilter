@@ -593,13 +593,26 @@ impl ShaderCache {
 /// The D3D12 shaders of every pass of `pkg` (8-bit and `rgba16float` outputs, default
 /// `expr` parameters), as `(path in the package, file)`, for `gpufx pack --precompile`.
 /// Needs a D3D12 adapter (WARP will do) and `dxcompiler.dll`; existing `compiled/` files
-/// of `pkg` are ignored. Each file is DXIL followed by its SHA-256.
+/// of `pkg` are ignored. Each file is DXIL followed by its SHA-256. With pass groups, every
+/// group that may run on D3D12 on Windows is compiled, whatever its vendor and features;
+/// a package without one has nothing to precompile (an empty list).
 pub fn precompile(pkg: &Package) -> Result<Vec<(String, Vec<u8>)>, crate::Error> {
+    let groups = &pkg.manifest.groups;
+    let packages: Vec<Package> = if groups.is_empty() {
+        vec![pkg.clone()]
+    } else {
+        (0..groups.len()).filter(|&g| groups[g].requires.allows_d3d12()).map(|g| pkg.with_group(g)).collect()
+    };
+    if packages.is_empty() {
+        return Ok(Vec::new());
+    }
     #[cfg(windows)]
     {
         let ctx = crate::GpuContext::for_precompile()?;
-        let program = crate::Program::new(ctx.clone(), pkg.clone())?;
-        program.passes(true)?;
+        for p in packages {
+            let program = crate::Program::new(ctx.clone(), p)?;
+            program.passes(true)?;
+        }
         let cache = ctx.shader_cache().expect("made with a recorder");
         let files = std::mem::take(&mut *cache.record.as_ref().expect("recorder").lock().unwrap_or_else(|e| e.into_inner()));
         if cache.disabled.load(Ordering::Relaxed) || files.is_empty() {
@@ -611,7 +624,7 @@ pub fn precompile(pkg: &Package) -> Result<Vec<(String, Vec<u8>)>, crate::Error>
     }
     #[cfg(not(windows))]
     {
-        let _ = pkg;
+        let _ = packages;
         Err(crate::Error::Gpu("precompiling D3D12 shaders needs Windows".into()))
     }
 }
