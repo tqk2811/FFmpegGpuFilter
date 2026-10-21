@@ -1,0 +1,22 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.edge-filter",
+  "name": "Edge Filter",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Gradient edge detectors in one effect: Sobel, Prewitt, Roberts cross and Scharr.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "kind", "type": "int", "default": 0, "min": 0, "max": 3, "description": "Edge operator: 0 = sobel, 1 = prewitt, 2 = roberts, 3 = scharr" },
+    { "name": "scale", "type": "float", "default": 1, "min": 0, "max": 65535, "description": "Gain applied to the gradient magnitude" },
+    { "name": "delta", "type": "float", "default": 0, "min": -65535, "max": 65535, "description": "Value added to the result, in 8-bit levels" },
+    { "name": "luma", "type": "bool", "default": false, "description": "1 = edges of the luma only, written to all three channels" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/edge_filter.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

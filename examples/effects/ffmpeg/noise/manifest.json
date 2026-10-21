@@ -1,0 +1,24 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.noise",
+  "name": "Noise",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Adds gaussian or uniform noise, static or changing every frame.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "strength", "type": "int", "default": 20, "min": 0, "max": 100, "description": "Noise strength in 8-bit levels (`alls`); FFmpeg's default is 0 (no noise)" },
+    { "name": "seed", "type": "int", "default": 0, "min": 0, "max": 2147483647, "description": "Seed of the noise (`all_seed`)" },
+    { "name": "temporal", "type": "bool", "default": false, "description": "1 = the noise changes every frame (flag `t`), 0 = the same noise on every frame" },
+    { "name": "uniform", "type": "bool", "default": false, "description": "1 = uniform noise (flag `u`), 0 = gaussian" },
+    { "name": "pattern", "type": "bool", "default": false, "description": "1 = mix in a (semi)regular pattern (flag `p`)" },
+    { "name": "mono", "type": "bool", "default": false, "description": "1 = the same noise on R, G and B (gray grain), 0 = independent per channel" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/noise.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

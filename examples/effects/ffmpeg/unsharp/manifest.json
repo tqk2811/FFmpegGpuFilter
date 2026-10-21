@@ -1,0 +1,25 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.unsharp",
+  "name": "Unsharp",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Sharpen or blur with a box-shaped unsharp mask, with separate luma and chroma size and amount.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "luma_msize_x", "type": "int", "default": 5, "min": 3, "max": 23, "description": "Luma matrix horizontal size (`lx`); the window is 2 * (size / 2) + 1 wide" },
+    { "name": "luma_msize_y", "type": "int", "default": 5, "min": 3, "max": 23, "description": "Luma matrix vertical size (`ly`)" },
+    { "name": "luma_amount", "type": "float", "default": 1, "min": -2, "max": 5, "description": "Luma effect strength (`la`): negative blurs, positive sharpens" },
+    { "name": "chroma_msize_x", "type": "int", "default": 5, "min": 3, "max": 23, "description": "Chroma matrix horizontal size (`cx`)" },
+    { "name": "chroma_msize_y", "type": "int", "default": 5, "min": 3, "max": 23, "description": "Chroma matrix vertical size (`cy`)" },
+    { "name": "chroma_amount", "type": "float", "default": 0, "min": -2, "max": 5, "description": "Chroma effect strength (`ca`)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/unsharp_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/unsharp_v.wgsl", "inputs": ["tmp", "src"], "output": "out" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.bilateral",
+  "name": "Bilateral",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Edge-preserving smoothing: neighbours are weighted by distance and by luma difference.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "sigmaS", "type": "float", "default": 0.1, "min": 0, "max": 8, "description": "Spatial sigma in pixels; the window reaches 2 * sigmaS pixels" },
+    { "name": "sigmaR", "type": "float", "default": 0.1, "min": 0, "max": 1, "description": "Range sigma: the luma difference (0..1) that still counts as the same surface" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/bilateral.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.convolution",
+  "name": "Convolution",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Convolution with a 3x3 matrix, a divisor and a bias.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "m0", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 1 column 1 (top left)" },
+    { "name": "m1", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 1 column 2" },
+    { "name": "m2", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 1 column 3" },
+    { "name": "m3", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 2 column 1" },
+    { "name": "m4", "type": "float", "default": 1, "min": -1000, "max": 1000, "description": "Matrix, row 2 column 2 (centre)" },
+    { "name": "m5", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 2 column 3" },
+    { "name": "m6", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 3 column 1" },
+    { "name": "m7", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 3 column 2" },
+    { "name": "m8", "type": "float", "default": 0, "min": -1000, "max": 1000, "description": "Matrix, row 3 column 3 (bottom right)" },
+    { "name": "rdiv", "type": "float", "default": 0, "min": 0, "max": 65535, "description": "Multiplier of the sum; 0 = 1 / (sum of the matrix), or 1 when that sum is 0 (`0rdiv`)" },
+    { "name": "bias", "type": "float", "default": 0, "min": 0, "max": 1020, "description": "Value added to the result, in 8-bit levels (`0bias`)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/convolution.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}
