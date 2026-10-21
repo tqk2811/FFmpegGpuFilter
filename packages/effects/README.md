@@ -123,7 +123,7 @@ Equivalents of FFmpeg built-in filters and `xfade` transitions.
 - [varblur](ffmpeg/varblur/README.md)
 - [vectorscope](ffmpeg/vectorscope/README.md)
 - [waveform](ffmpeg/waveform/README.md)
-- [xfade-custom](ffmpeg/xfade-custom/README.md)
+- [xfade](ffmpeg/xfade/README.md)
 - [xstack](ffmpeg/xstack/README.md)
 - [yaepblur](ffmpeg/yaepblur/README.md)
 - [zoom-pan](ffmpeg/zoom-pan/README.md)

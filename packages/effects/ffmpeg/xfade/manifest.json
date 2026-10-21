@@ -1,0 +1,63 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.xfade",
+  "name": "Crossfade (xfade)",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Transition from the first to the second input with any of FFmpeg's xfade transitions (fade, wipes, slides, circle/rect crops, dissolve, pixelize, wind, cover/reveal... and a custom expression). Drive `progress` from 0 to 1.",
+  "inputs": [
+    {
+      "name": "first",
+      "description": "Outgoing clip"
+    },
+    {
+      "name": "second",
+      "description": "Incoming clip (same size as the first)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "transition",
+      "type": "enum",
+      "values": { "custom": -1, "fade": 0, "wipeleft": 1, "wiperight": 2, "wipeup": 3, "wipedown": 4, "slideleft": 5, "slideright": 6, "slideup": 7, "slidedown": 8, "circlecrop": 9, "rectcrop": 10, "distance": 11, "fadeblack": 12, "fadewhite": 13, "radial": 14, "smoothleft": 15, "smoothright": 16, "smoothup": 17, "smoothdown": 18, "circleopen": 19, "circleclose": 20, "vertopen": 21, "vertclose": 22, "horzopen": 23, "horzclose": 24, "dissolve": 25, "pixelize": 26, "diagtl": 27, "diagtr": 28, "diagbl": 29, "diagbr": 30, "hlslice": 31, "hrslice": 32, "vuslice": 33, "vdslice": 34, "hblur": 35, "fadegrays": 36, "wipetl": 37, "wipetr": 38, "wipebl": 39, "wipebr": 40, "squeezeh": 41, "squeezev": 42, "zoomin": 43, "fadefast": 44, "fadeslow": 45, "hlwind": 46, "hrwind": 47, "vuwind": 48, "vdwind": 49, "coverleft": 50, "coverright": 51, "coverup": 52, "coverdown": 53, "revealleft": 54, "revealright": 55, "revealup": 56, "revealdown": 57 },
+      "default": "fade",
+      "description": "FFmpeg xfade transition name (or its number): custom uses `expr`; the list is in the README"
+    },
+    {
+      "name": "progress",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "0 = first clip, 1 = second clip (replaces FFmpeg's offset and duration); at exactly 0 and 1 the output is forced to the first / second clip"
+    },
+    {
+      "name": "expr",
+      "type": "expr",
+      "vars": [
+        "X",
+        "Y",
+        "W",
+        "H",
+        "P",
+        "A",
+        "B",
+        "PLANE"
+      ],
+      "default": "A*P + B*(1-P)",
+      "description": "Only for transition -1 (custom). Result for one color channel, 0..255. X, Y pixel position, W, H size, P = 1 - progress (FFmpeg's P: 1 at the start, 0 at the end), A and B the channel value of the first / second clip, 0..255, PLANE the channel: 0, 1, 2 = R, G, B"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/xfade.wgsl"
+        }
+      ]
+    }
+  ]
+}

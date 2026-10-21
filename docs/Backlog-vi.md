@@ -141,9 +141,9 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: giống demo hơn và tránh giật ở chỗ nối. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
 
-### [Vừa] `hblur-transition` đọc tới width/2 pixel mỗi điểm ảnh
-- **Vấn đề**: ở progress 0.5 trên 4K mỗi pixel đọc ~1920 lần mỗi texture (~32 G lần đọc một frame), dễ chạm GPU timeout (TDR) trên D3D12/Windows.
-- **Vị trí**: [hblur_transition.wgsl](../packages/effects/ffmpeg/hblur-transition/shaders/hblur_transition.wgsl)
+### [Vừa] `hblur-transition` và `xfade.zip=transition=hblur` đọc tới width/2 pixel mỗi điểm ảnh
+- **Vấn đề**: ở progress 0.5 trên 4K mỗi pixel đọc ~1920 lần mỗi texture (~32 G lần đọc một frame), dễ chạm GPU timeout (TDR) trên D3D12/Windows; 1080p cũng đã nặng (~4 G lần đọc). FFmpeg dùng tổng trượt O(1) mỗi pixel.
+- **Vị trí**: [hblur_transition.wgsl](../packages/effects/ffmpeg/hblur-transition/shaders/hblur_transition.wgsl), [xfade.wgsl](../packages/effects/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh hblur)
 - **Vì sao**: nên tính tổng theo hàng bằng prefix-sum hoặc shared memory để chi phí không phụ thuộc progress; cần texture trung gian float (xem mục `tmp` 8-bit dưới).
 - **Ngày ghi**: 2026-10-21
 
@@ -177,10 +177,10 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao / cách làm**: core (`graph.rs` `prepare`) đã dựng lại slot khi đổi cỡ. Phần C cần cache frames context theo (sw_format, w, h) như `old_frames`/`config_out_frames` của `vf_gpufx_ai_upscale.c`, kích thước theo từng frame cho output, biến biểu thức, passthrough, pool upload; `gpufx_upload`/`download` cấu hình lại. Output động cần `output.size` dạng biểu thức (api 2) + API FFI `_at`. Giới hạn của FFmpeg: chỉ `scale`, `libplacebo`, `format`, `null`, buffersink... nhận frame khác cỡ link; encoder giữ cỡ frame đầu.
 - **Ngày ghi**: 2026-10-21
 
-### [Thấp] `xfade-custom`: thiếu `PLANE` và hàm đọc pixel `a0..a3`/`b0..b3`
-- **Vấn đề**: biểu thức chạy giống nhau cho R/G/B, không đọc được pixel ở vị trí khác như `xfade=custom` của FFmpeg; `geq` cũng thiếu `p(x,y)`.
-- **Vị trí**: [xfade_custom.wgsl](../packages/effects/ffmpeg/xfade-custom/shaders/xfade_custom.wgsl); bộ dịch `expr` của gpufx-core
-- **Vì sao**: `PLANE` thêm rẻ (chạy biểu thức 3 lần); đọc pixel cần mở rộng định dạng `expr` cho phép gọi hàm lấy mẫu texture.
+### [Thấp] `xfade.zip` `custom`: thiếu hàm đọc pixel `a0..a3`/`b0..b3`
+- **Vấn đề**: biểu thức không đọc được pixel ở vị trí khác như `xfade=custom` của FFmpeg, alpha chỉ trộn tuyến tính chứ không chạy biểu thức; `geq` cũng thiếu `p(x,y)`.
+- **Vị trí**: [xfade.wgsl](../packages/effects/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh `custom`); bộ dịch `expr` của gpufx-core
+- **Vì sao**: đọc pixel cần mở rộng định dạng `expr` cho phép gọi hàm lấy mẫu texture.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Effect port FFmpeg: các finding review để sau
