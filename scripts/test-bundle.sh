@@ -31,8 +31,8 @@ FF=$DIST/bin/ffmpeg
 # Effects and models are passed relative to $PACKAGES: a Windows path (C:/...) would break the
 # filter graph, where ':' separates options.
 FX=gpufx
-# Package of an effect by name: gpufx/<group>/<name>.zip, as in packages/gpufx.
-fx() { set -- "$FX"/*/"$1".zip; echo "$1"; }
+# Package of an effect by name: gpufx/<group>/<name>.zip, as in packages/gpufx (a group may be nested).
+fx() { find "$FX" -name "$1.zip" | sort | head -n 1; }
 
 if [ ! -f "$CLIPS/straight.png" ]; then
     REF=${REF_FFMPEG:-ffmpeg}
@@ -284,10 +284,19 @@ TRANSITIONS="wipe-transition crossfade slide-transition circle-reveal clock-wipe
 # Every capcut effect is a two input transition too.
 for e in "$FX"/capcut/*.zip; do TRANSITIONS="$TRANSITIONS $(basename "$e" .zip)"; done
 echo "single input effects (audio stream kept, GPU frames into the null muxer):"
-for e in "$FX"/*/*.zip; do
-    case " $TRANSITIONS overlay fit hstack vstack " in *" $(basename "$e" .zip) "*) continue ;; esac
+# Other effects with several inputs, name:number of inputs (every input the same clip).
+MULTI="blend:2 displace:3 masked-merge:3 masked-minmax:3 maskedclamp:3 maskedthreshold:2 threshold:4 varblur:2 xfade:2 xstack:4 zoom-canvas:2"
+for e in $(find "$FX" -name '*.zip' | sort); do
+    case " $TRANSITIONS $MULTI overlay fit hstack vstack " in *" $(basename "$e" .zip) "* | *" $(basename "$e" .zip):"*) continue ;; esac
     # shellcheck disable=SC2086
     ok "$(basename "$e" .zip)" -i "$A" -vf "gpufx=graph=$e" $NULL
+done
+echo "multi input effects:"
+for m in $MULTI; do
+    n=${m#*:} args="" pads="" i=0
+    while [ $i -lt "$n" ]; do args="$args -i $A"; pads="$pads[$i]"; i=$((i + 1)); done
+    # shellcheck disable=SC2086
+    ok "${m%:*} ($n inputs)" $args -filter_complex "${pads}gpufx=graph='$pads$(fx "${m%:*}")'" -an $NULL
 done
 echo "two input effects:"
 for e in $TRANSITIONS; do
