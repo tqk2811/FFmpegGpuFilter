@@ -1,0 +1,46 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.blend",
+  "name": "Blend",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's blend filter: combine the top and bottom clips with one of 40 blend modes and an opacity.",
+  "inputs": [
+    {
+      "name": "top",
+      "description": "Top layer (FFmpeg's first input)"
+    },
+    {
+      "name": "bottom",
+      "description": "Bottom layer (FFmpeg's second input, same size as the top)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "mode",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 39,
+      "description": "Blend mode, FFmpeg's numbering: 0 normal, 1 addition, 2 and, 3 average, 4 burn, 5 darken, 6 difference, 7 grainextract, 8 divide, 9 dodge, 10 exclusion, 11 hardlight, 12 lighten, 13 multiply, 14 negation, 15 or, 16 overlay, 17 phoenix, 18 pinlight, 19 reflect, 20 screen, 21 softlight, 22 subtract, 23 vividlight, 24 xor, 25 hardmix, 26 linearlight, 27 glow, 28 grainmerge, 29 multiply128, 30 heat, 31 freeze, 32 extremity, 33 softdifference, 34 geometric, 35 harmonic, 36 bleach, 37 stain, 38 interpolate, 39 hardoverlay"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Strength of the effect. Modes other than normal: 0 = top, 1 = fully blended. Normal: 0 = bottom, 1 = top"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/blend.wgsl"
+        }
+      ]
+    }
+  ]
+}

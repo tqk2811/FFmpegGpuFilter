@@ -1,0 +1,33 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.masked-merge",
+  "name": "Masked Merge",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's maskedmerge filter: merge the base and overlay clips through a mask.",
+  "inputs": [
+    {
+      "name": "base",
+      "description": "Base clip (where the mask is black)"
+    },
+    {
+      "name": "overlay",
+      "description": "Overlay clip (where the mask is white, same size as the base)",
+      "same_size": true
+    },
+    {
+      "name": "mask",
+      "description": "Mask clip (same size as the base)",
+      "same_size": true
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/masked_merge.wgsl"
+        }
+      ]
+    }
+  ]
+}
