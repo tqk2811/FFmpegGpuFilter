@@ -115,15 +115,15 @@ chạy trên GPU qua libgpufx, trên cùng loại frame GPU và device như `gpu
 ```sh
 # 12 fps -> 24 fps trên Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
 # D3D12 (Windows; cần dxcompiler.dll, có sẵn trong bin/)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
 ```
 
 | Option | Mặc định | Ý nghĩa |
 |---|---|---|
-| `model` | (bắt buộc) | đường dẫn gói `frame_interp`, vd `models/rife-v4.6.zip` |
+| `model` | (bắt buộc) | đường dẫn gói `frame_interp`, vd `packages/gpufx_ai_framerate/rife-v4.6.zip` |
 | `fps` | gấp đôi input | frame rate đầu ra; số hoặc phân số (`30`, `24000/1001`; không nhận tên như `ntsc`); tỉ lệ bất kỳ, không chỉ bội số |
 | `scene` | 0.2 | ngưỡng chuyển cảnh (0-1): SSIM của cặp frame ở 32x32, tính như `inference_video.py` của RIFE gốc; cặp thấp hơn ngưỡng là chuyển cảnh, không nội suy (lặp frame gần hơn); 0 thì không bao giờ phát hiện chuyển cảnh (mọi cặp đều được nội suy). Với anime, 0.2 vẫn trộn một số cú cắt giữa hai cảnh bố cục giống nhau; 0.4 bắt được 89% cú cắt trên ba clip OP/ED 90 s, đổi lại lặp frame ở một số cú zoom hoặc chớp sáng rất nhanh |
 | `max_gap` | 2 | cặp frame cách nhau quá số lần thời lượng frame input này (khoảng hở của luồng VFR) thì không nội suy |
@@ -135,8 +135,8 @@ texture D3D11 shared) thì output dùng chính frames context của input và fr
 (vd `hwupload` D3D11) output có frames context riêng và frame nguồn được copy sang trên GPU (qua RGBA 8-bit, hơi mất
 chất lượng).
 
-Model không nằm trong git: bundle win64/linux64 kèm sẵn trong `models/` (cùng license), hoặc tự tải và chuyển đổi
-bằng `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (URL và sha256 cố định, ghi ra `build/models/`). Trên
+Model không nằm trong git: file release `gpufx-packages.zip` kèm sẵn trong `gpufx_ai_framerate/` (cùng license; bundle ffmpeg không kèm), hoặc tự tải và chuyển đổi
+bằng `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (URL và sha256 cố định, ghi ra `build/packages/<filter>/`). Các ví dụ ở đây đặt gói ở `packages/` nơi chạy ffmpeg: giải nén `gpufx-packages.zip` vào đó (hoặc trỏ `model=` tới `build/packages/...`). Trên
 D3D12 shader của model cần DXC (`dxcompiler.dll`); lần chạy đầu phải biên dịch (đặt `GPUFX_SHADER_CACHE` để giữ lại).
 
 **Chưa test:** đường VideoToolbox (macOS) của `gpufx_ai_framerate` chưa từng chạy trên máy Mac, và bundle linux64 của
@@ -152,15 +152,15 @@ lần input theo mỗi chiều, cùng pixel format với input:
 ```sh
 # Anime 1080p -> 4K trên Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
 # Video quay thật x4 trên D3D12 (Windows; cần dxcompiler.dll, có sẵn trong bin/)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
 ```
 
 | Option | Mặc định | Ý nghĩa |
 |---|---|---|
-| `model` | (bắt buộc) | đường dẫn gói hoặc bundle `super_resolution`: `models/realesr-animevideov3.zip` (anime, scale 2, 3, 4) hoặc `models/realesr-general-x4v3.zip` (nội dung thường, scale 4) |
+| `model` | (bắt buộc) | đường dẫn gói hoặc bundle `super_resolution`: `packages/gpufx_ai_upscale/realesr-animevideov3.zip` (anime, scale 2, 3, 4) hoặc `packages/gpufx_ai_upscale/realesr-general-x4v3.zip` (nội dung thường, scale 4) |
 | `scale` | 2 | kích thước đầu ra / input theo mỗi chiều; gói phải có scale này (lỗi sẽ liệt kê các scale gói có) |
 | `tile` | 0 | cạnh [tile](docs/Glossary-vi.md#L35) lớn nhất tính bằng pixel input; 0 thì chọn ít tile nhất vừa giới hạn buffer của GPU. Các tile chồng lên nhau đúng bằng vùng ngữ cảnh của model nên kết quả không phụ thuộc cách chia (không có đường nối) |
 | `precision` | `auto` | `auto`: tích chập f16 nếu GPU hỗ trợ (khoảng 57 dB so với bản tham chiếu f32), không thì f32; `f32`: f32 toàn bộ (chậm hơn) |
@@ -169,8 +169,8 @@ Input phải là frame GPU (Vulkan, D3D12, D3D11 hoặc VideoToolbox) dạng nv1
 qua RGBA 8-bit (đầu vào và đầu ra của model), alpha không được giữ. Frame đầu ra có frames context riêng, lớn gấp
 `scale` lần. Đổi kích thước giữa luồng (`-reinit_filter 0`) thì frame đầu ra theo kích thước mới.
 
-Model không nằm trong git: bundle win64/linux64 kèm sẵn trong `models/` (cùng license), hoặc tự tải và chuyển đổi bằng
-`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/models/`). Trên D3D12 shader cần DXC, như
+Model không nằm trong git: file release `gpufx-packages.zip` kèm sẵn trong `gpufx_ai_upscale/` (cùng license; bundle ffmpeg không kèm), hoặc tự tải và chuyển đổi bằng
+`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/packages/<filter>/`). Trên D3D12 shader cần DXC, như
 `gpufx_ai_framerate`.
 
 **Không chạy realtime:** trên RTX 4060 Laptop một frame 1080p ở x2 (realesr-animevideov3) mất khoảng 480-510 ms trên
@@ -195,12 +195,12 @@ Cần Rust (stable) và một driver GPU (Linux không có GPU có thể dùng `
 ```sh
 cargo build --release
 cargo test --release                       # chạy các hiệu ứng mẫu trên GPU hiện có
-./target/release/gpufx run 'packages/effects/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
-scripts/pack-effects.sh                    # chỉ đóng gói hiệu ứng: packages/effects -> dist/effects/<group>/<name>.zip
+./target/release/gpufx run 'packages/gpufx/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
+scripts/pack-packages.sh                    # chỉ đóng gói hiệu ứng: packages/gpufx -> dist/packages/gpufx/<group>/<name>.zip
 ```
 
-Thêm hoặc sửa hiệu ứng **không cần build lại FFmpeg**: chạy `scripts/pack-effects.sh`
-(Windows: `scripts\pack-effects.ps1`) rồi dùng file `.zip` mới.
+Thêm hoặc sửa hiệu ứng **không cần build lại FFmpeg**: chạy `scripts/pack-packages.sh`
+(Windows: `scripts\pack-packages.ps1`) rồi dùng file `.zip` mới.
 
 ### Test
 
@@ -236,6 +236,7 @@ các thư viện còn lại (`avcodec`, `avformat`…) giữ nguyên bản build
 ```sh
 scripts/build-prebuilt.sh            # linux64 -> dist/linux64
 scripts/build-prebuilt.sh win64      # cross-compile bằng mingw-w64 -> dist/win64
+scripts/pack-packages.sh --models     # hiệu ứng + model -> dist/packages (bundle không kèm)
 scripts/test-bundle.sh dist/linux64  # chạy mọi hiệu ứng qua ffmpeg, kể cả quy tắc báo lỗi
 ```
 
@@ -290,9 +291,13 @@ Kết quả nằm trong `dist/<target>/`:
 
 ```
 bin/      ffmpeg, ffprobe, libgpufx.so | gpufx.dll, gpufx-cli
-effects/  các hiệu ứng mẫu đã đóng gói .zip (ffmpeg/, slideshow/, standalone/ như packages/effects)
+LICENSE-gpufx.txt, THIRD-PARTY-LICENSES-gpufx.txt, FFMPEG-LICENSE.txt, README.md
 include/  gpufx.h
 ```
+
+Bundle không chứa gói hiệu ứng và model: đóng gói bằng `scripts/pack-packages.sh`
+(thêm `--models` để có model AI) hoặc lấy file release `gpufx-packages.zip`.
+Các ví dụ trong README này đặt gói ở `packages/` nơi chạy ffmpeg (giải nén `gpufx-packages.zip` vào đó).
 
 Bản build này mặc định **bật mọi filter của FFmpeg** (`FFMPEG_FILTERS=all`), nên `overlay`, `xfade`, `gblur`...
 có sẵn cạnh các hiệu ứng `gpufx`. `FFMPEG_FILTERS=keep` quay về danh sách ngắn trong
@@ -321,8 +326,8 @@ make -j"$(nproc)"
 | `ffmpeg/` | Filter `vf_gpufx.c` và script tích hợp |
 | `external/FFmpeg` | Submodule mã nguồn FFmpeg |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx một lệnh trong Docker |
-| `packages/effects/` | 38 hiệu ứng mẫu, chia nhóm `ffmpeg/`, `slideshow/`, `standalone/` |
-| `scripts/` | `build-prebuilt.sh` (build nhanh trên FFmpeg build sẵn), `test-bundle.sh`, `install-libgpufx.sh`, `pack-effects.sh`/`.ps1` (đóng gói zip) |
+| `packages/gpufx/` | 38 hiệu ứng mẫu, chia nhóm `ffmpeg/`, `slideshow/`, `standalone/` |
+| `scripts/` | `build-prebuilt.sh` (build nhanh trên FFmpeg build sẵn), `test-bundle.sh`, `install-libgpufx.sh`, `pack-packages.sh`/`.ps1` (đóng gói zip) |
 
 ## Giấy phép
 

@@ -20,7 +20,7 @@ gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>]
 
 | Option | Type | Default | Range/values | Meaning |
 |--------|------|---------|--------------|---------|
-| `model` | string | (required) | path | Path of a gpufx-nn package whose `io.json` has kind `frame_interp`, for example `models/rife-v4.6.zip`. The filter fails to start without it. Format: [NN_MODEL_FORMAT.md](../../NN_MODEL_FORMAT.md) |
+| `model` | string | (required) | path | Path of a gpufx-nn package whose `io.json` has kind `frame_interp`, for example `packages/gpufx_ai_framerate/rife-v4.6.zip`. The filter fails to start without it. Format: [NN_MODEL_FORMAT.md](../../NN_MODEL_FORMAT.md) |
 | `fps` | rational | twice the input's | 0..INT_MAX | Output frame rate, a number or a fraction (`30`, `24000/1001`); named rates such as `ntsc` are not accepted. `0` (default) means twice the input rate. If the input rate is unknown, `fps` must be set |
 | `scene` | double | `0.2` | 0..1 | Scene change threshold: the SSIM of the pair at 32x32, as the official RIFE `inference_video.py` computes it. A pair below it is a cut and is not interpolated (the nearer source frame is repeated). `0` never detects a cut: every pair is interpolated. On anime 0.2 still blends some cuts between shots of similar layout; 0.4 caught 89% of the cuts of three 90 s OP/ED clips, at the cost of repeating a frame on some very fast zooms and flashes |
 | `max_gap` | double | `2.0` | 1..100 | A pair of source frames further apart than this many input frame durations (a gap in a VFR stream) is repeated, not interpolated |
@@ -56,24 +56,24 @@ No timeline support and no runtime commands.
 ```sh
 # 12 fps -> 24 fps on Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
 
 # Any target rate, D3D12 (Windows)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
 
 # No cut detection, interpolate across gaps up to 4 frame durations
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
 ```
 
-The model is not in git: the win64/linux64 bundles ship it in `models/`, or fetch and convert it with
-`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/models/`).
+The model is not in git: the release asset `gpufx-packages.zip` ships it in `gpufx_ai_framerate/` (not the ffmpeg bundles), or fetch and convert it with
+`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/packages/<filter>/`).
 
 ## Limitations
 
 - Untested: the VideoToolbox (macOS) path has never run on a Mac, and the linux64 bundle's filter and
-  `models/rife-v4.6.zip` have not been run (only Windows has).
+  `packages/gpufx_ai_framerate/rife-v4.6.zip` have not been run (only Windows has).
 - Speed (RTX 4060 Laptop): Vulkan about 45 ms per 1080p frame (4K about 174 ms); D3D12 and D3D11 are about
   1.7x slower. Prefer Vulkan.
 - Output frame rate is constant: variable frame rate input is resampled to the grid.

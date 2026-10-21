@@ -13,9 +13,9 @@ gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> --used-
 `-o` ending in `.zip` writes a zip, anything else a directory with the same files. The name defaults to the
 output file stem. `--used-for` (required) is written to `used_for` of `model.json`: `gpufx_ai_upscale` for a
 `super_resolution` model, `gpufx_ai_framerate` for a `frame_interp` one (checked against the `kind` of `io.json`).
-Each `models/*/source.json` has its `"used_for"`, which the fetch scripts pass on. Model files are not in git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` download the
-models listed in `models/*/source.json` (pinned URLs, sha256 checked) into `build/models/<name>/` and convert them
-to `build/models/<name>.zip`.
+Each `packages/gpufx_ai_*/*/source.json` has its `"used_for"`, which the fetch scripts pass on. Model files are not in git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` download the
+models listed in `packages/gpufx_ai_*/*/source.json` (pinned URLs, sha256 checked) into `build/packages/<filter>/<name>/` and convert them
+to `build/packages/<filter>/<name>.zip`.
 
 ## Package files
 
@@ -105,7 +105,7 @@ Op semantics:
 `timestep` is a one-channel plane filled with the time in (0, 1); the frames are padded to a multiple of
 `pad_multiple`, run, and the output is cropped and clamped.
 
-The Real-ESRGAN ones (`models/realesr-*/io-x<N>.json`) are:
+The Real-ESRGAN ones (`packages/gpufx_ai_upscale/realesr-*/io-x<N>.json`) are:
 
 ```json
 { "kind": "super_resolution", "family": "realesr", "inputs": { "image": "data" }, "output": "output",

@@ -125,7 +125,7 @@ static av_cold int init(AVFilterContext *ctx)
 
     if (!s->model || !*s->model) {
         av_log(ctx, AV_LOG_ERROR, "model is required: the path of a frame_interp package "
-               "(e.g. models/rife-v4.6.zip, see scripts/fetch-models).\n");
+               "(e.g. packages/gpufx_ai_framerate/rife-v4.6.zip, see scripts/fetch-models).\n");
         return AVERROR(EINVAL);
     }
     if (gpufx_version() < GPUFX_API_VERSION) {
@@ -883,7 +883,7 @@ static int activate(AVFilterContext *ctx)
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
 static const AVOption gpufx_ai_framerate_options[] = {
-    { "model",   "frame interpolation package (gpufx-nn, io.json kind frame_interp), e.g. models/rife-v4.6.zip", OFFSET(model), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
+    { "model",   "frame interpolation package (gpufx-nn, io.json kind frame_interp), e.g. packages/gpufx_ai_framerate/rife-v4.6.zip", OFFSET(model), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
     { "fps",     "output frame rate; default: twice the input's", OFFSET(fps), AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, INT_MAX, FLAGS },
     { "scene",   "scene change SSIM threshold (32x32): below it a pair is a cut and is not interpolated; 0: off", OFFSET(scene), AV_OPT_TYPE_DOUBLE, { .dbl = 0.2 }, 0, 1, FLAGS },
     { "max_gap", "pairs further apart than this many input frame durations are repeated, not interpolated", OFFSET(max_gap), AV_OPT_TYPE_DOUBLE, { .dbl = 2.0 }, 1, 100, FLAGS },

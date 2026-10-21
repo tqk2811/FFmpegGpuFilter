@@ -1,13 +1,13 @@
 #!/bin/sh
-# Downloads the neural network models of models/*/source.json (pinned URLs, sha256 checked) into
-# build/models/<name>/ and converts each to build/models/<name>.zip (gpufx-nn package).
-# The model files are not in git.
+# Downloads the neural network models of packages/<filter>/<name>/source.json (<filter> is a
+# gpufx_ai_* folder; pinned URLs, sha256 checked) into build/packages/<filter>/<name>/ and converts
+# each to build/packages/<filter>/<name>.zip (gpufx-nn package). The model files are not in git.
 #   scripts/fetch-models.sh                        all models
 #   scripts/fetch-models.sh rife-v4.6              chosen models
 #   scripts/fetch-models.sh --bin <gpufx-nnconv>   use a built converter instead of `cargo run`
 #
 # A source.json with a "variants" array is a multi-scale bundle: each variant has a dir, io, url_param,
-# sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/models/<name>.zip.
+# sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/packages/<filter>/<name>.zip.
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
 # filters the model is for) is passed to gpufx-nnconv --used-for.
 
@@ -24,10 +24,18 @@ while [ $# -gt 0 ]; do
 done
 if [ $# -eq 0 ]; then
     set --
-    for d in "$ROOT"/models/*/; do
+    for d in "$ROOT"/packages/gpufx_ai_*/*/; do
         [ -f "$d/source.json" ] && set -- "$@" "$(basename "$d")"
     done
 fi
+
+# model_dir <name>: the packages/gpufx_ai_*/<name> folder holding its source.json (empty if none).
+model_dir() {
+    for d in "$ROOT"/packages/gpufx_ai_*/"$1"; do
+        [ -f "$d/source.json" ] && { echo "$d"; return; }
+    done
+    return 0
+}
 
 sha256() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
@@ -94,12 +102,14 @@ convert() {
 }
 
 for name in "$@"; do
-    src=$ROOT/models/$name/source.json
-    [ -f "$src" ] || { echo "$name: no models/$name/source.json" >&2; exit 1; }
-    dir=$ROOT/build/models/$name
+    mdir=$(model_dir "$name")
+    [ -n "$mdir" ] || { echo "$name: no packages/gpufx_ai_*/$name/source.json" >&2; exit 1; }
+    src=$mdir/source.json
+    out=$ROOT/build/packages/$(basename "$(dirname "$mdir")")
+    dir=$out/$name
     mkdir -p "$dir"
     used_for=$(json_list "$src" used_for)
-    [ -n "$used_for" ] || { echo "$name: models/$name/source.json has no \"used_for\"" >&2; exit 1; }
+    [ -n "$used_for" ] || { echo "$name: $src has no \"used_for\"" >&2; exit 1; }
 
     license=
     if [ -n "$(json_get "$src" license_url)" ]; then
@@ -107,7 +117,7 @@ for name in "$@"; do
         license=$dir/LICENSE
     fi
     readme=
-    [ -f "$ROOT/models/$name/README.md" ] && readme=$ROOT/models/$name/README.md
+    [ -f "$mdir/README.md" ] && readme=$mdir/README.md
 
     if grep -q '"variants"' "$src"; then
         # Multi-scale bundle: convert each variant to a package directory, then bundle them.
@@ -118,7 +128,7 @@ for name in "$@"; do
             mkdir -p "$vd"
             fetch "$vurl_param" "$vsha_param" "$vd/model.param"
             fetch "$vurl_bin" "$vsha_bin" "$vd/model.bin"
-            convert ncnn --param "$vd/model.param" --bin "$vd/model.bin" --io "$ROOT/models/$name/$vio" \
+            convert ncnn --param "$vd/model.param" --bin "$vd/model.bin" --io "$mdir/$vio" \
                 --used-for "$used_for" --name "$name-$vdir" -o "$dir/pkg-$vdir"
             echo "$vdir|$dir/pkg-$vdir" >> "$dir/.variants"
         done
@@ -129,12 +139,12 @@ for name in "$@"; do
         done < "$dir/.variants"
         rm -f "$dir/.variants"
         convert bundle "$@" --name "$name" \
-            ${readme:+--readme "$readme"} ${license:+--license "$license"} -o "$ROOT/build/models/$name.zip"
+            ${readme:+--readme "$readme"} ${license:+--license "$license"} -o "$out/$name.zip"
     else
         # Single-model package (e.g. RIFE).
         fetch "$(json_get "$src" url_param)" "$(json_get "$src" sha256_param)" "$dir/flownet.param"
         fetch "$(json_get "$src" url_bin)" "$(json_get "$src" sha256_bin)" "$dir/flownet.bin"
-        convert ncnn --param "$dir/flownet.param" --bin "$dir/flownet.bin" --io "$ROOT/models/$name/io.json" \
-            --used-for "$used_for" ${license:+--license "$license"} ${readme:+--readme "$readme"} --name "$name" -o "$ROOT/build/models/$name.zip"
+        convert ncnn --param "$dir/flownet.param" --bin "$dir/flownet.bin" --io "$mdir/io.json" \
+            --used-for "$used_for" ${license:+--license "$license"} ${readme:+--readme "$readme"} --name "$name" -o "$out/$name.zip"
     fi
 done

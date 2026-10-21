@@ -13,9 +13,9 @@ gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> --used-
 `-o` kết thúc bằng `.zip` thì ghi zip, còn lại ghi thư mục có cùng các file. Mặc định tên model là tên file output
 (bỏ đuôi). `--used-for` (bắt buộc) được ghi vào `used_for` của `model.json`: `gpufx_ai_upscale` cho model
 `super_resolution`, `gpufx_ai_framerate` cho model `frame_interp` (đối chiếu với `kind` của `io.json`). Mỗi
-`models/*/source.json` có `"used_for"` riêng, script fetch truyền tiếp cho converter. File model không nằm trong git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` tải các model
-liệt kê trong `models/*/source.json` (URL ghim commit, kiểm sha256) vào `build/models/<name>/` rồi convert thành
-`build/models/<name>.zip`.
+`packages/gpufx_ai_*/*/source.json` có `"used_for"` riêng, script fetch truyền tiếp cho converter. File model không nằm trong git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` tải các model
+liệt kê trong `packages/gpufx_ai_*/*/source.json` (URL ghim commit, kiểm sha256) vào `build/packages/<filter>/<name>/` rồi convert thành
+`build/packages/<filter>/<name>.zip`.
 
 ## File trong package
 
@@ -105,7 +105,7 @@ Ngữ nghĩa các op:
 `timestep` là plane một channel điền giá trị thời gian trong (0, 1); frame được pad lên bội số của
 `pad_multiple`, chạy, rồi output được crop và clamp.
 
-Bản của Real-ESRGAN (`models/realesr-*/io-x<N>.json`):
+Bản của Real-ESRGAN (`packages/gpufx_ai_upscale/realesr-*/io-x<N>.json`):
 
 ```json
 { "kind": "super_resolution", "family": "realesr", "inputs": { "image": "data" }, "output": "output",

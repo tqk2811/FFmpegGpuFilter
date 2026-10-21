@@ -9,7 +9,7 @@ scale variant; select it at run time with `scale=4`.
 The weights are the ncnn `realesr-generalv3-x4` (SRVGGNetCompact) model of
 [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (Real-ESRGAN: Training Real-World Blind Super-Resolution
 with Pure Synthetic Data, Wang et al.), converted by `gpufx-nnconv`. The pinned URLs and sha256 are in
-`models/realesr-general-x4v3/source.json` of the gpufx repository; they match the official
+`packages/gpufx_ai_upscale/realesr-general-x4v3/source.json` of the gpufx repository; they match the official
 `realesrgan-ncnn-vulkan` release. The graph ends with a clip to `[0, 1]`.
 
 ## Use

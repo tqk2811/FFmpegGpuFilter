@@ -20,7 +20,7 @@ gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>]
 
 | Option | Kiểu | Mặc định | Khoảng/giá trị | Ý nghĩa |
 |--------|------|----------|----------------|---------|
-| `model` | string | (bắt buộc) | path | Đường dẫn gói gpufx-nn có `io.json` kind `frame_interp`, ví dụ `models/rife-v4.6.zip`. Thiếu thì filter không khởi động được. Định dạng: [NN_MODEL_FORMAT-vi.md](../../NN_MODEL_FORMAT-vi.md) |
+| `model` | string | (bắt buộc) | path | Đường dẫn gói gpufx-nn có `io.json` kind `frame_interp`, ví dụ `packages/gpufx_ai_framerate/rife-v4.6.zip`. Thiếu thì filter không khởi động được. Định dạng: [NN_MODEL_FORMAT-vi.md](../../NN_MODEL_FORMAT-vi.md) |
 | `fps` | rational | gấp đôi rate input | 0..INT_MAX | Frame rate output, số hoặc phân số (`30`, `24000/1001`); không nhận tên rate như `ntsc`. `0` (mặc định) nghĩa là gấp đôi rate input. Nếu không biết rate input thì phải đặt `fps` |
 | `scene` | double | `0.2` | 0..1 | Ngưỡng đổi cảnh: SSIM của cặp frame ở 32x32, tính như `inference_video.py` gốc của RIFE. Cặp dưới ngưỡng là một cú cắt và không nội suy (lặp source frame gần hơn). `0` không bao giờ phát hiện cắt: mọi cặp đều nội suy. Trên anime 0.2 vẫn trộn vài cú cắt giữa các cảnh có bố cục giống nhau; 0.4 bắt được 89% cú cắt của ba clip OP/ED 90 s, đổi lại có lúc lặp một frame ở vài cú zoom và flash rất nhanh |
 | `max_gap` | double | `2.0` | 1..100 | Cặp source frame cách nhau hơn từng này lần thời lượng frame input (khoảng trống trong stream VFR) thì lặp frame, không nội suy |
@@ -54,23 +54,23 @@ Không hỗ trợ timeline, không có command lúc chạy.
 ```sh
 # 12 fps -> 24 fps trên Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
 
 # Rate đích tuỳ ý, D3D12 (Windows)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
 
 # Không phát hiện cắt cảnh, nội suy qua khoảng trống tới 4 lần thời lượng frame
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
 ```
 
-Model không nằm trong git: bundle win64/linux64 có sẵn trong `models/`, hoặc tải và convert bằng
-`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/models/`).
+Model không nằm trong git: file release `gpufx-packages.zip` có sẵn trong `gpufx_ai_framerate/` (bundle ffmpeg không kèm), hoặc tải và convert bằng
+`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/packages/<filter>/`).
 
 ## Giới hạn
 
-- Chưa kiểm: đường VideoToolbox (macOS) chưa từng chạy trên Mac, và filter cùng `models/rife-v4.6.zip` của bundle
+- Chưa kiểm: đường VideoToolbox (macOS) chưa từng chạy trên Mac, và filter cùng `packages/gpufx_ai_framerate/rife-v4.6.zip` của bundle
   linux64 chưa được chạy (chỉ Windows đã chạy).
 - Tốc độ (RTX 4060 Laptop): Vulkan khoảng 45 ms mỗi frame 1080p (4K khoảng 174 ms); D3D12 và D3D11 chậm hơn
   khoảng 1,7 lần. Nên dùng Vulkan.

@@ -105,7 +105,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
   - heat-flash lấy mẫu glow trên lưới cố định 240 texel nhưng đọc thẳng texture `bright` full-res, nên ở 1080p/4K các tap cách nhau 9–18 px, highlight nhỏ có thể nhấp nháy.
   - screen-switch vẫn phóng `LAYER_ZOOM` (~0.6%) cho clip sau từ progress 0.967 tới 1, nên khung cuối có thể nhảy nhẹ.
   - collage-shift (strip-top/strip-bottom) và screen-switch (card-first/card-second) vẫn chạy blur ở những khoảng thời gian pass cuối không đọc kết quả.
-- **Vị trí**: [glow-h.wgsl](../packages/effects/capcut/heat-flash/shaders/glow-h.wgsl), [glow-v.wgsl](../packages/effects/capcut/heat-flash/shaders/glow-v.wgsl), [screen-switch.wgsl](../packages/effects/capcut/screen-switch/shaders/screen-switch.wgsl), [compose.wgsl](../packages/effects/capcut/collage-shift/shaders/compose.wgsl).
+- **Vị trí**: [glow-h.wgsl](../packages/gpufx/capcut/heat-flash/shaders/glow-h.wgsl), [glow-v.wgsl](../packages/gpufx/capcut/heat-flash/shaders/glow-v.wgsl), [screen-switch.wgsl](../packages/gpufx/capcut/screen-switch/shaders/screen-switch.wgsl), [compose.wgsl](../packages/gpufx/capcut/collage-shift/shaders/compose.wgsl).
 - **Vì sao**: sửa thì đẹp hơn ở độ phân giải cao và đỡ tốn GPU. Mỗi chỗ sửa phải chấm lại bằng `scripts/capcut-compare.py` để không tụt điểm so với demo.
 - **Ngày ghi**: 2026-10-16
 
@@ -114,7 +114,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
   - glassblock-zoom-2 giải ngược mesh bằng Newton (4 ô × 16 seed × tối đa 10 bước, khoảng 1900 lần tính Coons mỗi pixel) trong suốt khoảng bend 0.67–1.33 s: nặng ALU ở 4K; pixel không hội tụ ra đen (có thể lẫn chấm đen trong ô kính). Hướng sửa: bake ánh xạ ngược thành texture theo vài lát `m`, hoặc bỏ ô sớm theo bounding box điểm điều khiển, đạo hàm sai phân trung tâm.
   - varnish-wash tính lại 99 blob (seed chain, vị trí, vận tốc) ở mọi pixel dù tham số blob giống nhau cho cả khung; nên tách pass "bảng blob" 99x1 rồi pass field chỉ đọc bảng. Vị trí blob lệch CapCut (khung 28–30 chỉ 11–16 dB) do chuỗi hash nhạy sai số float GPU.
   - twist-flip khung 28–29 (khoảng 20 dB): mép thùy lệch demo, nghi CapCut nội suy texcoord trên lưới tam giác 32x32.
-- **Vị trí**: [panes.wgsl](../packages/effects/capcut/glassblock-zoom-2/shaders/panes.wgsl), [blobs.wgsl](../packages/effects/capcut/varnish-wash/shaders/blobs.wgsl), [twist.wgsl](../packages/effects/capcut/twist-flip/shaders/twist.wgsl).
+- **Vị trí**: [panes.wgsl](../packages/gpufx/capcut/glassblock-zoom-2/shaders/panes.wgsl), [blobs.wgsl](../packages/gpufx/capcut/varnish-wash/shaders/blobs.wgsl), [twist.wgsl](../packages/gpufx/capcut/twist-flip/shaders/twist.wgsl).
 - **Vì sao**: đỡ tốn GPU ở độ phân giải cao và giống demo hơn. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
 
@@ -125,7 +125,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
   - cube-roll: chưa đo chỗ nối t=0.9→0.91 (mặt clip sau phải thẳng và phủ kín khung); hằng số FOV dọc chưa có chú thích nguồn. Điểm 25.5 dB (lệch độ sáng lớp xám).
   - triple-slide: chưa đo dải đen mép trái ở progress 0.9–0.97 (zoom và drift dùng easing khác nhau).
   - diagonal-wipes dùng `textureDimensions(first)` thay vì `globals.size`/`pixel_aspect`; mép dải không AA. flash-split: flash chỉ 1–3 frame comp nên ở fps thấp/thời lượng ngắn có thể gần như mất.
-- **Vị trí**: [bokeh.wgsl](../packages/effects/capcut/bubble-blur/shaders/bokeh.wgsl), [cube-spins-2.wgsl](../packages/effects/capcut/cube-spins-2/shaders/cube-spins-2.wgsl), [cube-roll.wgsl](../packages/effects/capcut/cube-roll/shaders/cube-roll.wgsl), [triple-slide.wgsl](../packages/effects/capcut/triple-slide/shaders/triple-slide.wgsl), [diagonal-wipes.wgsl](../packages/effects/capcut/diagonal-wipes/shaders/diagonal-wipes.wgsl), [flash-split.wgsl](../packages/effects/capcut/flash-split/shaders/flash-split.wgsl).
+- **Vị trí**: [bokeh.wgsl](../packages/gpufx/capcut/bubble-blur/shaders/bokeh.wgsl), [cube-spins-2.wgsl](../packages/gpufx/capcut/cube-spins-2/shaders/cube-spins-2.wgsl), [cube-roll.wgsl](../packages/gpufx/capcut/cube-roll/shaders/cube-roll.wgsl), [triple-slide.wgsl](../packages/gpufx/capcut/triple-slide/shaders/triple-slide.wgsl), [diagonal-wipes.wgsl](../packages/gpufx/capcut/diagonal-wipes/shaders/diagonal-wipes.wgsl), [flash-split.wgsl](../packages/gpufx/capcut/flash-split/shaders/flash-split.wgsl).
 - **Vì sao**: đỡ tốn GPU và tránh giật nhẹ ở chỗ nối. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
 
@@ -137,37 +137,37 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
   - red-swipe: ENLARGE 1.01 gây nhảy 1 % ở khung đầu/cuối; strip chỉ 256 mẫu theo chiều dọc nên vùng bị sort mất chi tiết ở 1080p; điểm đen thuần thành đỏ khi tint đầy.
   - square-out: thứ tự ưu tiên góc kiểu chong chóng chưa đối chiếu demo.
   - Cả nhóm: ghi alpha chưa thống nhất (có hiệu ứng ép 1, ripple-vibe giữ alpha nguồn).
-- **Vị trí**: [smear.wgsl](../packages/effects/capcut/negative-glitch/shaders/smear.wgsl), [signal.wgsl](../packages/effects/capcut/negative-glitch/shaders/signal.wgsl), [halftone.wgsl](../packages/effects/capcut/pixel-vibe/shaders/halftone.wgsl), [zoom.wgsl](../packages/effects/capcut/pixel-vibe/shaders/zoom.wgsl), [silky-switch.wgsl](../packages/effects/capcut/silky-switch/shaders/silky-switch.wgsl), [finish.wgsl](../packages/effects/capcut/red-swipe/shaders/finish.wgsl), [square-out.wgsl](../packages/effects/capcut/square-out/shaders/square-out.wgsl).
+- **Vị trí**: [smear.wgsl](../packages/gpufx/capcut/negative-glitch/shaders/smear.wgsl), [signal.wgsl](../packages/gpufx/capcut/negative-glitch/shaders/signal.wgsl), [halftone.wgsl](../packages/gpufx/capcut/pixel-vibe/shaders/halftone.wgsl), [zoom.wgsl](../packages/gpufx/capcut/pixel-vibe/shaders/zoom.wgsl), [silky-switch.wgsl](../packages/gpufx/capcut/silky-switch/shaders/silky-switch.wgsl), [finish.wgsl](../packages/gpufx/capcut/red-swipe/shaders/finish.wgsl), [square-out.wgsl](../packages/gpufx/capcut/square-out/shaders/square-out.wgsl).
 - **Vì sao**: giống demo hơn và tránh giật ở chỗ nối. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
 
 ### [Vừa] `xfade.zip` transition=hblur đọc tới width/2 pixel mỗi điểm ảnh
 - **Vấn đề**: ở progress 0.5 trên 4K mỗi pixel đọc ~1920 lần mỗi texture (~32 G lần đọc một frame), dễ chạm GPU timeout (TDR) trên D3D12/Windows; 1080p cũng đã nặng (~4 G lần đọc). FFmpeg dùng tổng trượt O(1) mỗi pixel.
-- **Vị trí**: [xfade.wgsl](../packages/effects/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh hblur)
+- **Vị trí**: [xfade.wgsl](../packages/gpufx/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh hblur)
 - **Vì sao**: nên tính tổng theo hàng bằng prefix-sum hoặc shared memory để chi phí không phụ thuộc progress; cần texture trung gian float (xem mục `tmp` 8-bit dưới).
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Texture trung gian `tmp` chỉ 8-bit với video 8-bit
 - **Vấn đề**: pass trung gian ghi `rgba8unorm` khi input/output 8-bit, nên filter cần độ chính xác giữa các pass (gradfun, unsharp, smart-blur) phải gộp về một pass 2D tốn hơn bản tách hàng/cột.
-- **Vị trí**: [EFFECT_FORMAT.md:118](EFFECT_FORMAT.md#L118); các gói `packages/effects/ffmpeg/{gradfun,unsharp,smart-blur}`
+- **Vị trí**: [EFFECT_FORMAT.md:118](EFFECT_FORMAT.md#L118); các gói `packages/gpufx/ffmpeg/{gradfun,unsharp,smart-blur}`
 - **Vì sao**: manifest nên cho pass/texture khai báo `rgba16float`, rồi tách lại các filter trên thành 2 pass.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Effect port FFmpeg: test chỉ chạy tham số mặc định
 - **Vấn đề**: `every_example_compiles_and_runs` chỉ chạy tham số mặc định, mà nhiều gói mặc định là no-op (colorbalance, curves preset 0...). Các nhánh `mode`/`direction`/`corner`/`shape`/`preset`/bool khác mặc định chưa từng chạy; lỗi NaN của colorbalance `pl` và lệch mặc định của hsv-key chỉ được review bắt.
-- **Vị trí**: [effects.rs:61](../crates/gpufx-core/tests/effects.rs#L61); các gói `packages/effects/ffmpeg/*`
+- **Vị trí**: [effects.rs:61](../crates/gpufx-core/tests/effects.rs#L61); các gói `packages/gpufx/ffmpeg/*`
 - **Vì sao**: nên có smoke test cho từng giá trị enum/bool, và vài bài so pixel với giá trị tính tay từ công thức C của FFmpeg.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Filter FFmpeg chưa port sang gpufx
 - **Vấn đề**: chưa có: lut3d/haldclut (gói chỉ chứa ảnh cố định, không nhận file LUT lúc chạy), filter temporal (atadenoise, hqdn3d, lagfun, tmix...), edge kirsch/canny, convolution theo hàng/cột và ma trận theo plane, fillborders `margins`, colorhold/hsvhold, danh sách điểm của curves và `psfile`, biểu thức `c0..c3` của pseudocolor, colorlevels auto (giá trị âm), maskedclamp/maskedthreshold.
-- **Vị trí**: `packages/effects/ffmpeg/`
+- **Vị trí**: `packages/gpufx/ffmpeg/`
 - **Vì sao**: phủ thêm filter gốc FFmpeg cho gói zip; vài mục cần tính năng mới của định dạng effect (input LUT, frame trước).
 - **Ngày ghi**: 2026-10-21
 
 ### [Vừa] Scope và blur lớn chạy kiểu gather, tốn theo bình phương
 - **Vấn đề**: vectorscope (số ô × samples²), waveform (mỗi pixel lặp `max_samples`), histogram và varblur (cửa sổ (2r+1)² thay cho bảng tổng tích luỹ của FFmpeg) đọc texture rất nhiều; đã hạ mặc định/giới hạn (vectorscope `samples` 64, waveform 256, varblur `max_r` 4) nhưng vẫn nặng ở 4K. chromanr tối đa 33×33 lần đọc mỗi pixel.
-- **Vị trí**: `packages/effects/ffmpeg/{vectorscope,waveform,histogram}/shaders/*.wgsl`, [varblur.wgsl](../packages/effects/ffmpeg/varblur/shaders/varblur.wgsl)
+- **Vị trí**: `packages/gpufx/ffmpeg/{vectorscope,waveform,histogram}/shaders/*.wgsl`, [varblur.wgsl](../packages/gpufx/ffmpeg/varblur/shaders/varblur.wgsl)
 - **Vì sao**: cần storage buffer + `atomicAdd` (scatter) cho scope và pass prefix-sum float cho varblur; định dạng effect hiện chưa có hai thứ này.
 - **Ngày ghi**: 2026-10-21
 
@@ -179,19 +179,19 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 
 ### [Thấp] `xfade.zip` `custom`: thiếu hàm đọc pixel `a0..a3`/`b0..b3`
 - **Vấn đề**: biểu thức không đọc được pixel ở vị trí khác như `xfade=custom` của FFmpeg, alpha chỉ trộn tuyến tính chứ không chạy biểu thức; `geq` cũng thiếu `p(x,y)`.
-- **Vị trí**: [xfade.wgsl](../packages/effects/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh `custom`); bộ dịch `expr` của gpufx-core
+- **Vị trí**: [xfade.wgsl](../packages/gpufx/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh `custom`); bộ dịch `expr` của gpufx-core
 - **Vì sao**: đọc pixel cần mở rộng định dạng `expr` cho phép gọi hàm lấy mẫu texture.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Effect port FFmpeg: các finding review để sau
 - **Vấn đề**: (1) blend/masked-merge/masked-minmax lấy alpha của input đầu, tính trên RGB thay vì plane YUV. (2) xfade transition=distance đo khác màu trên YUV BT.601 quy đổi, bỏ alpha. (3) perspective dựng ma trận bằng f32 mỗi pixel (méo nhiều thì lệch ~1 px), tứ giác suy biến ra NaN. (4) displace dùng luma của map cho mọi kênh. (5) colorchannelmixer: ngưỡng `lout` 1/510 lệch 255 lần so với FFmpeg, case pwr dùng `pow(abs)` mất dấu thay `cbrt`. (6) huesaturation dựng ma trận 4x4 và curves giải spline mỗi pixel, nên tính sẵn khi đổi tham số. (7) chroma-shift/hsv-key/luma-key cố định BT.709 full-range.
-- **Vị trí**: các gói tương ứng trong `packages/effects/ffmpeg/`
+- **Vị trí**: các gói tương ứng trong `packages/gpufx/ffmpeg/`
 - **Vì sao**: chỉ lệch nhỏ so với FFmpeg hoặc tốn hiệu năng; README đã ghi phần lớn.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Test box-in chưa phủ direction 1 và 3
 - **Vấn đề**: test chỉ thử `direction` 0 và 2; đảo dấu riêng ở nhánh 1/3 không bị bắt.
-- **Vị trí**: [crates/gpufx-core/tests/effects.rs](../crates/gpufx-core/tests/effects.rs) (`transition_modes_have_clean_endpoints_and_their_own_midpoint`), [box_in.wgsl](../packages/effects/slideshow/box-in/shaders/box_in.wgsl).
+- **Vị trí**: [crates/gpufx-core/tests/effects.rs](../crates/gpufx-core/tests/effects.rs) (`transition_modes_have_clean_endpoints_and_their_own_midpoint`), [box_in.wgsl](../packages/gpufx/slideshow/box-in/shaders/box_in.wgsl).
 - **Vì sao**: rẻ để thêm, chặn hồi quy chiều chạy.
 - **Ngày ghi**: 2026-10-16
 
@@ -231,7 +231,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 
 ### Commit `76a729f` chưa qua review
 - **Vấn đề**: commit thêm quy tắc input/output, 15 hiệu ứng và `pack-effects` được tạo trước khi áp dụng bộ luật. Nó chưa qua lượt agent review và message không theo Conventional Commits. Commit đã push nên không sửa lại lịch sử.
-- **Vị trí**: [ffmpeg/vf_gpufx.c](../ffmpeg/vf_gpufx.c), [crates/gpufx-core/src/manifest.rs](../crates/gpufx-core/src/manifest.rs), [crates/gpufx-ffi/src/lib.rs](../crates/gpufx-ffi/src/lib.rs), `packages/effects/*`.
+- **Vị trí**: [ffmpeg/vf_gpufx.c](../ffmpeg/vf_gpufx.c), [crates/gpufx-core/src/manifest.rs](../crates/gpufx-core/src/manifest.rs), [crates/gpufx-ffi/src/lib.rs](../crates/gpufx-ffi/src/lib.rs), `packages/gpufx/*`.
 - **Vì sao**: phần negotiate format và chuyển đổi swscale trong `vf_gpufx.c` là logic phức tạp, nên có một lượt review riêng.
 - **Ngày ghi**: 2026-10-12
 
@@ -267,7 +267,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 
 ### Hiệu ứng thu nhỏ ảnh chưa dùng mipmap của input
 - **Vấn đề**: engine đã có `"mipmaps": true` cho input (api 2, chuỗi mip sinh trên GPU mỗi frame), nhưng `fit`, `push-box`, `photo-collection` vẫn lấy mẫu ở mức 0, nên ảnh lớn hơn khung nhiều (ảnh 4000 px trong `fit`, hộp nhỏ của `push-box`) vẫn răng cưa/nhấp nháy. Nền mờ của `fit` dùng 64 tap bilinear rải đều trên bán kính, bán kính lớn (trên khoảng 64 px) có thể lộ bóng lặp; đọc từ mức mip phù hợp sẽ hết.
-- **Vị trí**: `packages/effects/slideshow/{fit,push-box,photo-collection}`, [crates/gpufx-core/src/mips.rs](../crates/gpufx-core/src/mips.rs).
+- **Vị trí**: `packages/gpufx/slideshow/{fit,push-box,photo-collection}`, [crates/gpufx-core/src/mips.rs](../crates/gpufx-core/src/mips.rs).
 - **Vì sao**: giữ output của các hiệu ứng cũ giống từng byte khi thêm tính năng; chuyển sang api 2 và tự tính `lod` theo tỉ lệ thu nhỏ là thay đổi output, cần làm và kiểm riêng. Mip của input tốn thêm khoảng 1/3 VRAM của texture đó và một pass mỗi mức mỗi frame.
 - **Ngày ghi**: 2026-10-13
 
@@ -278,7 +278,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
   - Chưa có thư viện `#include` dùng chung (`gpufx_hash`...): hai gói lá chép cùng `leaves.wgsl` (có test giữ hai bản giống nhau).
   - Trường `colorspace` (`srgb`/`linear`) cho texture chưa có; khi pipeline chuyển sang linear thì phải linear hoá trước `premultiply` (hàm `premultiply` trong `texture.rs` là chỗ duy nhất đổi màu).
   - Mip của texture gói sinh trên CPU khi nạp (resize Triangle từ mức trên): ảnh lớn nhiều layer làm nạp gói chậm hơn; có thể chuyển sang GPU như mip của input.
-- **Vị trí**: [crates/gpufx-core/src/texture.rs](../crates/gpufx-core/src/texture.rs), `packages/effects/standalone/falling-*`.
+- **Vị trí**: [crates/gpufx-core/src/texture.rs](../crates/gpufx-core/src/texture.rs), `packages/gpufx/standalone/falling-*`.
 - **Vì sao**: ngoài phạm vi kế hoạch sprite (đã xong: texture mảng, mipmap, premultiply, quỹ đạo `expr`).
 - **Ngày ghi**: 2026-10-13
 
@@ -368,7 +368,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 ### Shader YUV tuỳ chọn cho transition (chọn shader theo tình huống)
 - **Vấn đề**: mọi hiệu ứng chạy trên RGBA nên mỗi `gpufx` đổi NV12 → RGBA → NV12 và giữ texture RGBA trung gian. Transition trộn/chọn pixel (crossfade, dissolve, wipe, slide, circle, clock, push…) làm đúng được thẳng trên plane Y và UV vì `lerp` giao hoán với phép đổi YUV ↔ RGB (affine).
 - **Thiết kế đề xuất**: manifest khai báo `variants.yuv` (tuỳ chọn) với helper `gpufx_read_y/uv`, `gpufx_write_y/uv`; engine chọn bản YUV khi input và output là NV12/yuv420p và hiệu ứng đứng một mình hoặc mọi hiệu ứng nối nhau đều có bản YUV, ngược lại dùng RGBA; option `variant=auto|rgba|yuv`; CI so pixel hai bản (lệch ≤ 1–2); tham số màu (`#rrggbb`) đổi sang YUV; định dạng khác (P010, 444) quay về RGBA.
-- **Vị trí**: [crates/gpufx-core/src/convert.rs](../crates/gpufx-core/src/convert.rs), [crates/gpufx-core/src/runtime.rs](../crates/gpufx-core/src/runtime.rs), manifest ([docs/EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md)), gói transition trong `packages/effects`.
+- **Vị trí**: [crates/gpufx-core/src/convert.rs](../crates/gpufx-core/src/convert.rs), [crates/gpufx-core/src/runtime.rs](../crates/gpufx-core/src/runtime.rs), manifest ([docs/EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md)), gói transition trong `packages/gpufx`.
 - **Vì sao**: bỏ pass đổi định dạng và texture RGBA, giảm dữ liệu đọc/ghi khoảng 2,7 lần cho chuỗi chỉ có transition (chưa đo).
 - **Ngày ghi**: 2026-10-13
 
@@ -439,6 +439,6 @@ Vấn đề: đưa file yuv thô không gắn `colorspace`/`range` qua `gpufx_up
 
 ### [Thấp] Shader CapCut gọi `smoothstep` với hai cận đảo ngược
 
-- **Vấn đề**: nhiều shader dưới `packages/effects/capcut/` gọi `smoothstep(hi, lo, x)` (edge0 > edge1) để lấy đường dốc xuống, vd `neon-graffiti/shaders/neon-graffiti.wgsl:137`, `glowing-graffiti/shaders/glowing-graffiti.wgsl:51,70,101,106,111,118` và khoảng 8 shader cũ hơn. MSL/GLSL coi kết quả là undefined khi edge0 >= edge1; driver phổ biến vẫn chạy đúng nhưng không bảo đảm trên Metal.
+- **Vấn đề**: nhiều shader dưới `packages/gpufx/capcut/` gọi `smoothstep(hi, lo, x)` (edge0 > edge1) để lấy đường dốc xuống, vd `neon-graffiti/shaders/neon-graffiti.wgsl:137`, `glowing-graffiti/shaders/glowing-graffiti.wgsl:51,70,101,106,111,118` và khoảng 8 shader cũ hơn. MSL/GLSL coi kết quả là undefined khi edge0 >= edge1; driver phổ biến vẫn chạy đúng nhưng không bảo đảm trên Metal.
 - **Vì sao nên làm**: đổi sang `1.0 - smoothstep(lo, hi, x)` cho chắc chắn trên mọi backend; kết quả số học không đổi.
 - **Ngày ghi**: 2026-10-18.

@@ -9,7 +9,7 @@ and x4 scale variants; pick one at run time with `scale=`.
 The weights are the ncnn `realesr-animevideov3` (SRVGGNetCompact) models of
 [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (Real-ESRGAN: Training Real-World Blind Super-Resolution
 with Pure Synthetic Data, Wang et al.), converted by `gpufx-nnconv`. The pinned URLs and sha256 are in
-`models/realesr-animevideov3/source.json` of the gpufx repository; they match the official
+`packages/gpufx_ai_upscale/realesr-animevideov3/source.json` of the gpufx repository; they match the official
 `realesrgan-ncnn-vulkan` release. The x2 and x3 graphs run the x4 network and bicubic-downscale the result, as in
 the original models.
 

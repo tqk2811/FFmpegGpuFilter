@@ -127,5 +127,5 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 Still pictures with the CLI:
 
 ```sh
-./target/release/gpufx run '[0][1]packages/effects/ffmpeg/xfade=transition=wipeleft:progress=0.5' -i a.png -i b.png -o out.png
+./target/release/gpufx run '[0][1]packages/gpufx/ffmpeg/xfade=transition=wipeleft:progress=0.5' -i a.png -i b.png -o out.png
 ```

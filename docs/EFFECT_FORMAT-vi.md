@@ -25,9 +25,9 @@ gpufx pack my-effect my-effect.zip
 Đóng gói nhiều hiệu ứng một lúc (không cần build FFmpeg hay Docker):
 
 ```sh
-scripts/pack-effects.sh                         # mọi thư mục trong packages/effects -> dist/effects/<group>/<name>.zip
-scripts/pack-effects.sh --check -o out my-fx    # biên dịch shader trên GPU trước, ghi vào out/
-.\scripts\pack-effects.ps1 -Check                # Windows
+scripts/pack-packages.sh                         # mọi thư mục trong packages/gpufx -> dist/packages/gpufx/<group>/<name>.zip
+scripts/pack-packages.sh --check -o out my-fx    # biên dịch shader trên GPU trước, ghi vào out/
+.\scripts\pack-packages.ps1 -Check                # Windows
 ```
 
 ## manifest.json
@@ -166,7 +166,7 @@ fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions của i
 fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad của input i ở mức 0 (0 khi ngoài khoảng)
 ```
 
-Xem `packages/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
+Xem `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 
 ## Nhóm pass và yêu cầu thiết bị
 
@@ -531,38 +531,38 @@ theo cùng quy tắc. `gpufx info` in các tên kèm số của chúng.
 
 ## Ví dụ có sẵn
 
-Các ví dụ nằm trong các thư mục nhóm dưới `packages/effects/`: `ffmpeg/` (tương đương filter dựng sẵn và chuyển cảnh `xfade` của FFmpeg), `slideshow/` (viết lại từ [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (dựng lại chuyển cảnh CapCut), `standalone/` (hiệu ứng tự viết) và nhóm lồng `tqk2811/TqkLibrary.FFmpegTransition/` (port từ [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). Nhóm có thể nằm ở độ sâu bất kỳ: gói là mọi thư mục có `manifest.json`. Xem [packages/effects/README.md](../packages/effects/README.md). Nhóm chỉ là thư mục: gói vẫn được gọi bằng tên riêng của nó.
+Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmpeg/` (tương đương filter dựng sẵn và chuyển cảnh `xfade` của FFmpeg), `slideshow/` (viết lại từ [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (dựng lại chuyển cảnh CapCut), `standalone/` (hiệu ứng tự viết) và nhóm lồng `tqk2811/TqkLibrary.FFmpegTransition/` (port từ [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). Nhóm có thể nằm ở độ sâu bất kỳ: gói là mọi thư mục có `manifest.json`. Xem [packages/gpufx/README.md](../packages/gpufx/README.md). Nhóm chỉ là thư mục: gói vẫn được gọi bằng tên riêng của nó.
 
 | Gói | Minh hoạ |
 |-----|----------|
-| `packages/effects/ffmpeg/vignette` | Tham số `float` + `color` |
-| `packages/effects/ffmpeg/gaussian-blur` | 2 pass qua texture trung gian `tmp` |
-| `packages/effects/ffmpeg/wipe-transition` | 2 input (`first`, `second`), tham số `progress` |
-| `packages/effects/standalone/gradient-map` | Texture PNG đi kèm làm LUT |
-| `packages/effects/standalone/rgb-split` | GLSL, dùng `globals.frame` làm nhiễu động |
-| `packages/effects/ffmpeg/color-adjust` | Độ sáng, tương phản, bão hoà, gamma, hue, nhiệt độ màu |
-| `packages/effects/ffmpeg/grayscale`, `packages/effects/ffmpeg/sepia`, `packages/effects/ffmpeg/invert` | Lọc màu cơ bản, tham số `amount` |
-| `packages/effects/ffmpeg/sharpen` | Unsharp mask 3×3 bằng `textureLoad` |
-| `packages/effects/ffmpeg/edge-detect` | Sobel |
-| `packages/effects/ffmpeg/pixelate` | Khảm theo khối |
-| `packages/effects/ffmpeg/mirror` | Lật ngang/dọc, tham số `int` |
-| `packages/effects/ffmpeg/transform` | Zoom, xoay, pan (Ken Burns), tham số `vec2` |
-| `packages/effects/ffmpeg/fade` | Fade về một màu |
-| `packages/effects/ffmpeg/chroma-key` | Phông xanh → alpha; **quy tắc** `formats` input, output `rgba`/`yuva420p`/`yuva444p` |
-| `packages/effects/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
-| `packages/effects/ffmpeg/hstack`, `packages/effects/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `output.size` `hstack`/`vstack`, output lớn hơn input |
-| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/effects/ffmpeg/slide-transition`, `packages/effects/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
-| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
-| `packages/effects/ffmpeg/blend` | 2 input, tham số `int` `mode` chọn 1 trong 40 công thức |
-| `packages/effects/ffmpeg/masked-merge` | 3 input (nền, lớp phủ, mask) với **quy tắc** `same_size` |
-| `packages/effects/ffmpeg/selectivecolor` | Tham số `vec4` |
-| `packages/effects/ffmpeg/box-blur` | 6 pass; các vòng vượt `power` chép nguyên input sang output |
-| `packages/effects/ffmpeg/displace` | 3 input, 2 trong số đó làm bản đồ dịch chuyển |
-| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/collapse`, `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/expand` | Clip đầu thu vào giữa / clip sau nở ra từ giữa: theo chiều ngang, chiều dọc, hộp, hình tròn (`mode`) |
-| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/dip-to-color` | Tối dần về một màu (mặc định đen) rồi hiện clip sau |
-| `packages/effects/ffmpeg/dissolve` | Hạt ngẫu nhiên (hash số nguyên, giống nhau trên mọi GPU) |
-| `packages/effects/ffmpeg/pixelize-transition`, `packages/effects/ffmpeg/zoom-transition`, `packages/effects/ffmpeg/fade-grays`, `packages/effects/slideshow/blinds` | Chuyển cảnh kiểu `xfade`: vỡ điểm ảnh, zoom, qua ảnh xám, rèm |
-| `packages/effects/slideshow/checkerboard`, `packages/effects/slideshow/push-box`, `packages/effects/slideshow/push-film`, `packages/effects/slideshow/photo-collection` | Chuyển cảnh slideshow theo [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (viết lại bằng shader): ô vuông lớn dần, hộp thu nhỏ - đẩy - phóng to, cuộn phim có lỗ vẽ bằng shader, ảnh bay vào vừa xoay vừa đáp nghiêng lên clip đầu (nối chuỗi để xếp chồng ảnh) |
-| `packages/effects/slideshow/box-in`, `packages/effects/slideshow/sliding-bars`, `packages/effects/slideshow/spin-transition` | Cũng theo các script đó: clip đầu thu nhỏ thành hộp rồi trượt ra, hộp clip sau trượt vào từ cùng phía rồi phóng to (`box_in_*`), các thanh của clip sau lần lượt trượt vào (`stagger`), clip đầu xoay thu nhỏ rồi clip sau xoay phóng to có motion blur (vòng lặp nhiều mẫu theo góc). `slide-transition` có thêm `mode` đẩy / phủ / lộ / đẩy qua khoảng trống màu `color`, `blinds` có `origin` mở từ giữa thanh |
-| `packages/effects/slideshow/fit` | Các chế độ khung hình của các script đó (giữa, cắt, kéo giãn, nền mờ) cho ảnh kích thước bất kỳ: input đầu chỉ cho kích thước khung; **hai pass**, box blur tách trục với số tap bilinear cố định |
-| `packages/effects/standalone/falling-maple`, `packages/effects/standalone/falling-ginkgo` | Lá phong đỏ / lá rẻ quạt vàng rơi: (api 2): atlas 2×2 cắt thành **texture mảng** (`grid`) có **mipmap** và **alpha premultiplied**, mức mip tính cho từng lá, hạt không trạng thái (chỉ phụ thuộc `t`, seek đúng), `var<workgroup>` + `workgroupBarrier`, 4 kiểu chuyển động (`mode`) và quỹ đạo tùy chỉnh (`mode=4`, **tham số `expr`** `path_x`, `path_y`, `angle`). Ảnh gốc và giấy phép ở `assets/leaves/` |
+| `packages/gpufx/ffmpeg/vignette` | Tham số `float` + `color` |
+| `packages/gpufx/ffmpeg/gaussian-blur` | 2 pass qua texture trung gian `tmp` |
+| `packages/gpufx/ffmpeg/wipe-transition` | 2 input (`first`, `second`), tham số `progress` |
+| `packages/gpufx/standalone/gradient-map` | Texture PNG đi kèm làm LUT |
+| `packages/gpufx/standalone/rgb-split` | GLSL, dùng `globals.frame` làm nhiễu động |
+| `packages/gpufx/ffmpeg/color-adjust` | Độ sáng, tương phản, bão hoà, gamma, hue, nhiệt độ màu |
+| `packages/gpufx/ffmpeg/grayscale`, `packages/gpufx/ffmpeg/sepia`, `packages/gpufx/ffmpeg/invert` | Lọc màu cơ bản, tham số `amount` |
+| `packages/gpufx/ffmpeg/sharpen` | Unsharp mask 3×3 bằng `textureLoad` |
+| `packages/gpufx/ffmpeg/edge-detect` | Sobel |
+| `packages/gpufx/ffmpeg/pixelate` | Khảm theo khối |
+| `packages/gpufx/ffmpeg/mirror` | Lật ngang/dọc, tham số `int` |
+| `packages/gpufx/ffmpeg/transform` | Zoom, xoay, pan (Ken Burns), tham số `vec2` |
+| `packages/gpufx/ffmpeg/fade` | Fade về một màu |
+| `packages/gpufx/ffmpeg/chroma-key` | Phông xanh → alpha; **quy tắc** `formats` input, output `rgba`/`yuva420p`/`yuva444p` |
+| `packages/gpufx/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
+| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `output.size` `hstack`/`vstack`, output lớn hơn input |
+| `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/gpufx/ffmpeg/slide-transition`, `packages/gpufx/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
+| `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
+| `packages/gpufx/ffmpeg/blend` | 2 input, tham số `int` `mode` chọn 1 trong 40 công thức |
+| `packages/gpufx/ffmpeg/masked-merge` | 3 input (nền, lớp phủ, mask) với **quy tắc** `same_size` |
+| `packages/gpufx/ffmpeg/selectivecolor` | Tham số `vec4` |
+| `packages/gpufx/ffmpeg/box-blur` | 6 pass; các vòng vượt `power` chép nguyên input sang output |
+| `packages/gpufx/ffmpeg/displace` | 3 input, 2 trong số đó làm bản đồ dịch chuyển |
+| `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/collapse`, `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/expand` | Clip đầu thu vào giữa / clip sau nở ra từ giữa: theo chiều ngang, chiều dọc, hộp, hình tròn (`mode`) |
+| `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/dip-to-color` | Tối dần về một màu (mặc định đen) rồi hiện clip sau |
+| `packages/gpufx/ffmpeg/dissolve` | Hạt ngẫu nhiên (hash số nguyên, giống nhau trên mọi GPU) |
+| `packages/gpufx/ffmpeg/pixelize-transition`, `packages/gpufx/ffmpeg/zoom-transition`, `packages/gpufx/ffmpeg/fade-grays`, `packages/gpufx/slideshow/blinds` | Chuyển cảnh kiểu `xfade`: vỡ điểm ảnh, zoom, qua ảnh xám, rèm |
+| `packages/gpufx/slideshow/checkerboard`, `packages/gpufx/slideshow/push-box`, `packages/gpufx/slideshow/push-film`, `packages/gpufx/slideshow/photo-collection` | Chuyển cảnh slideshow theo [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (viết lại bằng shader): ô vuông lớn dần, hộp thu nhỏ - đẩy - phóng to, cuộn phim có lỗ vẽ bằng shader, ảnh bay vào vừa xoay vừa đáp nghiêng lên clip đầu (nối chuỗi để xếp chồng ảnh) |
+| `packages/gpufx/slideshow/box-in`, `packages/gpufx/slideshow/sliding-bars`, `packages/gpufx/slideshow/spin-transition` | Cũng theo các script đó: clip đầu thu nhỏ thành hộp rồi trượt ra, hộp clip sau trượt vào từ cùng phía rồi phóng to (`box_in_*`), các thanh của clip sau lần lượt trượt vào (`stagger`), clip đầu xoay thu nhỏ rồi clip sau xoay phóng to có motion blur (vòng lặp nhiều mẫu theo góc). `slide-transition` có thêm `mode` đẩy / phủ / lộ / đẩy qua khoảng trống màu `color`, `blinds` có `origin` mở từ giữa thanh |
+| `packages/gpufx/slideshow/fit` | Các chế độ khung hình của các script đó (giữa, cắt, kéo giãn, nền mờ) cho ảnh kích thước bất kỳ: input đầu chỉ cho kích thước khung; **hai pass**, box blur tách trục với số tap bilinear cố định |
+| `packages/gpufx/standalone/falling-maple`, `packages/gpufx/standalone/falling-ginkgo` | Lá phong đỏ / lá rẻ quạt vàng rơi: (api 2): atlas 2×2 cắt thành **texture mảng** (`grid`) có **mipmap** và **alpha premultiplied**, mức mip tính cho từng lá, hạt không trạng thái (chỉ phụ thuộc `t`, seek đúng), `var<workgroup>` + `workgroupBarrier`, 4 kiểu chuyển động (`mode`) và quỹ đạo tùy chỉnh (`mode=4`, **tham số `expr`** `path_x`, `path_y`, `angle`). Ảnh gốc và giấy phép ở `assets/leaves/` |

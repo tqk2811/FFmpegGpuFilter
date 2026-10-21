@@ -98,7 +98,7 @@ make install
 
 echo "==> bundle $OUT"
 rm -rf "$OUT"
-mkdir -p "$OUT/bin" "$OUT/effects"
+mkdir -p "$OUT/bin"
 cp "$WORK/ffmpeg-install/bin/ffmpeg$EXE" "$WORK/ffmpeg-install/bin/ffprobe$EXE" "$OUT/bin/"
 cp "$CARGO_TARGET_DIR/$RUST_TARGET/release/gpufx$EXE" "$OUT/bin/gpufx-cli$EXE"
 if [ "$TARGET" = win64 ]; then
@@ -111,14 +111,6 @@ else
     patchelf --set-rpath '$ORIGIN' "$OUT/bin/ffmpeg" "$OUT/bin/ffprobe"
 fi
 cp -r "$PREFIX/include" "$OUT/"
-# A package is any folder with a manifest.json, at any depth.
-find "$SRC/packages/effects" -name manifest.json | sort | while IFS= read -r manifest; do
-    dir=$(dirname "$manifest")
-    # Same layout as packages/effects: effects/<group>/<name>.zip (a nested group keeps all its folders).
-    rel=${dir#"$SRC/packages/effects/"}
-    mkdir -p "$OUT/effects/$(dirname "$rel")"
-    (cd "$dir" && zip -qr "$OUT/effects/$rel.zip" .)
-done
 cp "$SRC/README.md" "$SRC/README-vi.md" "$OUT/"
 cp "$SRC/LICENSE" "$OUT/LICENSE-gpufx.txt"
 "$SRC/scripts/third-party-licenses.sh" "$OUT/THIRD-PARTY-LICENSES-gpufx.txt" "$RUST_TARGET"

@@ -42,7 +42,7 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 Still pictures with the CLI:
 
 ```sh
-./target/release/gpufx run 'packages/effects/slideshow/spin-transition=progress=0.5:turns=2:blur=12' -i a.png -i b.png -o out.png
+./target/release/gpufx run 'packages/gpufx/slideshow/spin-transition=progress=0.5:turns=2:blur=12' -i a.png -i b.png -o out.png
 ```
 
 ## Notes
