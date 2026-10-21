@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.wipe-right",
   "name": "Wipe Right",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Hard-edged wipe that reveals the second input from left to right. Recreation of the CapCut \"Wipe Right\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

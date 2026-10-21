@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.film-blur",
   "name": "Film Blur",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Hard cut hidden under a burst of warm, high-contrast light leak screened over the picture. Recreation of the CapCut \"Film Blur\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

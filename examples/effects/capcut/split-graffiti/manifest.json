@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.split-graffiti",
   "name": "Split Graffiti",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "White chalk-like scribbles sweep over the first clip, then the second clip breaks in as tilted, white-edged shards that close up along a jagged horizontal tear. Recreation of the CapCut \"Split Graffiti\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

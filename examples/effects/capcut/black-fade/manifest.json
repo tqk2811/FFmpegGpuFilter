@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.black-fade",
   "name": "Black Fade",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Fade the first input to black, then fade from black to the second. Recreation of the CapCut \"Black Fade\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.double-glitch",
   "name": "Double Glitch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A hard cut hidden under a short burst of horizontal glitch: the frame slides and mirror-wraps, streaks smear sideways, the picture flashes a red tritone and splits its RGB channels. Recreation of the CapCut \"Double Glitch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

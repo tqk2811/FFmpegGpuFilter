@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.dispersion-trail-2",
   "name": "Dispersion Trail 2",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Coloured light streaks rush diagonally over the first clip, a cyan glare floods the frame white and fades out over the second clip. Recreation of the CapCut \"Dispersion Trail 2\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

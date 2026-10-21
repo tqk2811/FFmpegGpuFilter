@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.push-film",
   "name": "Push Film",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Both clips run through a film strip: the second pushes the first out of the frame like a film moving through a projector. Drive `progress` from 0 to 1.",
   "inputs": [

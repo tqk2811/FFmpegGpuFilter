@@ -1071,6 +1071,7 @@ MANIFEST = {
     "api": 1,
     "id": "io.github.tqk2811.capcut.stack-rotate",
     "name": "Stack & Rotate",
+    "used_for": ["gpufx"],
     "version": "1.0.0",
     "description": "The first clip shrinks into a tilted card among blurred side cards while the whole stack "
                    "rolls half a turn, a blur and twirl pulse hides the swap, and the second clip card settles "

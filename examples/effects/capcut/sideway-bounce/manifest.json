@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.sideway-bounce",
   "name": "Sideway Bounce",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture zooms in and is knocked sideways by a fading wobble with motion smear and a bright glow, cutting to the second clip at the peak before settling back. Recreation of the CapCut \"Sideway Bounce\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

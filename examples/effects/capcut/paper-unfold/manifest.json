@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.paper-unfold",
   "name": "Paper Unfold",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Crumpled newspaper climbs over the first clip while a torn edge reveals the second, with scratch streaks and an exposure flash. Recreation of the CapCut \"Paper Unfold\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

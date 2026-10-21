@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.tremor",
   "name": "Tremor",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip trembles and zooms in under a closing vignette and a lens bulge, then the second clip slams up from below with a vertical motion blur and settles with a small bounce. Recreation of the CapCut \"Tremor\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

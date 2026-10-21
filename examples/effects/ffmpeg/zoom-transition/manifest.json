@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.zoom-transition",
   "name": "Zoom Transition",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip zooms in toward a point and fades into the second. Drive `progress` from 0 to 1.",
   "inputs": [

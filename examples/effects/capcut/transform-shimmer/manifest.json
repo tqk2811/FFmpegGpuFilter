@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.transform-shimmer",
   "name": "Transform Shimmer",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Fade to the second clip through a soft blur that swells and clears again while golden sparkles drift over the frame. Recreation of the CapCut \"Transform Shimmer\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

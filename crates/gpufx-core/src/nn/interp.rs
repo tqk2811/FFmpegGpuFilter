@@ -101,7 +101,9 @@ fn words(v: &[u32]) -> Vec<u8> {
 
 impl FrameInterp {
     pub fn new(model: Arc<NnModel>) -> Result<Self, Error> {
+        crate::used_for::check(model.name(), model.used_for(), crate::used_for::AI_FRAMERATE)?;
         let io = InterpIo::parse(&model.io)?;
+
         for n in [&io.frame0, &io.frame1, &io.timestep] {
             if !model.inputs().contains(n) {
                 return Err(Error::Package(format!("io.json names input \"{n}\" the model does not have")));

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.phone-reveal",
   "name": "Phone Reveal",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A phone spins up from the bottom, its lock screen slides away and the view dives into its screen to reveal the second clip. Recreation of the CapCut \"Phone Reveal\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

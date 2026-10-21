@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.fade-grays",
   "name": "Fade Through Gray",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip loses its color, crossfades in gray to the second, which regains color. Drive `progress` from 0 to 1.",
   "inputs": [

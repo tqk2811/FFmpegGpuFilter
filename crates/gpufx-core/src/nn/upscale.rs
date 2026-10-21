@@ -305,7 +305,9 @@ impl FrameUpscale {
 
     /// Runs `model`, whose precision was chosen when it was loaded (`options.precision` is not used).
     pub fn new(model: Arc<NnModel>, options: UpscaleOptions) -> Result<Self, Error> {
+        crate::used_for::check(model.name(), model.used_for(), crate::used_for::AI_UPSCALE)?;
         let io = SrIo::parse(&model.io)?;
+
         if model.inputs() != [io.input.clone()] {
             return Err(Error::Package(format!("a super_resolution model has exactly one input, \"{}\"", io.input)));
         }

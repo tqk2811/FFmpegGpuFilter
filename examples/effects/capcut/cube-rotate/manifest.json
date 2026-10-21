@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.cube-rotate",
   "name": "Cube Rotate",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The two clips sit on two faces of a cube that turns a quarter turn to the left in perspective, the first clip dimming as it turns away and the second flashing bright as it comes to the front. Recreation of the CapCut \"Cube Rotate\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

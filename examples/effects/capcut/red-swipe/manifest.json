@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.red-swipe",
   "name": "Red Swipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Pixel-sorted vertical streaks melt the first clip down while a colour wheel floods its red channel, then the streaks and the red cast drain away from the second clip. Recreation of the CapCut \"Red Swipe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

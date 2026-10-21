@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.photon-portal",
   "name": "Photon Portal",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A violet energy ring bursts open over the shaking first clip, the second clip shows through its glowing hole and the view zooms through it. Recreation of the CapCut \"Photon Portal\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

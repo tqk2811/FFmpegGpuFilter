@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.slide-right",
   "name": "Slide Right",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Both clips slide right together, the second clip pushing in from the left, with ease-in-out. Recreation of the CapCut \"Right\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

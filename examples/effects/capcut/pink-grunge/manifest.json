@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.pink-grunge",
   "name": "Pink Grunge",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture flips to a shaking, motion-blurred negative under a flickering pink and red grunge light leak, cutting to the second clip at 40%. Recreation of the CapCut \"Pink Grunge\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

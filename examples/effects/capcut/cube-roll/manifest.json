@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.cube-roll",
   "name": "Cube Roll",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip is the front of a cube that tumbles a quarter turn on all three axes, its faces washing out to grey as they turn away, until the second clip's face settles in front. Recreation of the CapCut \"Cube Roll\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

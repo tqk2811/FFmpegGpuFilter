@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.photo-collection",
   "name": "Photo Collection",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The second clip flies in as a photo, spinning, and lands tilted on top of the first: chain it to stack photos. At `progress` 1 the photo lies on the first clip, so the result is not the second clip alone. Drive `progress` from 0 to 1.",
   "inputs": [

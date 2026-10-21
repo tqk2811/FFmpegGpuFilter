@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.pixelize-transition",
   "name": "Pixelize Transition",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Pixels grow, the clips blend at the coarsest point, then pixels shrink back. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.sunset-flash",
   "name": "Sunset Flash",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Hard cut hidden under a warm orange-to-white light leak that cools to deep red and fades. Recreation of the CapCut \"Sunset Flash\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

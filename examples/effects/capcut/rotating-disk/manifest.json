@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.rotating-disk",
   "name": "Rotating Disk",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip spins away under a rotational blur while a growing disc reveals the second clip unwinding into place, with a brief exposure flash. Recreation of the CapCut \"Rotating Disk\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

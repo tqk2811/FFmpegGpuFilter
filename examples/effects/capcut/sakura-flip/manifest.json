@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.sakura-flip",
   "name": "Sakura Flip",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A giant cherry blossom petal sweeps across the frame among drifting petals and flips over while a soft wipe reveals the second clip. Recreation of the CapCut \"Sakura Flip\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

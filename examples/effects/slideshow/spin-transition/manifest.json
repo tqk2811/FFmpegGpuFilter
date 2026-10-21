@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.spin-transition",
   "name": "Spin",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip spins out shrinking, then the second spins in growing, with motion blur. Drive `progress` from 0 to 1.",
   "inputs": [

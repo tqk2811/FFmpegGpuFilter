@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.chroma-key",
   "name": "Chroma Key",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Removes a key color (green screen) into alpha. Use a format with alpha after it, or overlay it.",
   "inputs": [

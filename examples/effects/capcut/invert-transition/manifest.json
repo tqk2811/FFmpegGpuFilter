@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.invert-transition",
   "name": "Invert Transition",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Handheld-shaking cut from the first clip to the second, hidden under a light-leak flash blended in difference mode so the colours invert, with a vignette and exposure push. Recreation of the CapCut \"Invert Transition\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

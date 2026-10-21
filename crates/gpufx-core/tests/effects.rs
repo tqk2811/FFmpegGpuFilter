@@ -304,7 +304,7 @@ fn shader_errors_point_at_the_author_file() {
     std::fs::create_dir_all(dir.join("shaders")).unwrap();
     std::fs::write(
         dir.join("manifest.json"),
-        r#"{"id":"t.bad","name":"Bad","inputs":[{"name":"src"}],"groups":[{"passes":[{"shader":"shaders/bad.wgsl"}]}]}"#,
+        r#"{"id":"t.bad","name":"Bad","used_for":["gpufx"],"inputs":[{"name":"src"}],"groups":[{"passes":[{"shader":"shaders/bad.wgsl"}]}]}"#,
     )
     .unwrap();
     std::fs::write(dir.join("shaders/bad.wgsl"), "@compute @workgroup_size(8,8) fn main() { let x = undefined_thing; }").unwrap();
@@ -531,7 +531,7 @@ fn chain_rules_follow_two_filters_in_a_row() {
     // The format the first effect outputs must be one the next accepts.
     let gray_only = TempPackage::new(
         "gray-only",
-        r#"{"id":"t.gray","name":"Gray only","inputs":[{"name":"src","formats":["gray"],"width":{"max":100}}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+        r#"{"id":"t.gray","name":"Gray only","used_for":["gpufx"],"inputs":[{"name":"src","formats":["gray"],"width":{"max":100}}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
     let gray = || ("gray".to_string(), Effect::new(ctx.clone(), Package::open(&gray_only.0).unwrap()).unwrap());
@@ -540,7 +540,7 @@ fn chain_rules_follow_two_filters_in_a_row() {
     // An effect without output rules may output YUV, as two filters would negotiate.
     let yuv_only = TempPackage::new(
         "yuv-only",
-        r#"{"id":"t.yuv","name":"YUV only","inputs":[{"name":"src","formats":["yuv420p"]}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+        r#"{"id":"t.yuv","name":"YUV only","used_for":["gpufx"],"inputs":[{"name":"src","formats":["yuv420p"]}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
     common::chain(vec![open(&ctx, "invert"), ("yuv".to_string(), Effect::new(ctx.clone(), Package::open(&yuv_only.0).unwrap()).unwrap())])
@@ -553,7 +553,7 @@ fn chain_rules_follow_two_filters_in_a_row() {
     assert!(chain.check_inputs(&stream(128)).is_err());
     let narrow = TempPackage::new(
         "narrow",
-        r#"{"id":"t.narrow","name":"Narrow","inputs":[{"name":"src","width":{"max":100}}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+        r#"{"id":"t.narrow","name":"Narrow","used_for":["gpufx"],"inputs":[{"name":"src","width":{"max":100}}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
     let narrow = ("narrow".to_string(), Effect::new(ctx.clone(), Package::open(&narrow.0).unwrap()).unwrap());
@@ -577,7 +577,7 @@ fn globals_hold_precise_time_and_pixel_aspect() {
     let Some(ctx) = gpu() else { return };
     let pkg = TempPackage::new(
         "globals",
-        r#"{"id":"t.globals","name":"Globals","groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+        r#"{"id":"t.globals","name":"Globals","used_for":["gpufx"],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
              if (!gpufx_in_bounds(id)) { return; }
              gpufx_write(id, vec4f(f32(globals.time_int + 128) / 255.0, globals.time_frac, globals.pixel_aspect / 4.0, 1.0));

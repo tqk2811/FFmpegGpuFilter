@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.twist-turn",
   "name": "Twist Turn",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip tips back and twists away as a card while the second clip, revealed top-down as a small dimmed card, swings round on a soft shadow and grows to fill the frame. Recreation of the CapCut \"Twist Turn\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 2,
   "id": "io.github.tqk2811.falling-ginkgo",
   "name": "Falling Ginkgo Leaves",
+  "used_for": ["gpufx"],
   "version": "2.0.0",
   "description": "Yellow ginkgo leaves falling over the video, spinning down on the wind.",
   "inputs": [

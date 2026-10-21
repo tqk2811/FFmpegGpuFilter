@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.love-theme",
   "name": "Love Theme",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A pixel-art curtain of pink hearts climbs over the first clip in stop-motion steps and leaves upward over the second. Recreation of the CapCut \"Love Theme\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

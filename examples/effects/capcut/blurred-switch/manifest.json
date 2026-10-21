@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.blurred-switch",
   "name": "Blurred Switch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "White flashes, a horizontal blur burst and half-screen white and black strobes over a quick dissolve to the second clip. Recreation of the CapCut \"Blurred Switch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

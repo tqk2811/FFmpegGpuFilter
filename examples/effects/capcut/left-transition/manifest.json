@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.left-transition",
   "name": "Left Transition",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Both clips slide left with a strong motion blur, the second clip entering from the right, under a warm light leak and black letterbox bars that close and reopen. Recreation of the CapCut \"Left Transition\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

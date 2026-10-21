@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.wide-ripple",
   "name": "Wide Ripple",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture swells and drifts sideways through a pinching wide-angle lens with a zoom blur, warm toning and film grain, cutting to the second clip as it settles in. Recreation of the CapCut \"Wide Ripple\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

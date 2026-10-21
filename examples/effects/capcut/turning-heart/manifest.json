@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.turning-heart",
   "name": "Turning Heart",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A glossy heart spins up, bursts into a pink heart that floods the frame, then a soft heart-shaped hole opens onto the second clip. Recreation of the CapCut \"Turning Heart\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

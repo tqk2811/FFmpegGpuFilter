@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.color-adjust",
   "name": "Color Adjust",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Brightness, contrast, saturation, gamma, hue and white balance in one pass.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.bubbly-dream",
   "name": "Bubbly Dream",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip breaks up into a foam of wobbly bubbles that shrink and pop to reveal the second clip. Recreation of the CapCut \"Bubbly Dream\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

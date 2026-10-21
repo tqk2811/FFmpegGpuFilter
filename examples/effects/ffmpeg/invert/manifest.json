@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.invert",
   "name": "Invert",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Negative image.",
   "inputs": [

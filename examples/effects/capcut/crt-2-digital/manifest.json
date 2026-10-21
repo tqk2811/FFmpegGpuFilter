@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.crt-2-digital",
   "name": "CRT 2 Digital",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The camera pulls back from the first clip to an old TV in a dim room; the glitching picture falls out of the screen onto the floor, the second clip plays on the set, and the camera pushes back in. Recreation of the CapCut \"CRT 2 Digital\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

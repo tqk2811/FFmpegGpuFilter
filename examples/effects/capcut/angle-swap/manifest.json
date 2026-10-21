@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.angle-swap",
   "name": "Angle Swap",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Hard cut at the midpoint hidden by a tilted push-in and pull-back with motion blur, a diamond bokeh, an exposure flash, twinkling star specks and cross-shaped glint streaks. Recreation of the CapCut \"Angle Swap\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.negative-glitch",
   "name": "Negative Glitch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture flips to its negative, flares in exposure, shakes and zooms out with mirrored edges and a smeared, desaturated analogue-signal look, cutting to the second clip at the peak. Recreation of the CapCut \"Negative Glitch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

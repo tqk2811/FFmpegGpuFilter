@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.target-zoom",
   "name": "Target Zoom",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "An aiming reticle locks onto a point, the picture swirls and bulges into it, and the second clip unwinds out of the same point. Recreation of the CapCut \"Target Zoom\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

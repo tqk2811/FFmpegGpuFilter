@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.record-scratch",
   "name": "Record Scratch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip is shoved sideways with a bounce while the second slides in, smeared into bright light trails under a pincushion lens and a centre pinch, with twinkling dust specks. Recreation of the CapCut \"Record Scratch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

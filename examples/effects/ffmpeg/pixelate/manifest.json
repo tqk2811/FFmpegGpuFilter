@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.pixelate",
   "name": "Pixelate",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Mosaic of square blocks.",
   "inputs": [

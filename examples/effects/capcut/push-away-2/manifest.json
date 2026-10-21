@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.push-away-2",
   "name": "Push Away 2",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip pinches, shrinks and turns away with a camera shake, then the second clip spins in from a bulged, enlarged view under a spin blur, a highlight glow and a white flash. Recreation of the CapCut \"Push Away 2\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

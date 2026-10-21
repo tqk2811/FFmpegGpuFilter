@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.tearing-paper",
   "name": "Tearing Paper",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A ragged tear runs across the middle of the first clip, then the paper shreds apart from the tear outward to reveal the second clip. Recreation of the CapCut \"Tearing Paper\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

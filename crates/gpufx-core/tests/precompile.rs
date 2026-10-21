@@ -96,7 +96,8 @@ fn only_d3d12_groups_are_precompiled() {
     .unwrap();
     std::fs::write(dir.join("bad.wgsl"), "@compute @workgroup_size(8,8) fn main() { let x = undefined_thing; }").unwrap();
     let pack = |groups: &str| {
-        std::fs::write(dir.join("manifest.json"), format!(r#"{{"id":"t.g","name":"G","groups":[{groups}]}}"#)).unwrap();
+        std::fs::write(dir.join("manifest.json"), format!(r#"{{"id":"t.g","name":"G","used_for":["gpufx"],"groups":[{groups}]}}"#))
+            .unwrap();
         Package::pack(&dir, &dir.with_extension("zip"), true)
     };
     // The vendor and features of a D3D12 group do not matter; the Metal group is not compiled.

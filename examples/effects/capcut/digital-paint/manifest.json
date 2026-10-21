@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.digital-paint",
   "name": "Digital Paint",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip flares with a pulsing glow, brush strokes paint a black-dot halftone of the second clip over it, then a second round of strokes reveals the glowing second clip, with zoom-blur punches along the way. Recreation of the CapCut \"Digital Paint\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.crop-switch",
   "name": "Crop Switch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Cropped panels of the second clip pop up over the first with drop shadows and jolts, then the second clip cuts in. Recreation of the CapCut \"Crop Switch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

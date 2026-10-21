@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.horizontal-blur",
   "name": "Horizontal Blur",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Dissolve to the second clip through a horizontal blur and a bright exposure flash. Recreation of the CapCut \"Horizontal Blur\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

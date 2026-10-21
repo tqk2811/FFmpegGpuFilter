@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.dispersion-trail",
   "name": "Dispersion Trail",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip blooms into a white glow, a curtain of blurred rainbow light streaks drifts diagonally across the frame, then the second clip appears through a fading glow. Recreation of the CapCut \"Dispersion Trail\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

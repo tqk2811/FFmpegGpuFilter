@@ -256,7 +256,11 @@ impl NnModel {
             None => String::new(),
         };
         let get = |n: &str| files.get(&format!("{dir}{n}")).map(Vec::as_slice);
-        let model = get("model.json").ok_or_else(|| Error::Package(format!("missing {dir}model.json")))?;
+        let model = match get("model.json") {
+            Some(m) => m,
+            None if dir.is_empty() => return Err(crate::used_for::wrong_kind(&files, "model.json")),
+            None => return Err(Error::Package(format!("missing {dir}model.json"))),
+        };
         let weights = get("weights.bin").ok_or_else(|| Error::Package(format!("missing {dir}weights.bin")))?;
         Self::from_parts_with(ctx, model, weights, get("io.json"), precision)
     }
@@ -396,6 +400,11 @@ impl NnModel {
 
     pub fn name(&self) -> &str {
         &self.model.name
+    }
+
+    /// The filters the model is for (`used_for` of `model.json`).
+    pub fn used_for(&self) -> &[String] {
+        &self.model.used_for
     }
 
     /// Names of the input tensors.

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.arrow-up",
   "name": "Arrow Up",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "An upward chevron wipe reveals the second clip, trailed by two gold chevron stripes. Recreation of the CapCut \"Arrow Up\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

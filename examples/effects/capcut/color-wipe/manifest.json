@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.color-wipe",
   "name": "Color Wipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture turns black and white while a slanted band showing a vivid, mirrored second clip sweeps across, wiping the first clip to the second behind it. Recreation of the CapCut \"Color Wipe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

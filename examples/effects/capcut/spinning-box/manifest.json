@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.spinning-box",
   "name": "Spinning Box",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A glowing box of the second clip pops up in the centre, spins a quarter turn and stretches open to fill the frame. Recreation of the CapCut \"Spinning Box\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

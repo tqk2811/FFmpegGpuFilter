@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.centerfold-wipe",
   "name": "Centerfold Wipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip rolls up like a sheet of paper from the top edge down, catching the light on the curl, and uncovers the second clip. Recreation of the CapCut \"Centerfold Wipe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

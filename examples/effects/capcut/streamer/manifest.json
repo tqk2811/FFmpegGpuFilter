@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.streamer",
   "name": "Streamer I",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A wobbly hole with a glowing golden rim grows out of the zooming first clip and reveals the shrinking second clip. Recreation of the CapCut \"Streamer I\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

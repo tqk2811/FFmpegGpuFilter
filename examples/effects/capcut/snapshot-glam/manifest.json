@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.snapshot-glam",
   "name": "Snapshot Glam",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip tips back and away like a photo card, the second swings up from below with a slight twist and lands with a quick zoom blur. Recreation of the CapCut \"Snapshot Glam\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

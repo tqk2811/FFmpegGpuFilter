@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.heart-wipe-2",
   "name": "Heart Wipe 2",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A heart with two faint echoes opens over the first clip to show the second, wobbles, then swells to fill the frame. Recreation of the CapCut \"Heart Wipe 2\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

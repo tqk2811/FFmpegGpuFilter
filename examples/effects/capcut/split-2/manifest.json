@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.split-2",
   "name": "Split II",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The top and bottom halves slide sideways in opposite directions with motion blur, revealing the second clip. Recreation of the CapCut \"Split II\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

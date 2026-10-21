@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.flip-page",
   "name": "Flip Page",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Peel pages off from the bottom-left corner, two of the first input and then one of the second, under a diagonal streak blur. Recreation of the CapCut \"Flip Page\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

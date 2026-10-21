@@ -2,6 +2,7 @@
   "api": 2,
   "id": "io.github.tqk2811.capcut.dollar-bills-ii",
   "name": "Dollar Bills II",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A burst of banknotes explodes from the centre of the first clip, one note flies into the camera to hide the cut, and notes rain down over the second clip. Recreation of the CapCut \"Dollar Bills II\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

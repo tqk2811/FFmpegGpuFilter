@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.wipe-switch",
   "name": "Wipe Switch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A silver bar sweeps down the frame, uncovering the second clip above it while the first clip stays below. Recreation of the CapCut \"Wipe Switch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

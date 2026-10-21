@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.neon-graffiti",
   "name": "Neon Graffiti",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Yellow neon scribbles flicker over the first clip, which jolts and stretches into a white flash, and the second clip snaps back into place under the fading glow. Recreation of the CapCut \"Neon Graffiti\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

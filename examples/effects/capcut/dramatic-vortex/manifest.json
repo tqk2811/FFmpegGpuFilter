@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.dramatic-vortex",
   "name": "Dramatic Vortex",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip grows and whirls away in a twisting, colour-split blur with an exposure flash, and the second clip spins back in from 170 degrees. Recreation of the CapCut \"Dramatic Vortex\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

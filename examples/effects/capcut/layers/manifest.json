@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.layers",
   "name": "Layers",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A glowing hole opens in the bulging, spinning first clip and stacked rings cut from both clips spin out of it towards the viewer, then a burst of light rays hands over to the glowing second clip. Recreation of the CapCut \"Layers\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

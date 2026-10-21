@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.red-envelope",
   "name": "Red Envelope",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A red envelope tumbles in over the first clip, is tapped and tears open, and the second clip bursts out of it with a zoom overshoot and two glow pulses. Recreation of the CapCut \"Red Envelope\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

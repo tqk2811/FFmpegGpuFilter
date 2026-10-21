@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.rainbow-strobe",
   "name": "Rainbow Strobe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Coloured bokeh lights strobe over the frame in screen blend, the picture cuts to a brightened second clip that settles back to normal. Recreation of the CapCut \"Rainbow Strobe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

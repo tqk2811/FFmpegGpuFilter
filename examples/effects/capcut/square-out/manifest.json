@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.square-out",
   "name": "Square Out",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A window opens from the centre of the first clip, pushing its four sides outward, and reveals the second clip zooming up inside. Recreation of the CapCut \"Square Out\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.heat-flash",
   "name": "Heat Flash",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip blooms into a warm orange glow while a flickering film-burn flash washes over the frame, then the second clip emerges as the glow fades. Recreation of the CapCut \"Heat Flash\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

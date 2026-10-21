@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.image-drop",
   "name": "Image Drop",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture sags downward and smears in a vertical motion blur, cuts to the second clip and springs back into place. Recreation of the CapCut \"Image Drop\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

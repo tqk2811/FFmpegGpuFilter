@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.split-transition",
   "name": "Split Transition",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first input wipes away in two halves, split down the middle, over a pulsing glow of the second one under a soft light wash. Recreation of the CapCut \"Split Transition\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

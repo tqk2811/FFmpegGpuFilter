@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.flying-rectangle",
   "name": "Flying Rectangle",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip zooms in through a black frame that closes into a band, tilts upright and flies away; the second clip then settles from a blurred zoom with a fading glow. Recreation of the CapCut \"Flying Rectangle\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

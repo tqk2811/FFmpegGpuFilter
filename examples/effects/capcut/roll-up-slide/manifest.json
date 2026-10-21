@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.roll-up-slide",
   "name": "Roll-up Slide",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first input rolls up diagonally like a page curling onto a cylinder, revealing the second. Recreation of the CapCut \"Roll-up Slide\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

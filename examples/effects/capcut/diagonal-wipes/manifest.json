@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.diagonal-wipes",
   "name": "Diagonal Wipes",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Three diagonal strips switch from the first clip to the second one after another, each zooming in, streaking along the diagonal and settling back, while the whole frame shakes. Recreation of the CapCut \"Diagonal Wipes\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

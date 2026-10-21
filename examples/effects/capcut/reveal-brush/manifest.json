@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.reveal-brush",
   "name": "Reveal Brush",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Zig-zag brush strokes paint the second clip over the first, then it fades in fully. Recreation of the CapCut \"Reveal Brush\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

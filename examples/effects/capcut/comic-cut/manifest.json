@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.comic-cut",
   "name": "Comic Cut",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip cracks down the middle and tears into two paper-edged halves that fly apart over a halftone print of the second clip, under film grain. Recreation of the CapCut \"Comic Cut\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

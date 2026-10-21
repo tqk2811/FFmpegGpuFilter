@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.paper-ball",
   "name": "Paper Ball",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A crumpled paper ball lands on the first clip, unfolds into a sheet and tears open onto the second clip. Recreation of the CapCut \"Paper Ball\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

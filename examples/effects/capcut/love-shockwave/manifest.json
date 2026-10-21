@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.love-shockwave",
   "name": "Love Shockwave",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A glowing pixel-art heart grows from the centre of the first clip, with the second clip inside, until it fills the frame. Recreation of the CapCut \"Love Shockwave\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

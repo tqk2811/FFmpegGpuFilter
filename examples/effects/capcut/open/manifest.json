@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.open",
   "name": "Open",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip splits down the middle and both halves swing open in perspective while the second clip comes forward from the distance over a floor reflection. Recreation of the CapCut \"Open\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

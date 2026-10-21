@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.fade-up",
   "name": "Fade Up",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip rises, grows and fades out over the second through a zoom blur and a gentle wave, with a short exposure flash at the start. Recreation of the CapCut \"Fade Up\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

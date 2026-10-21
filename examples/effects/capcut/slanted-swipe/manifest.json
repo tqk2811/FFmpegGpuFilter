@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.slanted-swipe",
   "name": "Slanted Swipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip smears into a strong slanted motion blur with fast black flicker, cuts to the second clip under the blur (with a split white flash), and the blur and flicker fade out. Recreation of the CapCut \"Slanted Swipe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

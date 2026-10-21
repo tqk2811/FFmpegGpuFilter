@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.checkerboard",
   "name": "Checkerboard",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A square of the second clip grows from the centre of every cell of a grid until it covers the first. Drive `progress` from 0 to 1.",
   "inputs": [

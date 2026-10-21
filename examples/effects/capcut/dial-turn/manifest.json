@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.dial-turn",
   "name": "Dial Turn",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip whips off to the left with a growing horizontal motion blur, then the second clip swings in like a dial turning around the bottom centre, overshoots and settles with a springy wobble and a rotational blur. Recreation of the CapCut \"Dial Turn\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

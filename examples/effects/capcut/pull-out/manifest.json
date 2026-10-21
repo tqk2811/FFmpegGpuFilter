@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.pull-out",
   "name": "Pull Out",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Zoom out of the first input with a radial blur, then zoom into the second. Recreation of the CapCut \"Pull Out\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.drag-up-switch",
   "name": "Drag-up Switch",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip zooms in and is dragged up out of frame with the second clip stacked beneath it, bulging vertically on the way, under a faint camera viewfinder mark. Recreation of the CapCut \"Drag-up Switch\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

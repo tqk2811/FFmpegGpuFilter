@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.firework-light",
   "name": "Firework Light",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A burst of warm sparkles rises from the bottom and floods the frame while a growing bokeh blur hides the cut to the second clip. Recreation of the CapCut \"Firework Light\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

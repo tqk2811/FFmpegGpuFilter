@@ -2,6 +2,7 @@
   "api": 2,
   "id": "io.github.tqk2811.hstack",
   "name": "Horizontal Stack",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Places the inputs side by side, left to right, like FFmpeg's hstack.",
   "inputs": [

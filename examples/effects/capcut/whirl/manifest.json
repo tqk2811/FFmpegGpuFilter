@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.whirl",
   "name": "Whirl",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The second clip flies up from the bottom as a round-cornered card, tumbling in 3D with motion blur and exposure flicker, and grows to fill the frame over the darkened first clip. Recreation of the CapCut \"Whirl\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

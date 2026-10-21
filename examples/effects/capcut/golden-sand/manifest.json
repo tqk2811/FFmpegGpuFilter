@@ -2,6 +2,9 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.golden-sand",
   "name": "Golden Sand",
+  "used_for": [
+    "gpufx"
+  ],
   "version": "1.0.0",
   "description": "The first clip bursts into glowing golden sand that sweeps down the frame while the second clip is uncovered from the top. Recreation of the CapCut \"Golden Sand\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

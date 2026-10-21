@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.brush-portal",
   "name": "Brush Portal",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The second clip is painted in through a swirling brush stroke that grows from the centre, with a glowing negative rim and a light-leak wash. Recreation of the CapCut \"Brush Portal\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

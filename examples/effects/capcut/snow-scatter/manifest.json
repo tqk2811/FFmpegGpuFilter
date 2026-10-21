@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.snow-scatter",
   "name": "Snow Scatter",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A burst of sparks flies out of the centre and snowflakes drift and fade over the second clip. Recreation of the CapCut \"Snow Scatter\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

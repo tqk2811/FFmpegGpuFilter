@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.varnish-wash",
   "name": "Varnish Wash",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A burst of glossy liquid blobs sprays out and merges into a metallic pool that refracts the second clip over the first. Recreation of the CapCut \"Varnish Wash\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

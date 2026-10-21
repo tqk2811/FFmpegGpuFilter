@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.torn-wipe",
   "name": "Torn Wipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Torn-paper strips of the two clips slide in from every side before the second clip takes over. Recreation of the CapCut \"Torn Wipe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

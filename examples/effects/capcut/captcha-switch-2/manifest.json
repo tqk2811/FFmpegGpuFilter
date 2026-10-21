@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.captcha-switch-2",
   "name": "Captcha Switch 2",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A captcha card pops up over the first clip, a cursor drags its slider to line up two rotated rings showing the second clip, then the card zooms through the screen to reveal it. Recreation of the CapCut \"Captcha Switch 2\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

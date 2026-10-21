@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.negative-flash",
   "name": "Negative Flash",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip flickers under a punchy grade with two quick negative flashes, then dips into the second clip through a fading crushed-shadow grade. Recreation of the CapCut \"Zoom Negative\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

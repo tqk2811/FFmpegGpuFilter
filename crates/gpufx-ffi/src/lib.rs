@@ -1439,6 +1439,19 @@ mod tests {
         SERIAL.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// A gpufx-nn model given to gpufx fails at open, naming the filter that takes it.
+    #[test]
+    fn a_model_package_is_not_an_effect() {
+        let _serial = serial();
+        let dir = std::env::temp_dir().join(format!("gpufx-ffi-model-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.json"), r#"{"format":"gpufx-nn","version":1,"used_for":["gpufx_ai_upscale"]}"#).unwrap();
+        assert!(open(&dir).is_null());
+        let e = unsafe { CStr::from_ptr(gpufx_last_error()) }.to_string_lossy().into_owned();
+        assert!(e.contains("missing manifest.json: it is a gpufx-nn model package, use it with the gpufx_ai_upscale filter"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_effect_gets_its_device_at_the_first_frame() {
         let _serial = serial();

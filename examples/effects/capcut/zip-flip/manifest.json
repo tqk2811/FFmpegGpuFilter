@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.zip-flip",
   "name": "Zip Flip",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip twists shut row by row around a vertical axis and the second clip untwists out of it. Recreation of the CapCut \"Zip Flip\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

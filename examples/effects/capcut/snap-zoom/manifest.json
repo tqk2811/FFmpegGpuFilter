@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.snap-zoom",
   "name": "Snap Zoom",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip shrinks into a pinched, magnified bubble under zoom streaks, then a blue flash snaps to the second clip as it springs out of a bulge with a short shake. Recreation of the CapCut \"Snap Zoom\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

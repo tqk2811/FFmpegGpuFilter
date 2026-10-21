@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.polygonal-unfold",
   "name": "Polygonal Unfold",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A crumpled paper polygon pops up over the first clip, tears open onto the second clip and unfolds outwards until it flies off. Recreation of the CapCut \"Polygonal Unfold\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

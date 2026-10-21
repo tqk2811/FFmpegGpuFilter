@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.signal-glitch-2",
   "name": "Signal Glitch 2",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Glitch into the second clip: the colour channels drift apart, the picture jolts sideways with a motion smear, blooms with an over-exposed glow, streaks, tears along spinning noise under glowing interference bands and flickers to grey. Recreation of the CapCut \"Signal Glitch 2\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

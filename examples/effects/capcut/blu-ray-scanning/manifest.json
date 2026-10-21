@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.blu-ray-scanning",
   "name": "Blu-ray Scanning",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A glowing blue scan line sweeps from the foreground to the background of the first clip, rippling the picture as it passes and leaving the second clip behind it. Recreation of the CapCut \"Blu-ray Scanning\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

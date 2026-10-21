@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.pixel-vibe",
   "name": "Pixel Vibe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A halftone dot screen fades over the frame while it flares in exposure, punches in with a zoom blur and shakes, cutting to the second clip at the midpoint. Recreation of the CapCut \"Pixel Vibe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

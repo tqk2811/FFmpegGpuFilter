@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.dissolve",
   "name": "Dissolve",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Random pixels (or blocks) switch from the first clip to the second. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.box-in",
   "name": "Box In",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip zooms out into a box, the box slides out of the frame, a box of the second clip slides in from the same side and zooms in to fill the frame. Drive `progress` from 0 to 1.",
   "inputs": [

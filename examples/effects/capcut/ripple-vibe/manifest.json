@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.ripple-vibe",
   "name": "Ripple Vibe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture shakes, flares bright and ripples sideways in noisy waves while cutting to the second clip at the midpoint. Recreation of the CapCut \"Ripple Vibe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

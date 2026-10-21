@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.rgb-split",
   "name": "RGB Split + Grain",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Chromatic aberration with animated film grain, written in GLSL.",
   "inputs": [{ "name": "src" }],

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.hexa-mosaic",
   "name": "Hexa Mosaic",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Hard cut at the midpoint hidden by a sideways block-noise scramble, a red/green/blue scale split, a bright glow and sharpening that peak in the middle. Recreation of the CapCut \"Hexa Mosaic\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

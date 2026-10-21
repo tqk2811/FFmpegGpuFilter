@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.2024-recap",
   "name": "2024 Recap",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip shrinks into a rounded photo card on a phone chat screen with confetti and a greeting bubble, slides aside for the second card, which grows back to full frame under red fireworks. Recreation of the CapCut \"2024 Recap\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

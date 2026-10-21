@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.thermal-imaging-3",
   "name": "Thermal Imaging 3",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The second clip burns in from its highlights down to its shadows while a coloured glow, subtracted from the picture, gives the frame a false-colour heat-camera look. Recreation of the CapCut \"Thermal Imaging 3\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

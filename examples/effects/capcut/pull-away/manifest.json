@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.pull-away",
   "name": "Pull Away",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip splits along its middle and its halves slide off up and down, uncovering the second clip as two darkened, tilted panels that unfold flat. Recreation of the CapCut \"Pull Away\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

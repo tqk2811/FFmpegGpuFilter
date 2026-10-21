@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.break-swipe",
   "name": "Break Swipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The second clip is typed in over the first in five snaking horizontal strips, the uncovered part smeared by a pulsing horizontal blur. Recreation of the CapCut \"Break Swipe\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.film-erase",
   "name": "Film Erase",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Flickering film-burn light leaks wash over the clips while a slanted edge wipes the second clip in from the top. Recreation of the CapCut \"Film Erase\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

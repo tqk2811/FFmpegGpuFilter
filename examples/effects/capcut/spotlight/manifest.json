@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.spotlight",
   "name": "Spotlight",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A glowing light beam grows down from the top showing the second clip mirrored inside it, floods the darkened, desaturated frame as both clips slide down, then shrinks back to a thin line over the second clip. Recreation of the CapCut \"Spotlight\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

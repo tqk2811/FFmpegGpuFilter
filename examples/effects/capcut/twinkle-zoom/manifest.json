@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.twinkle-zoom",
   "name": "Twinkle Zoom",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Dissolve to the second clip while the picture melts into a hexagonal bokeh blur whose highlights flare into sparkles, then sharpens again. Recreation of the CapCut \"Twinkle Zoom\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

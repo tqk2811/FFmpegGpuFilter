@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.circle-reveal",
   "name": "Circle Reveal",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Iris transition: the second clip appears in a growing circle. Drive `progress` from 0 to 1.",
   "inputs": [

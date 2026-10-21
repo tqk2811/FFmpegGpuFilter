@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.contrast-split",
   "name": "Contrast Split",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Hard cut hidden under a punchy analogue-video grade with a vignette and an exposure swell, a two-frame jolt of the first clip, the second clip dropping in raised over the first, a short vertical blur and three flat flash cards. Recreation of the CapCut \"Contrast Split\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

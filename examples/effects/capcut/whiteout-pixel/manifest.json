@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.whiteout-pixel",
   "name": "Whiteout Pixel",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The picture turns into a zooming RGB dot screen, cuts to the second clip under a white light sweep, then a magenta sweep as the dots fade. Recreation of the CapCut \"Whiteout Pixel\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

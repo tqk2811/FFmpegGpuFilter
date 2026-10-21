@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.dazzle-pulse",
   "name": "Dazzle Pulse",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A bright pulse: the frame swells, ripples, flares in exposure and shakes with a zoom blur and a colour split, cutting to the second clip at the peak. Recreation of the CapCut \"Dazzle Pulse\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

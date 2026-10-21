@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.delay-zoom",
   "name": "Delay Zoom",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip eases back into a mirrored, RGB-split zoom blur and flares bright, then fades over the second clip settling in from a zoom. Recreation of the CapCut \"Delay Zoom\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

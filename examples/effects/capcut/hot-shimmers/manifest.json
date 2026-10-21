@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.hot-shimmers",
   "name": "Hot Shimmers",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Dissolve to the second clip through a heat-haze warp with a bright glow on the highlights and a zoom blur streaming up from the bottom edge. Recreation of the CapCut \"Hot Shimmers\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.wipers",
   "name": "Wipers",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A wiper blade hinged at the top-left corner sweeps the first clip away to a greyscale second clip, then a second blade hinged at the top-right corner sweeps the colour back in. Recreation of the CapCut \"Wipers\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

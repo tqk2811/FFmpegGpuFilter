@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.slide-bars",
   "name": "Slide Bars",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Four horizontal strips of the second clip slide in from alternating sides with motion blur, then the picture shakes and ripples as a ring flare bursts out. Recreation of the CapCut \"Slide Bars\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

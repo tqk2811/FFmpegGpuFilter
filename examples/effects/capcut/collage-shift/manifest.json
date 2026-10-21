@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.collage-shift",
   "name": "Collage Shift",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip splits into two rows of repeated tiles that shrink and slide apart in opposite directions with directional motion blur, then the second clip opens from the middle. Recreation of the CapCut \"Collage Shift\" transition. Drive `progress` from 0 to 1.",
   "inputs": [

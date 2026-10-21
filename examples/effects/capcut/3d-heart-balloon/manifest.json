@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.capcut.3d-heart-balloon",
   "name": "3D Heart Balloon",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "A swarm of glossy pink heart balloons and bubbles pours in and rushes past the camera while the second clip fades in underneath. Recreation of the CapCut \"3D Heart Balloon\" transition. Drive `progress` from 0 to 1.",
   "inputs": [
