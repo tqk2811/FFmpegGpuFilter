@@ -141,9 +141,9 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: giống demo hơn và tránh giật ở chỗ nối. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
 
-### [Vừa] `hblur-transition` và `xfade.zip=transition=hblur` đọc tới width/2 pixel mỗi điểm ảnh
+### [Vừa] `xfade.zip` transition=hblur đọc tới width/2 pixel mỗi điểm ảnh
 - **Vấn đề**: ở progress 0.5 trên 4K mỗi pixel đọc ~1920 lần mỗi texture (~32 G lần đọc một frame), dễ chạm GPU timeout (TDR) trên D3D12/Windows; 1080p cũng đã nặng (~4 G lần đọc). FFmpeg dùng tổng trượt O(1) mỗi pixel.
-- **Vị trí**: [hblur_transition.wgsl](../packages/effects/ffmpeg/hblur-transition/shaders/hblur_transition.wgsl), [xfade.wgsl](../packages/effects/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh hblur)
+- **Vị trí**: [xfade.wgsl](../packages/effects/ffmpeg/xfade/shaders/xfade.wgsl) (nhánh hblur)
 - **Vì sao**: nên tính tổng theo hàng bằng prefix-sum hoặc shared memory để chi phí không phụ thuộc progress; cần texture trung gian float (xem mục `tmp` 8-bit dưới).
 - **Ngày ghi**: 2026-10-21
 
@@ -184,7 +184,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Effect port FFmpeg: các finding review để sau
-- **Vấn đề**: (1) blend/masked-merge/masked-minmax lấy alpha của input đầu, tính trên RGB thay vì plane YUV. (2) distance-transition đo khác màu trên YUV BT.601 quy đổi, bỏ alpha. (3) perspective dựng ma trận bằng f32 mỗi pixel (méo nhiều thì lệch ~1 px), tứ giác suy biến ra NaN. (4) displace dùng luma của map cho mọi kênh. (5) colorchannelmixer: ngưỡng `lout` 1/510 lệch 255 lần so với FFmpeg, case pwr dùng `pow(abs)` mất dấu thay `cbrt`. (6) huesaturation dựng ma trận 4x4 và curves giải spline mỗi pixel, nên tính sẵn khi đổi tham số. (7) chroma-shift/hsv-key/luma-key cố định BT.709 full-range.
+- **Vấn đề**: (1) blend/masked-merge/masked-minmax lấy alpha của input đầu, tính trên RGB thay vì plane YUV. (2) xfade transition=distance đo khác màu trên YUV BT.601 quy đổi, bỏ alpha. (3) perspective dựng ma trận bằng f32 mỗi pixel (méo nhiều thì lệch ~1 px), tứ giác suy biến ra NaN. (4) displace dùng luma của map cho mọi kênh. (5) colorchannelmixer: ngưỡng `lout` 1/510 lệch 255 lần so với FFmpeg, case pwr dùng `pow(abs)` mất dấu thay `cbrt`. (6) huesaturation dựng ma trận 4x4 và curves giải spline mỗi pixel, nên tính sẵn khi đổi tham số. (7) chroma-shift/hsv-key/luma-key cố định BT.709 full-range.
 - **Vị trí**: các gói tương ứng trong `packages/effects/ffmpeg/`
 - **Vì sao**: chỉ lệch nhỏ so với FFmpeg hoặc tốn hiệu năng; README đã ghi phần lớn.
 - **Ngày ghi**: 2026-10-21
