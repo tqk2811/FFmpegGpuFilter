@@ -1,0 +1,58 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.monochrome",
+  "name": "Monochrome",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Black and white through a color filter, like a colored filter on a film camera.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "cb",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Chroma blue spot of the filter"
+    },
+    {
+      "name": "cr",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Chroma red spot of the filter"
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "default": 1,
+      "min": 0.1,
+      "max": 10,
+      "description": "Size of the color filter"
+    },
+    {
+      "name": "high",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Strength of the filter in the highlights"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/monochrome.wgsl"
+        }
+      ]
+    }
+  ]
+}

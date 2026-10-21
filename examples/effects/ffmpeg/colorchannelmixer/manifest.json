@@ -1,0 +1,170 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colorchannelmixer",
+  "name": "Color Channel Mixer",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Mixes the red, green, blue and alpha channels with a 4x4 matrix.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "rr",
+      "type": "float",
+      "default": 1,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the red channel in the red channel"
+    },
+    {
+      "name": "rg",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the green channel in the red channel"
+    },
+    {
+      "name": "rb",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the blue channel in the red channel"
+    },
+    {
+      "name": "ra",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the alpha channel in the red channel"
+    },
+    {
+      "name": "gr",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the red channel in the green channel"
+    },
+    {
+      "name": "gg",
+      "type": "float",
+      "default": 1,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the green channel in the green channel"
+    },
+    {
+      "name": "gb",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the blue channel in the green channel"
+    },
+    {
+      "name": "ga",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the alpha channel in the green channel"
+    },
+    {
+      "name": "br",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the red channel in the blue channel"
+    },
+    {
+      "name": "bg",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the green channel in the blue channel"
+    },
+    {
+      "name": "bb",
+      "type": "float",
+      "default": 1,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the blue channel in the blue channel"
+    },
+    {
+      "name": "ba",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the alpha channel in the blue channel"
+    },
+    {
+      "name": "ar",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the red channel in the alpha channel"
+    },
+    {
+      "name": "ag",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the green channel in the alpha channel"
+    },
+    {
+      "name": "ab",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the blue channel in the alpha channel"
+    },
+    {
+      "name": "aa",
+      "type": "float",
+      "default": 1,
+      "min": -2,
+      "max": 2,
+      "description": "Gain of the alpha channel in the alpha channel"
+    },
+    {
+      "name": "pc",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "description": "Preserve color mode: 0 = none, 1 = lum, 2 = max, 3 = avg, 4 = sum, 5 = nrm, 6 = pwr"
+    },
+    {
+      "name": "pa",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Amount of the color preservation"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colorchannelmixer.wgsl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colorlevels",
+  "name": "Color Levels",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Adjusts the black and white points of every channel (levels).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "rimin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Input red black point"
+    },
+    {
+      "name": "gimin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Input green black point"
+    },
+    {
+      "name": "bimin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Input blue black point"
+    },
+    {
+      "name": "aimin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Input alpha black point"
+    },
+    {
+      "name": "rimax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Input red white point"
+    },
+    {
+      "name": "gimax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Input green white point"
+    },
+    {
+      "name": "bimax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Input blue white point"
+    },
+    {
+      "name": "aimax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Input alpha white point"
+    },
+    {
+      "name": "romin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Output red black point"
+    },
+    {
+      "name": "gomin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Output green black point"
+    },
+    {
+      "name": "bomin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Output blue black point"
+    },
+    {
+      "name": "aomin",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Output alpha black point"
+    },
+    {
+      "name": "romax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Output red white point"
+    },
+    {
+      "name": "gomax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Output green white point"
+    },
+    {
+      "name": "bomax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Output blue white point"
+    },
+    {
+      "name": "aomax",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Output alpha white point"
+    },
+    {
+      "name": "preserve",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "description": "Preserve color mode: 0 = none, 1 = lum, 2 = max, 3 = avg, 4 = sum, 5 = nrm, 6 = pwr"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colorlevels.wgsl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.curves",
+  "name": "Curves",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Tone curves: FFmpeg's presets, or a custom curve through one middle point per channel.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "preset",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 10,
+      "description": "Preset: 0 = none, 1 = color_negative, 2 = cross_process, 3 = darker, 4 = increase_contrast, 5 = lighter, 6 = linear_contrast, 7 = medium_contrast, 8 = negative, 9 = strong_contrast, 10 = vintage"
+    },
+    {
+      "name": "master",
+      "type": "vec2",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "description": "Middle point (x, y) of the master curve through (0, 0) and (1, 1); (0.5, 0.5) leaves the preset in place"
+    },
+    {
+      "name": "red",
+      "type": "vec2",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "description": "Middle point (x, y) of the red curve; (0.5, 0.5) leaves the preset in place"
+    },
+    {
+      "name": "green",
+      "type": "vec2",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "description": "Middle point (x, y) of the green curve; (0.5, 0.5) leaves the preset in place"
+    },
+    {
+      "name": "blue",
+      "type": "vec2",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "description": "Middle point (x, y) of the blue curve; (0.5, 0.5) leaves the preset in place"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/curves.wgsl"
+        }
+      ]
+    }
+  ]
+}
