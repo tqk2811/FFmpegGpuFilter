@@ -1,0 +1,43 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.displace",
+  "name": "Displace",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Displaces the first input by the brightness of two map inputs (x and y).",
+  "inputs": [
+    {
+      "name": "src",
+      "description": "Picture to displace"
+    },
+    {
+      "name": "xmap",
+      "description": "Horizontal displacement map (same size as the first input)",
+      "same_size": true
+    },
+    {
+      "name": "ymap",
+      "description": "Vertical displacement map (same size as the first input)",
+      "same_size": true
+    }
+  ],
+  "params": [
+    {
+      "name": "edge",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "description": "What happens beyond the edge: 0 = blank (black), 1 = smear (repeat the edge), 2 = wrap, 3 = mirror"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/displace.wgsl"
+        }
+      ]
+    }
+  ]
+}

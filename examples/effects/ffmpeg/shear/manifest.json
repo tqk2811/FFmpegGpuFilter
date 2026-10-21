@@ -1,0 +1,54 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.shear",
+  "name": "Shear",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Shears the picture horizontally and/or vertically.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "shx",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Horizontal shear factor"
+    },
+    {
+      "name": "shy",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Vertical shear factor"
+    },
+    {
+      "name": "fillcolor",
+      "type": "color",
+      "default": "#000000",
+      "description": "Color of the area outside the sheared picture"
+    },
+    {
+      "name": "interp",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Interpolation: 0 = nearest, 1 = bilinear"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/shear.wgsl"
+        }
+      ]
+    }
+  ]
+}

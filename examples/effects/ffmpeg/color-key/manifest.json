@@ -1,0 +1,64 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.color-key",
+  "name": "Color Key",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Turns pixels close to a key color into transparency (RGB distance). Use a format with alpha after it, or overlay it.",
+  "inputs": [
+    {
+      "name": "src",
+      "formats": [
+        "yuv420p",
+        "yuv422p",
+        "yuv444p",
+        "yuvj420p",
+        "nv12",
+        "rgb24",
+        "bgr24",
+        "rgba",
+        "bgra"
+      ]
+    }
+  ],
+  "output": {
+    "formats": [
+      "rgba",
+      "yuva420p",
+      "yuva444p"
+    ]
+  },
+  "params": [
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "Key color to make transparent; alpha is ignored"
+    },
+    {
+      "name": "similarity",
+      "type": "float",
+      "default": 0.01,
+      "min": 0.00001,
+      "max": 1,
+      "description": "Distance from the key color that becomes transparent; 0.01 matches only very close colors, 1 everything"
+    },
+    {
+      "name": "blend",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Width of the soft edge above the similarity; 0 = hard cut"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/color_key.wgsl"
+        }
+      ]
+    }
+  ]
+}

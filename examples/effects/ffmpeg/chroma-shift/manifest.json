@@ -1,0 +1,64 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.chroma-shift",
+  "name": "Chroma Shift",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Shifts the chroma (Cb and Cr) of the picture horizontally and vertically, leaving the luma in place.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "cbh",
+      "type": "int",
+      "default": 0,
+      "min": -255,
+      "max": 255,
+      "description": "Shift chroma-blue horizontally, in pixels"
+    },
+    {
+      "name": "cbv",
+      "type": "int",
+      "default": 0,
+      "min": -255,
+      "max": 255,
+      "description": "Shift chroma-blue vertically, in pixels"
+    },
+    {
+      "name": "crh",
+      "type": "int",
+      "default": 0,
+      "min": -255,
+      "max": 255,
+      "description": "Shift chroma-red horizontally, in pixels"
+    },
+    {
+      "name": "crv",
+      "type": "int",
+      "default": 0,
+      "min": -255,
+      "max": 255,
+      "description": "Shift chroma-red vertically, in pixels"
+    },
+    {
+      "name": "edge",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Edge operation: 0 = smear (repeat the edge), 1 = wrap"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/chroma_shift.wgsl"
+        }
+      ]
+    }
+  ]
+}
