@@ -171,9 +171,13 @@
       "premultiply": true
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/leaves.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/leaves.wgsl"
+        }
+      ]
     }
   ]
 }

@@ -25,28 +25,32 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/spin-blur.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "spun"
-    },
-    {
-      "shader": "shaders/zoom-blur.wgsl",
-      "inputs": [
-        "second"
-      ],
-      "output": "zoomed"
-    },
-    {
-      "shader": "shaders/composite.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "spun",
-        "zoomed"
+      "passes": [
+        {
+          "shader": "shaders/spin-blur.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "spun"
+        },
+        {
+          "shader": "shaders/zoom-blur.wgsl",
+          "inputs": [
+            "second"
+          ],
+          "output": "zoomed"
+        },
+        {
+          "shader": "shaders/composite.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "spun",
+            "zoomed"
+          ]
+        }
       ]
     }
   ]

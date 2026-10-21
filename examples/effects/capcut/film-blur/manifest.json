@@ -25,28 +25,32 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/look.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "look"
-    },
-    {
-      "shader": "shaders/crisp.wgsl",
-      "inputs": [
-        "look"
-      ],
-      "output": "crisp"
-    },
-    {
-      "shader": "shaders/film-blur.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "crisp"
+      "passes": [
+        {
+          "shader": "shaders/look.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "look"
+        },
+        {
+          "shader": "shaders/crisp.wgsl",
+          "inputs": [
+            "look"
+          ],
+          "output": "crisp"
+        },
+        {
+          "shader": "shaders/film-blur.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "crisp"
+          ]
+        }
       ]
     }
   ]

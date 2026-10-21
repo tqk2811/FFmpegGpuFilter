@@ -55,9 +55,13 @@
       "description": "0 = each stripe opens from one edge, 1 = from its center towards both edges"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/blinds.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/blinds.wgsl"
+        }
+      ]
     }
   ]
 }

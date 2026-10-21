@@ -55,9 +55,13 @@
       "description": "1 = each bar starts when the previous one lands, 0 = all bars move together"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/sliding_bars.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/sliding_bars.wgsl"
+        }
+      ]
     }
   ]
 }

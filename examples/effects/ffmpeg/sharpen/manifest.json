@@ -19,9 +19,13 @@
       "description": "Sharpening strength"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/sharpen.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/sharpen.wgsl"
+        }
+      ]
     }
   ]
 }

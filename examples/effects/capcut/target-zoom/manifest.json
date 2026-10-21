@@ -25,21 +25,25 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/warp.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "warped"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": [
-        "warped",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/warp.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "warped"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": [
+            "warped",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

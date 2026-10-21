@@ -48,9 +48,13 @@
       "description": "Edge width, in turns"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/clock_wipe.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/clock_wipe.wgsl"
+        }
+      ]
     }
   ]
 }

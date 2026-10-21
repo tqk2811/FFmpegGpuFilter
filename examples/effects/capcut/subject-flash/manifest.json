@@ -25,57 +25,61 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/bend.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "bent"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "inputs": [
-        "bent"
-      ],
-      "output": "glow_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "inputs": [
-        "glow_x"
-      ],
-      "output": "glow"
-    },
-    {
-      "shader": "shaders/soft-y.wgsl",
-      "inputs": [
-        "bent",
-        "glow"
-      ],
-      "output": "soft_y"
-    },
-    {
-      "shader": "shaders/soft-x.wgsl",
-      "inputs": [
-        "soft_y"
-      ],
-      "output": "soft"
-    },
-    {
-      "shader": "shaders/bokeh.wgsl",
-      "inputs": [
-        "soft"
-      ],
-      "output": "bokeh"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "bokeh"
+      "passes": [
+        {
+          "shader": "shaders/bend.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "bent"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "inputs": [
+            "bent"
+          ],
+          "output": "glow_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "inputs": [
+            "glow_x"
+          ],
+          "output": "glow"
+        },
+        {
+          "shader": "shaders/soft-y.wgsl",
+          "inputs": [
+            "bent",
+            "glow"
+          ],
+          "output": "soft_y"
+        },
+        {
+          "shader": "shaders/soft-x.wgsl",
+          "inputs": [
+            "soft_y"
+          ],
+          "output": "soft"
+        },
+        {
+          "shader": "shaders/bokeh.wgsl",
+          "inputs": [
+            "soft"
+          ],
+          "output": "bokeh"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "bokeh"
+          ]
+        }
       ]
     }
   ]

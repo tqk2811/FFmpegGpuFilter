@@ -25,9 +25,13 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/petal-wind.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/petal-wind.wgsl"
+        }
+      ]
     }
   ]
 }

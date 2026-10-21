@@ -31,9 +31,13 @@
       "path": "textures/crumple.png"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/paper-ball.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/paper-ball.wgsl"
+        }
+      ]
     }
   ]
 }

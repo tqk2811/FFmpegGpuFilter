@@ -33,15 +33,19 @@
       "description": "Real transition length in seconds; sets the speed of the shake"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/bars.wgsl",
-      "inputs": ["first", "second"],
-      "output": "stack"
-    },
-    {
-      "shader": "shaders/shake.wgsl",
-      "inputs": ["stack", "first", "second"]
+      "passes": [
+        {
+          "shader": "shaders/bars.wgsl",
+          "inputs": ["first", "second"],
+          "output": "stack"
+        },
+        {
+          "shader": "shaders/shake.wgsl",
+          "inputs": ["stack", "first", "second"]
+        }
+      ]
     }
   ]
 }

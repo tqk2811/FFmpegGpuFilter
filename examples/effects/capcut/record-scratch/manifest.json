@@ -25,49 +25,53 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/dust-first.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "dust_first"
-    },
-    {
-      "shader": "shaders/dust-second.wgsl",
-      "inputs": [
-        "second"
-      ],
-      "output": "dust_second"
-    },
-    {
-      "shader": "shaders/slide.wgsl",
-      "inputs": [
-        "dust_first",
-        "dust_second"
-      ],
-      "output": "slid"
-    },
-    {
-      "shader": "shaders/lens.wgsl",
-      "inputs": [
-        "slid"
-      ],
-      "output": "lensed"
-    },
-    {
-      "shader": "shaders/smooth.wgsl",
-      "inputs": [
-        "lensed"
-      ],
-      "output": "smoothed"
-    },
-    {
-      "shader": "shaders/pinch.wgsl",
-      "inputs": [
-        "smoothed",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/dust-first.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "dust_first"
+        },
+        {
+          "shader": "shaders/dust-second.wgsl",
+          "inputs": [
+            "second"
+          ],
+          "output": "dust_second"
+        },
+        {
+          "shader": "shaders/slide.wgsl",
+          "inputs": [
+            "dust_first",
+            "dust_second"
+          ],
+          "output": "slid"
+        },
+        {
+          "shader": "shaders/lens.wgsl",
+          "inputs": [
+            "slid"
+          ],
+          "output": "lensed"
+        },
+        {
+          "shader": "shaders/smooth.wgsl",
+          "inputs": [
+            "lensed"
+          ],
+          "output": "smoothed"
+        },
+        {
+          "shader": "shaders/pinch.wgsl",
+          "inputs": [
+            "smoothed",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

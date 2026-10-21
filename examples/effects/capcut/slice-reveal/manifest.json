@@ -25,37 +25,41 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/slice-left.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "left"
-    },
-    {
-      "shader": "shaders/slice-right.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "right"
-    },
-    {
-      "shader": "shaders/shadow.wgsl",
-      "inputs": [
-        "left",
-        "right"
-      ],
-      "output": "shade_x"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "left",
-        "right",
-        "shade_x"
+      "passes": [
+        {
+          "shader": "shaders/slice-left.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "left"
+        },
+        {
+          "shader": "shaders/slice-right.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "right"
+        },
+        {
+          "shader": "shaders/shadow.wgsl",
+          "inputs": [
+            "left",
+            "right"
+          ],
+          "output": "shade_x"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "left",
+            "right",
+            "shade_x"
+          ]
+        }
       ]
     }
   ]

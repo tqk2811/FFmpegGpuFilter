@@ -25,42 +25,46 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/masks.wgsl",
-      "inputs": [],
-      "output": "masks"
-    },
-    {
-      "shader": "shaders/highlight.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "masks"
-      ],
-      "output": "lit"
-    },
-    {
-      "shader": "shaders/blur-h.wgsl",
-      "inputs": [
-        "lit"
-      ],
-      "output": "blur_h"
-    },
-    {
-      "shader": "shaders/blur-v.wgsl",
-      "inputs": [
-        "blur_h"
-      ],
-      "output": "glow_v"
-    },
-    {
-      "shader": "shaders/composite.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "masks",
-        "glow_v"
+      "passes": [
+        {
+          "shader": "shaders/masks.wgsl",
+          "inputs": [],
+          "output": "masks"
+        },
+        {
+          "shader": "shaders/highlight.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "masks"
+          ],
+          "output": "lit"
+        },
+        {
+          "shader": "shaders/blur-h.wgsl",
+          "inputs": [
+            "lit"
+          ],
+          "output": "blur_h"
+        },
+        {
+          "shader": "shaders/blur-v.wgsl",
+          "inputs": [
+            "blur_h"
+          ],
+          "output": "glow_v"
+        },
+        {
+          "shader": "shaders/composite.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "masks",
+            "glow_v"
+          ]
+        }
       ]
     }
   ]

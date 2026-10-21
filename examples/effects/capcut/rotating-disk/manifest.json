@@ -25,20 +25,24 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/spin-first.wgsl",
-      "inputs": ["first"],
-      "output": "spun_first"
-    },
-    {
-      "shader": "shaders/spin-second.wgsl",
-      "inputs": ["second"],
-      "output": "spun_second"
-    },
-    {
-      "shader": "shaders/blend.wgsl",
-      "inputs": ["first", "second", "spun_first", "spun_second"]
+      "passes": [
+        {
+          "shader": "shaders/spin-first.wgsl",
+          "inputs": ["first"],
+          "output": "spun_first"
+        },
+        {
+          "shader": "shaders/spin-second.wgsl",
+          "inputs": ["second"],
+          "output": "spun_second"
+        },
+        {
+          "shader": "shaders/blend.wgsl",
+          "inputs": ["first", "second", "spun_first", "spun_second"]
+        }
+      ]
     }
   ]
 }

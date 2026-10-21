@@ -25,48 +25,52 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/bend.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "bent"
-    },
-    {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": [
-        "bent"
-      ],
-      "output": "zoomed"
-    },
-    {
-      "shader": "shaders/wave.wgsl",
-      "inputs": [
-        "zoomed"
-      ],
-      "output": "waved"
-    },
-    {
-      "shader": "shaders/prism.wgsl",
-      "inputs": [
-        "waved"
-      ],
-      "output": "prismed"
-    },
-    {
-      "shader": "shaders/glow.wgsl",
-      "inputs": [
-        "prismed"
-      ],
-      "output": "glow_x"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": [
-        "prismed",
-        "glow_x"
+      "passes": [
+        {
+          "shader": "shaders/bend.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "bent"
+        },
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": [
+            "bent"
+          ],
+          "output": "zoomed"
+        },
+        {
+          "shader": "shaders/wave.wgsl",
+          "inputs": [
+            "zoomed"
+          ],
+          "output": "waved"
+        },
+        {
+          "shader": "shaders/prism.wgsl",
+          "inputs": [
+            "waved"
+          ],
+          "output": "prismed"
+        },
+        {
+          "shader": "shaders/glow.wgsl",
+          "inputs": [
+            "prismed"
+          ],
+          "output": "glow_x"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": [
+            "prismed",
+            "glow_x"
+          ]
+        }
       ]
     }
   ]

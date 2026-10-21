@@ -25,15 +25,19 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/lens.wgsl",
-      "inputs": ["first"],
-      "output": "disc"
-    },
-    {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": ["disc", "first", "second"]
+      "passes": [
+        {
+          "shader": "shaders/lens.wgsl",
+          "inputs": ["first"],
+          "output": "disc"
+        },
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": ["disc", "first", "second"]
+        }
+      ]
     }
   ]
 }

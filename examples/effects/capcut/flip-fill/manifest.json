@@ -25,20 +25,24 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/scene.wgsl",
-      "inputs": ["first", "second"],
-      "output": "lit"
-    },
-    {
-      "shader": "shaders/streak.wgsl",
-      "inputs": ["lit"],
-      "output": "streak"
-    },
-    {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": ["first", "second", "streak"]
+      "passes": [
+        {
+          "shader": "shaders/scene.wgsl",
+          "inputs": ["first", "second"],
+          "output": "lit"
+        },
+        {
+          "shader": "shaders/streak.wgsl",
+          "inputs": ["lit"],
+          "output": "streak"
+        },
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": ["first", "second", "streak"]
+        }
+      ]
     }
   ]
 }

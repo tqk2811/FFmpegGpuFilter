@@ -25,21 +25,25 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/compose.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "composed"
-    },
-    {
-      "shader": "shaders/frame-swipe.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "composed"
+      "passes": [
+        {
+          "shader": "shaders/compose.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "composed"
+        },
+        {
+          "shader": "shaders/frame-swipe.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "composed"
+          ]
+        }
       ]
     }
   ]

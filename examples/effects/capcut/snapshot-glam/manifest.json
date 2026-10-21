@@ -25,21 +25,25 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/flip.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "scene"
-    },
-    {
-      "shader": "shaders/blur.wgsl",
-      "inputs": [
-        "scene",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/flip.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "scene"
+        },
+        {
+          "shader": "shaders/blur.wgsl",
+          "inputs": [
+            "scene",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

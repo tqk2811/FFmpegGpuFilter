@@ -25,86 +25,90 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/source.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "split"
-    },
-    {
-      "shader": "shaders/wipe.wgsl",
-      "inputs": [
-        "split"
-      ],
-      "output": "wiped"
-    },
-    {
-      "shader": "shaders/smear.wgsl",
-      "inputs": [
-        "wiped"
-      ],
-      "output": "smeared"
-    },
-    {
-      "shader": "shaders/layers.wgsl",
-      "inputs": [
-        "split",
-        "smeared"
-      ],
-      "output": "layered"
-    },
-    {
-      "shader": "shaders/soften.wgsl",
-      "inputs": [
-        "layered"
-      ],
-      "output": "softened"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": [
-        "softened"
-      ],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/glow-v.wgsl",
-      "inputs": [
-        "glow_h"
-      ],
-      "output": "glow"
-    },
-    {
-      "shader": "shaders/bloom.wgsl",
-      "inputs": [
-        "softened",
-        "glow"
-      ],
-      "output": "bloomed"
-    },
-    {
-      "shader": "shaders/streak.wgsl",
-      "inputs": [
-        "bloomed"
-      ],
-      "output": "streaked"
-    },
-    {
-      "shader": "shaders/warp.wgsl",
-      "inputs": [
-        "streaked"
-      ],
-      "output": "warped"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": [
-        "warped",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/source.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "split"
+        },
+        {
+          "shader": "shaders/wipe.wgsl",
+          "inputs": [
+            "split"
+          ],
+          "output": "wiped"
+        },
+        {
+          "shader": "shaders/smear.wgsl",
+          "inputs": [
+            "wiped"
+          ],
+          "output": "smeared"
+        },
+        {
+          "shader": "shaders/layers.wgsl",
+          "inputs": [
+            "split",
+            "smeared"
+          ],
+          "output": "layered"
+        },
+        {
+          "shader": "shaders/soften.wgsl",
+          "inputs": [
+            "layered"
+          ],
+          "output": "softened"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": [
+            "softened"
+          ],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/glow-v.wgsl",
+          "inputs": [
+            "glow_h"
+          ],
+          "output": "glow"
+        },
+        {
+          "shader": "shaders/bloom.wgsl",
+          "inputs": [
+            "softened",
+            "glow"
+          ],
+          "output": "bloomed"
+        },
+        {
+          "shader": "shaders/streak.wgsl",
+          "inputs": [
+            "bloomed"
+          ],
+          "output": "streaked"
+        },
+        {
+          "shader": "shaders/warp.wgsl",
+          "inputs": [
+            "streaked"
+          ],
+          "output": "warped"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": [
+            "warped",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

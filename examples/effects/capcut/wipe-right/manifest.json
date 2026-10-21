@@ -25,9 +25,13 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/wipe-right.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/wipe-right.wgsl"
+        }
+      ]
     }
   ]
 }

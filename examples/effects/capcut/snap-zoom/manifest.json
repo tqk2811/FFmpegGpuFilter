@@ -25,20 +25,24 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/scene.wgsl",
-      "inputs": ["first", "second"],
-      "output": "scene"
-    },
-    {
-      "shader": "shaders/trail.wgsl",
-      "inputs": ["scene"],
-      "output": "trail"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": ["trail", "first", "second"]
+      "passes": [
+        {
+          "shader": "shaders/scene.wgsl",
+          "inputs": ["first", "second"],
+          "output": "scene"
+        },
+        {
+          "shader": "shaders/trail.wgsl",
+          "inputs": ["scene"],
+          "output": "trail"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": ["trail", "first", "second"]
+        }
+      ]
     }
   ]
 }

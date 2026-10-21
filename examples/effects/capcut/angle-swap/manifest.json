@@ -25,173 +25,177 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/compose.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "composed"
-    },
-    {
-      "shader": "shaders/bokeh-v.wgsl",
-      "inputs": [
-        "composed"
-      ],
-      "output": "bokeh_v"
-    },
-    {
-      "shader": "shaders/bokeh-h.wgsl",
-      "inputs": [
-        "bokeh_v"
-      ],
-      "output": "bokeh_h"
-    },
-    {
-      "shader": "shaders/bokeh.wgsl",
-      "inputs": [
-        "bokeh_h"
-      ],
-      "output": "bokeh"
-    },
-    {
-      "shader": "shaders/motion.wgsl",
-      "inputs": [
-        "bokeh"
-      ],
-      "output": "moved"
-    },
-    {
-      "shader": "shaders/highlight.wgsl",
-      "inputs": [
-        "moved"
-      ],
-      "output": "glints"
-    },
-    {
-      "shader": "shaders/soften-h.wgsl",
-      "inputs": [
-        "glints"
-      ],
-      "output": "glints_h"
-    },
-    {
-      "shader": "shaders/soften-v.wgsl",
-      "inputs": [
-        "glints_h"
-      ],
-      "output": "glints_soft"
-    },
-    {
-      "shader": "shaders/streak-x0.wgsl",
-      "inputs": [
-        "glints_soft"
-      ],
-      "output": "streak_x0"
-    },
-    {
-      "shader": "shaders/streak-x1.wgsl",
-      "inputs": [
-        "streak_x0"
-      ],
-      "output": "streak_x1"
-    },
-    {
-      "shader": "shaders/streak-x2.wgsl",
-      "inputs": [
-        "streak_x1"
-      ],
-      "output": "streak_x2"
-    },
-    {
-      "shader": "shaders/streak-x3.wgsl",
-      "inputs": [
-        "streak_x2"
-      ],
-      "output": "streak_x3"
-    },
-    {
-      "shader": "shaders/streak-x4.wgsl",
-      "inputs": [
-        "streak_x3"
-      ],
-      "output": "streak_x4"
-    },
-    {
-      "shader": "shaders/streak-x5.wgsl",
-      "inputs": [
-        "streak_x4"
-      ],
-      "output": "streak_x5"
-    },
-    {
-      "shader": "shaders/merge-x.wgsl",
-      "inputs": [
-        "moved",
-        "streak_x0",
-        "streak_x1",
-        "streak_x2",
-        "streak_x3",
-        "streak_x4",
-        "streak_x5"
-      ],
-      "output": "streaked_x"
-    },
-    {
-      "shader": "shaders/streak-y0.wgsl",
-      "inputs": [
-        "glints_soft"
-      ],
-      "output": "streak_y0"
-    },
-    {
-      "shader": "shaders/streak-y1.wgsl",
-      "inputs": [
-        "streak_y0"
-      ],
-      "output": "streak_y1"
-    },
-    {
-      "shader": "shaders/streak-y2.wgsl",
-      "inputs": [
-        "streak_y1"
-      ],
-      "output": "streak_y2"
-    },
-    {
-      "shader": "shaders/streak-y3.wgsl",
-      "inputs": [
-        "streak_y2"
-      ],
-      "output": "streak_y3"
-    },
-    {
-      "shader": "shaders/streak-y4.wgsl",
-      "inputs": [
-        "streak_y3"
-      ],
-      "output": "streak_y4"
-    },
-    {
-      "shader": "shaders/streak-y5.wgsl",
-      "inputs": [
-        "streak_y4"
-      ],
-      "output": "streak_y5"
-    },
-    {
-      "shader": "shaders/merge-y.wgsl",
-      "inputs": [
-        "streaked_x",
-        "streak_y0",
-        "streak_y1",
-        "streak_y2",
-        "streak_y3",
-        "streak_y4",
-        "streak_y5",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/compose.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "composed"
+        },
+        {
+          "shader": "shaders/bokeh-v.wgsl",
+          "inputs": [
+            "composed"
+          ],
+          "output": "bokeh_v"
+        },
+        {
+          "shader": "shaders/bokeh-h.wgsl",
+          "inputs": [
+            "bokeh_v"
+          ],
+          "output": "bokeh_h"
+        },
+        {
+          "shader": "shaders/bokeh.wgsl",
+          "inputs": [
+            "bokeh_h"
+          ],
+          "output": "bokeh"
+        },
+        {
+          "shader": "shaders/motion.wgsl",
+          "inputs": [
+            "bokeh"
+          ],
+          "output": "moved"
+        },
+        {
+          "shader": "shaders/highlight.wgsl",
+          "inputs": [
+            "moved"
+          ],
+          "output": "glints"
+        },
+        {
+          "shader": "shaders/soften-h.wgsl",
+          "inputs": [
+            "glints"
+          ],
+          "output": "glints_h"
+        },
+        {
+          "shader": "shaders/soften-v.wgsl",
+          "inputs": [
+            "glints_h"
+          ],
+          "output": "glints_soft"
+        },
+        {
+          "shader": "shaders/streak-x0.wgsl",
+          "inputs": [
+            "glints_soft"
+          ],
+          "output": "streak_x0"
+        },
+        {
+          "shader": "shaders/streak-x1.wgsl",
+          "inputs": [
+            "streak_x0"
+          ],
+          "output": "streak_x1"
+        },
+        {
+          "shader": "shaders/streak-x2.wgsl",
+          "inputs": [
+            "streak_x1"
+          ],
+          "output": "streak_x2"
+        },
+        {
+          "shader": "shaders/streak-x3.wgsl",
+          "inputs": [
+            "streak_x2"
+          ],
+          "output": "streak_x3"
+        },
+        {
+          "shader": "shaders/streak-x4.wgsl",
+          "inputs": [
+            "streak_x3"
+          ],
+          "output": "streak_x4"
+        },
+        {
+          "shader": "shaders/streak-x5.wgsl",
+          "inputs": [
+            "streak_x4"
+          ],
+          "output": "streak_x5"
+        },
+        {
+          "shader": "shaders/merge-x.wgsl",
+          "inputs": [
+            "moved",
+            "streak_x0",
+            "streak_x1",
+            "streak_x2",
+            "streak_x3",
+            "streak_x4",
+            "streak_x5"
+          ],
+          "output": "streaked_x"
+        },
+        {
+          "shader": "shaders/streak-y0.wgsl",
+          "inputs": [
+            "glints_soft"
+          ],
+          "output": "streak_y0"
+        },
+        {
+          "shader": "shaders/streak-y1.wgsl",
+          "inputs": [
+            "streak_y0"
+          ],
+          "output": "streak_y1"
+        },
+        {
+          "shader": "shaders/streak-y2.wgsl",
+          "inputs": [
+            "streak_y1"
+          ],
+          "output": "streak_y2"
+        },
+        {
+          "shader": "shaders/streak-y3.wgsl",
+          "inputs": [
+            "streak_y2"
+          ],
+          "output": "streak_y3"
+        },
+        {
+          "shader": "shaders/streak-y4.wgsl",
+          "inputs": [
+            "streak_y3"
+          ],
+          "output": "streak_y4"
+        },
+        {
+          "shader": "shaders/streak-y5.wgsl",
+          "inputs": [
+            "streak_y4"
+          ],
+          "output": "streak_y5"
+        },
+        {
+          "shader": "shaders/merge-y.wgsl",
+          "inputs": [
+            "streaked_x",
+            "streak_y0",
+            "streak_y1",
+            "streak_y2",
+            "streak_y3",
+            "streak_y4",
+            "streak_y5",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

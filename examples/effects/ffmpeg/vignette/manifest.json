@@ -10,5 +10,5 @@
     { "name": "radius", "type": "float", "default": 0.75, "min": 0, "max": 1.5, "description": "Where the darkening starts" },
     { "name": "color", "type": "color", "default": "#000000", "description": "Vignette color" }
   ],
-  "passes": [{ "shader": "shaders/vignette.wgsl" }]
+  "groups": [{ "passes": [{ "shader": "shaders/vignette.wgsl" }] }]
 }

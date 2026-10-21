@@ -44,20 +44,24 @@
       "description": "Background behind the picture in modes 0 to 2 (transparent shows the first input); mode 3 uses the blurred copy"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/blur_h.wgsl",
-      "inputs": [
-        "src"
-      ],
-      "output": "blurred_h"
-    },
-    {
-      "shader": "shaders/fit.wgsl",
-      "inputs": [
-        "canvas",
-        "src",
-        "blurred_h"
+      "passes": [
+        {
+          "shader": "shaders/blur_h.wgsl",
+          "inputs": [
+            "src"
+          ],
+          "output": "blurred_h"
+        },
+        {
+          "shader": "shaders/fit.wgsl",
+          "inputs": [
+            "canvas",
+            "src",
+            "blurred_h"
+          ]
+        }
       ]
     }
   ]

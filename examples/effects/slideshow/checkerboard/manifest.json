@@ -33,9 +33,13 @@
       "description": "Cell size in pixels"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/checkerboard.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/checkerboard.wgsl"
+        }
+      ]
     }
   ]
 }

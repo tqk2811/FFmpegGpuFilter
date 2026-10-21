@@ -25,15 +25,19 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/slide.wgsl",
-      "inputs": ["first", "second"],
-      "output": "layered"
-    },
-    {
-      "shader": "shaders/ripple.wgsl",
-      "inputs": ["first", "second", "layered"]
+      "passes": [
+        {
+          "shader": "shaders/slide.wgsl",
+          "inputs": ["first", "second"],
+          "output": "layered"
+        },
+        {
+          "shader": "shaders/ripple.wgsl",
+          "inputs": ["first", "second", "layered"]
+        }
+      ]
     }
   ]
 }

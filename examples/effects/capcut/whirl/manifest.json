@@ -25,20 +25,24 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/card.wgsl",
-      "inputs": [
-        "second"
-      ],
-      "output": "card"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "card"
+      "passes": [
+        {
+          "shader": "shaders/card.wgsl",
+          "inputs": [
+            "second"
+          ],
+          "output": "card"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "card"
+          ]
+        }
       ]
     }
   ]

@@ -25,30 +25,34 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/scene.wgsl",
-      "inputs": ["first", "second"],
-      "output": "streaks"
-    },
-    {
-      "shader": "shaders/soften-h.wgsl",
-      "inputs": ["streaks"],
-      "output": "soft_h"
-    },
-    {
-      "shader": "shaders/soften-v.wgsl",
-      "inputs": ["soft_h"],
-      "output": "soft"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": ["soft"],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/glow-v.wgsl",
-      "inputs": ["soft", "glow_h"]
+      "passes": [
+        {
+          "shader": "shaders/scene.wgsl",
+          "inputs": ["first", "second"],
+          "output": "streaks"
+        },
+        {
+          "shader": "shaders/soften-h.wgsl",
+          "inputs": ["streaks"],
+          "output": "soft_h"
+        },
+        {
+          "shader": "shaders/soften-v.wgsl",
+          "inputs": ["soft_h"],
+          "output": "soft"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": ["soft"],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/glow-v.wgsl",
+          "inputs": ["soft", "glow_h"]
+        }
+      ]
     }
   ]
 }

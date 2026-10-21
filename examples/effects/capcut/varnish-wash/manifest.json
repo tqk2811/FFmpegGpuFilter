@@ -25,15 +25,19 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/blobs.wgsl",
-      "inputs": ["first"],
-      "output": "blobs"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": ["first", "second", "blobs"]
+      "passes": [
+        {
+          "shader": "shaders/blobs.wgsl",
+          "inputs": ["first"],
+          "output": "blobs"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": ["first", "second", "blobs"]
+        }
+      ]
     }
   ]
 }

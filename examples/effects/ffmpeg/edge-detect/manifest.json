@@ -33,9 +33,13 @@
       "description": "Edge color"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/edge_detect.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/edge_detect.wgsl"
+        }
+      ]
     }
   ]
 }

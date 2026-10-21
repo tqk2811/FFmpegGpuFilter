@@ -25,42 +25,46 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/soften-h-first.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "first_h"
-    },
-    {
-      "shader": "shaders/soften-h-second.wgsl",
-      "inputs": [
-        "second"
-      ],
-      "output": "second_h"
-    },
-    {
-      "shader": "shaders/soften-v-first.wgsl",
-      "inputs": [
-        "first_h"
-      ],
-      "output": "first_v"
-    },
-    {
-      "shader": "shaders/soften-v-second.wgsl",
-      "inputs": [
-        "second_h"
-      ],
-      "output": "second_v"
-    },
-    {
-      "shader": "shaders/bokeh.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "first_v",
-        "second_v"
+      "passes": [
+        {
+          "shader": "shaders/soften-h-first.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "first_h"
+        },
+        {
+          "shader": "shaders/soften-h-second.wgsl",
+          "inputs": [
+            "second"
+          ],
+          "output": "second_h"
+        },
+        {
+          "shader": "shaders/soften-v-first.wgsl",
+          "inputs": [
+            "first_h"
+          ],
+          "output": "first_v"
+        },
+        {
+          "shader": "shaders/soften-v-second.wgsl",
+          "inputs": [
+            "second_h"
+          ],
+          "output": "second_v"
+        },
+        {
+          "shader": "shaders/bokeh.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "first_v",
+            "second_v"
+          ]
+        }
       ]
     }
   ]

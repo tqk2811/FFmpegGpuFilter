@@ -25,15 +25,19 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/sag.wgsl",
-      "inputs": ["first", "second"],
-      "output": "sagged"
-    },
-    {
-      "shader": "shaders/streak.wgsl",
-      "inputs": ["first", "second", "sagged"]
+      "passes": [
+        {
+          "shader": "shaders/sag.wgsl",
+          "inputs": ["first", "second"],
+          "output": "sagged"
+        },
+        {
+          "shader": "shaders/streak.wgsl",
+          "inputs": ["first", "second", "sagged"]
+        }
+      ]
     }
   ]
 }

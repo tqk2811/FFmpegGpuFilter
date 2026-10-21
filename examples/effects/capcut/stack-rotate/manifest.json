@@ -25,82 +25,86 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/back.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "back"
-    },
-    {
-      "shader": "shaders/back-blur-x.wgsl",
-      "inputs": [
-        "back"
-      ],
-      "output": "back_blur_x"
-    },
-    {
-      "shader": "shaders/back-blur-y.wgsl",
-      "inputs": [
-        "back_blur_x"
-      ],
-      "output": "back_soft"
-    },
-    {
-      "shader": "shaders/middle.wgsl",
-      "inputs": [
-        "back_soft",
-        "back",
-        "first",
-        "second"
-      ],
-      "output": "middle"
-    },
-    {
-      "shader": "shaders/middle-blur-x.wgsl",
-      "inputs": [
-        "middle"
-      ],
-      "output": "middle_blur_x"
-    },
-    {
-      "shader": "shaders/middle-blur-y.wgsl",
-      "inputs": [
-        "middle_blur_x"
-      ],
-      "output": "middle_soft"
-    },
-    {
-      "shader": "shaders/front.wgsl",
-      "inputs": [
-        "middle_soft",
-        "middle",
-        "second"
-      ],
-      "output": "stacked"
-    },
-    {
-      "shader": "shaders/haze-x.wgsl",
-      "inputs": [
-        "stacked"
-      ],
-      "output": "haze_x"
-    },
-    {
-      "shader": "shaders/haze-y.wgsl",
-      "inputs": [
-        "haze_x"
-      ],
-      "output": "haze"
-    },
-    {
-      "shader": "shaders/twirl.wgsl",
-      "inputs": [
-        "haze",
-        "stacked",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/back.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "back"
+        },
+        {
+          "shader": "shaders/back-blur-x.wgsl",
+          "inputs": [
+            "back"
+          ],
+          "output": "back_blur_x"
+        },
+        {
+          "shader": "shaders/back-blur-y.wgsl",
+          "inputs": [
+            "back_blur_x"
+          ],
+          "output": "back_soft"
+        },
+        {
+          "shader": "shaders/middle.wgsl",
+          "inputs": [
+            "back_soft",
+            "back",
+            "first",
+            "second"
+          ],
+          "output": "middle"
+        },
+        {
+          "shader": "shaders/middle-blur-x.wgsl",
+          "inputs": [
+            "middle"
+          ],
+          "output": "middle_blur_x"
+        },
+        {
+          "shader": "shaders/middle-blur-y.wgsl",
+          "inputs": [
+            "middle_blur_x"
+          ],
+          "output": "middle_soft"
+        },
+        {
+          "shader": "shaders/front.wgsl",
+          "inputs": [
+            "middle_soft",
+            "middle",
+            "second"
+          ],
+          "output": "stacked"
+        },
+        {
+          "shader": "shaders/haze-x.wgsl",
+          "inputs": [
+            "stacked"
+          ],
+          "output": "haze_x"
+        },
+        {
+          "shader": "shaders/haze-y.wgsl",
+          "inputs": [
+            "haze_x"
+          ],
+          "output": "haze"
+        },
+        {
+          "shader": "shaders/twirl.wgsl",
+          "inputs": [
+            "haze",
+            "stacked",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

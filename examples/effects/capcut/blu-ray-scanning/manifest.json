@@ -25,50 +25,54 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/depth.wgsl",
-      "inputs": ["first"],
-      "output": "depth"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": ["depth"],
-      "output": "glow_a"
-    },
-    {
-      "shader": "shaders/glow-v.wgsl",
-      "inputs": ["glow_a"],
-      "output": "glow_b"
-    },
-    {
-      "shader": "shaders/glow-h2.wgsl",
-      "inputs": ["glow_b"],
-      "output": "glow_c"
-    },
-    {
-      "shader": "shaders/glow-v2.wgsl",
-      "inputs": ["glow_c"],
-      "output": "glow"
-    },
-    {
-      "shader": "shaders/blend.wgsl",
-      "inputs": ["first", "second", "depth", "glow"],
-      "output": "blended"
-    },
-    {
-      "shader": "shaders/displace.wgsl",
-      "inputs": ["blended", "depth"],
-      "output": "displaced"
-    },
-    {
-      "shader": "shaders/soften-x.wgsl",
-      "inputs": ["displaced"],
-      "output": "soft_x"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": ["first", "second", "soft_x"]
+      "passes": [
+        {
+          "shader": "shaders/depth.wgsl",
+          "inputs": ["first"],
+          "output": "depth"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": ["depth"],
+          "output": "glow_a"
+        },
+        {
+          "shader": "shaders/glow-v.wgsl",
+          "inputs": ["glow_a"],
+          "output": "glow_b"
+        },
+        {
+          "shader": "shaders/glow-h2.wgsl",
+          "inputs": ["glow_b"],
+          "output": "glow_c"
+        },
+        {
+          "shader": "shaders/glow-v2.wgsl",
+          "inputs": ["glow_c"],
+          "output": "glow"
+        },
+        {
+          "shader": "shaders/blend.wgsl",
+          "inputs": ["first", "second", "depth", "glow"],
+          "output": "blended"
+        },
+        {
+          "shader": "shaders/displace.wgsl",
+          "inputs": ["blended", "depth"],
+          "output": "displaced"
+        },
+        {
+          "shader": "shaders/soften-x.wgsl",
+          "inputs": ["displaced"],
+          "output": "soft_x"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": ["first", "second", "soft_x"]
+        }
+      ]
     }
   ]
 }

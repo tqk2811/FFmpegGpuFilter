@@ -25,21 +25,25 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/smear.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "smeared"
-    },
-    {
-      "shader": "shaders/scanlines.wgsl",
-      "inputs": [
-        "smeared",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/smear.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "smeared"
+        },
+        {
+          "shader": "shaders/scanlines.wgsl",
+          "inputs": [
+            "smeared",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

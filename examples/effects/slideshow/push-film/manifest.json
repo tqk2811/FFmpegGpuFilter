@@ -69,9 +69,13 @@
       "description": "Colour seen through the perforations"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/push_film.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/push_film.wgsl"
+        }
+      ]
     }
   ]
 }

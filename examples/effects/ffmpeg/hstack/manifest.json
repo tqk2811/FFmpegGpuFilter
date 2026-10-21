@@ -14,9 +14,13 @@
   "output": {
     "size": "hstack"
   },
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/hstack.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/hstack.wgsl"
+        }
+      ]
     }
   ]
 }

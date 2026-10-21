@@ -8,8 +8,12 @@
   "params": [
     { "name": "radius", "type": "float", "default": 6, "min": 0, "max": 48, "description": "Blur radius in pixels" }
   ],
-  "passes": [
-    { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
-    { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+      ]
+    }
   ]
 }

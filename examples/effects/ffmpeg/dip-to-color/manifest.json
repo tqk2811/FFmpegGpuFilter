@@ -31,9 +31,13 @@
       "description": "Color in the middle of the transition"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/dip_to_color.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/dip_to_color.wgsl"
+        }
+      ]
     }
   ]
 }

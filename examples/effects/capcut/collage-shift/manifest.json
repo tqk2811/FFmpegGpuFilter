@@ -25,28 +25,32 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/strip-top.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "strip_top"
-    },
-    {
-      "shader": "shaders/strip-bottom.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "strip_bottom"
-    },
-    {
-      "shader": "shaders/compose.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "strip_top",
-        "strip_bottom"
+      "passes": [
+        {
+          "shader": "shaders/strip-top.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "strip_top"
+        },
+        {
+          "shader": "shaders/strip-bottom.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "strip_bottom"
+        },
+        {
+          "shader": "shaders/compose.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "strip_top",
+            "strip_bottom"
+          ]
+        }
       ]
     }
   ]

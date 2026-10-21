@@ -34,14 +34,13 @@ pub struct Manifest {
     /// Static images shipped in the package (LUTs, masks, overlays).
     #[serde(default)]
     pub textures: Vec<TextureDef>,
-    /// Compute passes, executed in order. The output of the last pass is the effect output.
-    /// Empty in a manifest written with `groups` until it is resolved for a device
-    /// (see [`Manifest::resolve`]).
-    #[serde(default)]
+    /// Compute passes of the group chosen for the device, executed in order. The output of
+    /// the last pass is the effect output. Not read from JSON: empty until the manifest is
+    /// resolved to one group (see [`Manifest::with_group`]).
+    #[serde(skip)]
     pub passes: Vec<PassDef>,
-    /// Alternative pass lists, the first whose `requires` match the device runs. Either
-    /// this or `passes`; empty in a manifest written with `passes`.
-    #[serde(default)]
+    /// Alternative pass lists, the first whose `requires` match the device runs. Required
+    /// in JSON; empty once the manifest is resolved to one group (then in `passes`).
     pub groups: Vec<GroupDef>,
 }
 
@@ -55,7 +54,7 @@ pub struct GroupDef {
     /// The devices the group runs on. Omitted: any.
     #[serde(default)]
     pub requires: Requires,
-    /// Like the top-level `passes`; the last one writes the effect output.
+    /// Compute passes, executed in order; the last one writes the effect output.
     pub passes: Vec<PassDef>,
 }
 
@@ -441,7 +440,14 @@ impl Manifest {
                 return Err(Error::Manifest(format!("unsupported manifest api {api} (runtime supports <= {MANIFEST_API})")));
             }
         }
-        let m: Manifest = serde_json::from_slice(bytes).map_err(|e| Error::Manifest(e.to_string()))?;
+        let m: Manifest = serde_json::from_slice(bytes).map_err(|e| {
+            let msg = e.to_string();
+            if msg.starts_with("unknown field `passes`") || msg.starts_with("missing field `groups`") {
+                Error::Manifest(format!(r#"{msg}: put the passes in `groups`, e.g. "groups": [{{ "passes": [...] }}]"#))
+            } else {
+                Error::Manifest(msg)
+            }
+        })?;
         m.validate()?;
         Ok(m)
     }
@@ -454,11 +460,9 @@ impl Manifest {
         if self.inputs.is_empty() {
             return bad("an effect needs at least one input".into());
         }
-        if !self.passes.is_empty() && !self.groups.is_empty() {
-            return bad("`passes` and `groups` do not go together: put every pass list in `groups`".into());
-        }
+        // A manifest resolved to one group (see `with_group`) has its passes and no groups.
         if self.passes.is_empty() && self.groups.is_empty() {
-            return bad("an effect needs at least one pass (`passes` or `groups`)".into());
+            return bad("an effect needs at least one group in `groups`".into());
         }
         for (g, group) in self.groups.iter().enumerate() {
             let label = self.group_label(g);
@@ -599,7 +603,8 @@ impl Manifest {
         Ok(())
     }
 
-    /// The pass lists to check: `passes`, or those of every group with its label.
+    /// The pass lists to check: those of every group with its label, or the `passes` of a
+    /// manifest resolved to one group.
     fn pass_lists(&self) -> Vec<(Option<String>, &[PassDef])> {
         if self.groups.is_empty() {
             return vec![(None, &self.passes)];
@@ -620,23 +625,16 @@ impl Manifest {
         m
     }
 
-    /// The manifest for `target`: a manifest written with `passes` as is, else one per
-    /// group whose `requires` match (see [`Manifest::with_group`]), in manifest order, so
-    /// the first is the one that runs. A noop target matches every group of its OS. Fails
-    /// when no group matches, saying why each one does not.
+    /// The manifest for `target`: one per group whose `requires` match (see
+    /// [`Manifest::with_group`]), in manifest order, so the first is the one that runs. A
+    /// noop target matches every group of its OS. Fails when no group matches, saying why
+    /// each one does not.
     pub fn resolve(&self, target: &Target) -> Result<Vec<Manifest>, Error> {
-        if self.groups.is_empty() {
-            return Ok(vec![self.clone()]);
-        }
         Ok(self.matching_groups(target)?.into_iter().map(|g| self.with_group(g)).collect())
     }
 
-    /// Indices of the groups whose `requires` match `target` (see [`Manifest::resolve`]),
-    /// empty for a manifest without groups.
+    /// Indices of the groups whose `requires` match `target` (see [`Manifest::resolve`]).
     pub fn matching_groups(&self, target: &Target) -> Result<Vec<usize>, Error> {
-        if self.groups.is_empty() {
-            return Ok(Vec::new());
-        }
         let mut found = Vec::new();
         let mut why = String::new();
         for (g, group) in self.groups.iter().enumerate() {
@@ -748,7 +746,9 @@ mod tests {
     use super::*;
 
     fn manifest(inputs: &str, output: &str) -> Result<Manifest, Error> {
-        Manifest::parse(format!(r#"{{"id":"t.x","name":"X","inputs":{inputs}{output},"passes":[{{"shader":"a.wgsl"}}]}}"#).as_bytes())
+        Manifest::parse(
+            format!(r#"{{"id":"t.x","name":"X","inputs":{inputs}{output},"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes(),
+        )
     }
 
     fn info(format: &str, width: u32, height: u32) -> StreamInfo<'_> {
@@ -802,7 +802,7 @@ mod tests {
         let parse = |inputs: &str, extra: &str| {
             Manifest::parse(
                 format!(
-                    r#"{{"api":2,"id":"t.x","name":"X","inputs":{inputs}{extra},"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}"#
+                    r#"{{"api":2,"id":"t.x","name":"X","inputs":{inputs}{extra},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}]}}"#
                 )
                 .as_bytes(),
             )
@@ -811,7 +811,7 @@ mod tests {
         let e = m.with_input_count(Some(3)).unwrap();
         let names: Vec<&str> = e.inputs.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, ["a", "s0", "s1", "s2"]);
-        assert_eq!(e.passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
+        assert_eq!(e.groups[0].passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
         assert_eq!(m.with_input_count(None).unwrap().inputs.len(), 3);
         assert!(m.with_input_count(Some(4)).unwrap_err().to_string().contains("takes 1 to 3 inputs, got 4"));
         assert_eq!(e.output_size(&[(2, 5), (3, 5), (4, 5), (1, 5)]), Some((10, 5)));
@@ -830,7 +830,10 @@ mod tests {
     }
 
     fn textures(api: u32, list: &str) -> Result<Manifest, Error> {
-        Manifest::parse(format!(r#"{{"api":{api},"id":"t.x","name":"X","textures":[{list}],"passes":[{{"shader":"a.wgsl"}}]}}"#).as_bytes())
+        Manifest::parse(
+            format!(r#"{{"api":{api},"id":"t.x","name":"X","textures":[{list}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#)
+                .as_bytes(),
+        )
     }
 
     #[test]
@@ -862,7 +865,7 @@ mod tests {
         }
         assert!(manifest(r#"[{"name":"a","mipmaps":true}]"#, "").unwrap_err().to_string().contains(r#""api": 2"#));
         let var = |v: &str| {
-            Manifest::parse(format!(r#"{{"api":2,"id":"t.x","name":"X","params":[{{"name":"e","type":"expr","default":"1","vars":["{v}"]}}],"passes":[{{"shader":"a.wgsl"}}]}}"#).as_bytes())
+            Manifest::parse(format!(r#"{{"api":2,"id":"t.x","name":"X","params":[{{"name":"e","type":"expr","default":"1","vars":["{v}"]}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes())
         };
         var("u_2").unwrap();
         assert!(var("_u").is_err() && var("a__b").is_err() && var("2u").is_err());
@@ -870,7 +873,7 @@ mod tests {
         let param = |n: &str| {
             Manifest::parse(
                 format!(
-                    r#"{{"id":"t.x","name":"X","params":[{{"name":"{n}","type":"float","default":1}}],"passes":[{{"shader":"a.wgsl"}}]}}"#
+                    r#"{{"id":"t.x","name":"X","params":[{{"name":"{n}","type":"float","default":1}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#
                 )
                 .as_bytes(),
             )
@@ -938,9 +941,9 @@ mod tests {
     }
 
     #[test]
-    fn plain_passes_are_one_group_for_every_device() {
+    fn a_group_without_requires_runs_on_every_device() {
         let m = manifest(r#"[{"name":"src"}]"#, "").unwrap();
-        assert!(m.groups.is_empty());
+        assert!(m.passes.is_empty() && m.groups.len() == 1);
         let r = m.resolve(&target(wgpu::Backend::Gl, 0, "x", wgpu::Features::empty())).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].passes[0].shader, "a.wgsl");
@@ -962,11 +965,15 @@ mod tests {
         assert!(err(r#"{"name":"a","passes":[{"shader":"a.wgsl","inputs":["nope"]}]}"#).contains("group a: pass 0 reads `nope`"));
         // Every key "*" is fine, and a group need not be named.
         grouped(&format!(r#"{{"requires":{{"os":"*","backend":"*","vendor":"*","features":[]}},{p}}}"#)).unwrap();
-        // Both or neither of `passes` and `groups`; api 1 may use groups.
+        // Top-level `passes` is gone, `groups` is required and not empty; api 1 has groups.
+        let old = Manifest::parse(format!(r#"{{"id":"t.x","name":"X",{p}}}"#).as_bytes()).unwrap_err().to_string();
+        assert!(old.contains("unknown field `passes`") && old.contains("put the passes in `groups`"), "{old}");
         let both = Manifest::parse(format!(r#"{{"id":"t.x","name":"X",{p},"groups":[{{{p}}}]}}"#).as_bytes()).unwrap_err();
-        assert!(both.to_string().contains("do not go together"), "{both}");
-        let neither = Manifest::parse(br#"{"id":"t.x","name":"X"}"#).unwrap_err();
-        assert!(neither.to_string().contains("at least one pass"), "{neither}");
+        assert!(both.to_string().contains("put the passes in `groups`"), "{both}");
+        let neither = Manifest::parse(br#"{"id":"t.x","name":"X"}"#).unwrap_err().to_string();
+        assert!(neither.contains("missing field `groups`") && neither.contains("put the passes in `groups`"), "{neither}");
+        let empty = Manifest::parse(br#"{"id":"t.x","name":"X","groups":[]}"#).unwrap_err();
+        assert!(empty.to_string().contains("at least one group"), "{empty}");
         Manifest::parse(format!(r#"{{"api":1,"id":"t.x","name":"X","groups":[{{{p}}}]}}"#).as_bytes()).unwrap();
         // GLSL in any group rules out a repeated input.
         let glsl = Manifest::parse(

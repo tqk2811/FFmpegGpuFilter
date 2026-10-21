@@ -25,40 +25,44 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/pages.wgsl",
-      "inputs": ["first"],
-      "output": "pages"
-    },
-    {
-      "shader": "shaders/blur-pages-h.wgsl",
-      "inputs": ["pages"],
-      "output": "pages_h"
-    },
-    {
-      "shader": "shaders/blur-pages-v.wgsl",
-      "inputs": ["pages_h"],
-      "output": "pages_b"
-    },
-    {
-      "shader": "shaders/shadows.wgsl",
-      "inputs": [],
-      "output": "shadows"
-    },
-    {
-      "shader": "shaders/blur-shadows-h.wgsl",
-      "inputs": ["shadows"],
-      "output": "shadows_h"
-    },
-    {
-      "shader": "shaders/blur-shadows-v.wgsl",
-      "inputs": ["shadows_h"],
-      "output": "shadows_b"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": ["first", "second", "pages_b", "shadows_b"]
+      "passes": [
+        {
+          "shader": "shaders/pages.wgsl",
+          "inputs": ["first"],
+          "output": "pages"
+        },
+        {
+          "shader": "shaders/blur-pages-h.wgsl",
+          "inputs": ["pages"],
+          "output": "pages_h"
+        },
+        {
+          "shader": "shaders/blur-pages-v.wgsl",
+          "inputs": ["pages_h"],
+          "output": "pages_b"
+        },
+        {
+          "shader": "shaders/shadows.wgsl",
+          "inputs": [],
+          "output": "shadows"
+        },
+        {
+          "shader": "shaders/blur-shadows-h.wgsl",
+          "inputs": ["shadows"],
+          "output": "shadows_h"
+        },
+        {
+          "shader": "shaders/blur-shadows-v.wgsl",
+          "inputs": ["shadows_h"],
+          "output": "shadows_b"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": ["first", "second", "pages_b", "shadows_b"]
+        }
+      ]
     }
   ]
 }

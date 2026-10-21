@@ -25,20 +25,24 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/scene.wgsl",
-      "inputs": ["first", "second"],
-      "output": "streaks"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": ["streaks"],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/glow-v.wgsl",
-      "inputs": ["streaks", "glow_h"]
+      "passes": [
+        {
+          "shader": "shaders/scene.wgsl",
+          "inputs": ["first", "second"],
+          "output": "streaks"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": ["streaks"],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/glow-v.wgsl",
+          "inputs": ["streaks", "glow_h"]
+        }
+      ]
     }
   ]
 }

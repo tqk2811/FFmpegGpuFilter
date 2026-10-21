@@ -1084,7 +1084,7 @@ MANIFEST = {
         {"name": "progress", "type": "float", "default": 0.5, "min": 0, "max": 1,
          "description": "0 = first clip, 1 = second clip"},
     ],
-    "passes": [],
+    "groups": [{"passes": []}],
 }
 
 
@@ -1096,7 +1096,7 @@ def main():
         p = {"shader": "shaders/%s.wgsl" % shader_name, "inputs": inputs}
         if output:
             p["output"] = output
-        MANIFEST["passes"].append(p)
+        MANIFEST["groups"][0]["passes"].append(p)
     (EFFECT / "manifest.json").write_bytes((json.dumps(MANIFEST, indent=2) + "\n").encode("utf-8"))
     print("wrote %d shaders and manifest.json" % len(files))
 

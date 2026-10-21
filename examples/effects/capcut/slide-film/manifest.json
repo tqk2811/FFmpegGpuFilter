@@ -25,26 +25,30 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/strip.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "layered"
-    },
-    {
-      "shader": "shaders/blur.wgsl",
-      "inputs": [
-        "layered"
-      ],
-      "output": "blurred"
-    },
-    {
-      "shader": "shaders/lens.wgsl",
-      "inputs": [
-        "blurred"
+      "passes": [
+        {
+          "shader": "shaders/strip.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "layered"
+        },
+        {
+          "shader": "shaders/blur.wgsl",
+          "inputs": [
+            "layered"
+          ],
+          "output": "blurred"
+        },
+        {
+          "shader": "shaders/lens.wgsl",
+          "inputs": [
+            "blurred"
+          ]
+        }
       ]
     }
   ]

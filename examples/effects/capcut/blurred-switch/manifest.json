@@ -25,23 +25,27 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/reduce.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "small"
-    },
-    {
-      "shader": "shaders/blur.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "small"
-      ],
-      "output": "out"
+      "passes": [
+        {
+          "shader": "shaders/reduce.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "small"
+        },
+        {
+          "shader": "shaders/blur.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "small"
+          ],
+          "output": "out"
+        }
+      ]
     }
   ]
 }

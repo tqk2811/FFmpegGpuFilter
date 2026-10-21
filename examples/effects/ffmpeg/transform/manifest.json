@@ -40,9 +40,13 @@
       "description": "Fill outside the source"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/transform.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/transform.wgsl"
+        }
+      ]
     }
   ]
 }

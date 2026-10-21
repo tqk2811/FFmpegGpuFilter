@@ -25,35 +25,39 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/compose.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "composed"
-    },
-    {
-      "shader": "shaders/smear.wgsl",
-      "inputs": [
-        "composed"
-      ],
-      "output": "smeared"
-    },
-    {
-      "shader": "shaders/detail.wgsl",
-      "inputs": [
-        "smeared"
-      ],
-      "output": "graded"
-    },
-    {
-      "shader": "shaders/contrast-split.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "graded"
+      "passes": [
+        {
+          "shader": "shaders/compose.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "composed"
+        },
+        {
+          "shader": "shaders/smear.wgsl",
+          "inputs": [
+            "composed"
+          ],
+          "output": "smeared"
+        },
+        {
+          "shader": "shaders/detail.wgsl",
+          "inputs": [
+            "smeared"
+          ],
+          "output": "graded"
+        },
+        {
+          "shader": "shaders/contrast-split.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "graded"
+          ]
+        }
       ]
     }
   ]

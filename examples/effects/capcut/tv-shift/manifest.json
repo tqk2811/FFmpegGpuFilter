@@ -25,15 +25,19 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/fade.wgsl",
-      "inputs": ["first", "second"],
-      "output": "mixed"
-    },
-    {
-      "shader": "shaders/tv.wgsl",
-      "inputs": ["mixed", "first", "second"]
+      "passes": [
+        {
+          "shader": "shaders/fade.wgsl",
+          "inputs": ["first", "second"],
+          "output": "mixed"
+        },
+        {
+          "shader": "shaders/tv.wgsl",
+          "inputs": ["mixed", "first", "second"]
+        }
+      ]
     }
   ]
 }

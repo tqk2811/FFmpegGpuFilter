@@ -37,9 +37,13 @@
       "mipmaps": true
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/dollar-bills-ii.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/dollar-bills-ii.wgsl"
+        }
+      ]
     }
   ]
 }

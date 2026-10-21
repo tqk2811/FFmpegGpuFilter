@@ -25,25 +25,29 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/compose.wgsl",
-      "inputs": ["first", "second"],
-      "output": "layer"
-    },
-    {
-      "shader": "shaders/spin.wgsl",
-      "inputs": ["layer"],
-      "output": "spun"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": ["spun"],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": ["spun", "glow_h", "first", "second"]
+      "passes": [
+        {
+          "shader": "shaders/compose.wgsl",
+          "inputs": ["first", "second"],
+          "output": "layer"
+        },
+        {
+          "shader": "shaders/spin.wgsl",
+          "inputs": ["layer"],
+          "output": "spun"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": ["spun"],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": ["spun", "glow_h", "first", "second"]
+        }
+      ]
     }
   ]
 }

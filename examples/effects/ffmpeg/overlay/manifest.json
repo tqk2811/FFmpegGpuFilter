@@ -62,9 +62,13 @@
       "description": "Border color"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/overlay.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/overlay.wgsl"
+        }
+      ]
     }
   ]
 }

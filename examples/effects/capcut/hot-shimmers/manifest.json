@@ -25,25 +25,29 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/warp.wgsl",
-      "inputs": ["first", "second"],
-      "output": "warped"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": ["warped"],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/glow-v.wgsl",
-      "inputs": ["glow_h"],
-      "output": "glow"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": ["warped", "glow"]
+      "passes": [
+        {
+          "shader": "shaders/warp.wgsl",
+          "inputs": ["first", "second"],
+          "output": "warped"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": ["warped"],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/glow-v.wgsl",
+          "inputs": ["glow_h"],
+          "output": "glow"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": ["warped", "glow"]
+        }
+      ]
     }
   ]
 }

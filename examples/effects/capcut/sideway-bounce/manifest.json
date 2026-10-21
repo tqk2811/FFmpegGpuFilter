@@ -33,36 +33,40 @@
       "description": "Real length of the transition in seconds; sets the speed of the wobble (0 freezes it, like CapCut exports)"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/shake.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "shaken"
-    },
-    {
-      "shader": "shaders/glow-h.wgsl",
-      "inputs": [
-        "shaken"
-      ],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/glow-v.wgsl",
-      "inputs": [
-        "glow_h"
-      ],
-      "output": "glow"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "shaken",
-        "glow"
+      "passes": [
+        {
+          "shader": "shaders/shake.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "shaken"
+        },
+        {
+          "shader": "shaders/glow-h.wgsl",
+          "inputs": [
+            "shaken"
+          ],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/glow-v.wgsl",
+          "inputs": [
+            "glow_h"
+          ],
+          "output": "glow"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "shaken",
+            "glow"
+          ]
+        }
       ]
     }
   ]

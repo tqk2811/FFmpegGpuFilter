@@ -55,9 +55,13 @@
       "description": "Background around the spinning clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/spin_transition.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/spin_transition.wgsl"
+        }
+      ]
     }
   ]
 }

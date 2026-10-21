@@ -25,20 +25,24 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/fringe.wgsl",
-      "inputs": ["first", "second"],
-      "output": "fringed"
-    },
-    {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": ["fringed"],
-      "output": "zoomed"
-    },
-    {
-      "shader": "shaders/panes.wgsl",
-      "inputs": ["first", "second", "zoomed"]
+      "passes": [
+        {
+          "shader": "shaders/fringe.wgsl",
+          "inputs": ["first", "second"],
+          "output": "fringed"
+        },
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": ["fringed"],
+          "output": "zoomed"
+        },
+        {
+          "shader": "shaders/panes.wgsl",
+          "inputs": ["first", "second", "zoomed"]
+        }
+      ]
     }
   ]
 }

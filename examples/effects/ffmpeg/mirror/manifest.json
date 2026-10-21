@@ -19,9 +19,13 @@
       "description": "0 = horizontal, 1 = vertical, 2 = both"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/mirror.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/mirror.wgsl"
+        }
+      ]
     }
   ]
 }

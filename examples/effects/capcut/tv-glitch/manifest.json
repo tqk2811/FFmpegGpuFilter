@@ -25,9 +25,13 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/glitch.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/glitch.wgsl"
+        }
+      ]
     }
   ]
 }

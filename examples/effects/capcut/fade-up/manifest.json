@@ -33,9 +33,13 @@
       "description": "Real transition length in seconds; sets how far the wave travels"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/fade-up.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/fade-up.wgsl"
+        }
+      ]
     }
   ]
 }

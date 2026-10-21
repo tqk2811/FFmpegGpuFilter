@@ -40,7 +40,7 @@ impl Package {
         let manifest = parsed.with_input_count(None)?;
         let template = parsed.repeat().is_some().then(|| Box::new(parsed));
         let pkg = Package { manifest, template, files };
-        for pass in pkg.manifest.passes.iter().chain(pkg.manifest.groups.iter().flat_map(|g| &g.passes)) {
+        for pass in pkg.manifest.groups.iter().flat_map(|g| &g.passes) {
             pkg.file(&pass.shader)?;
         }
         for tex in &pkg.manifest.textures {

@@ -25,28 +25,32 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "zoomed"
-    },
-    {
-      "shader": "shaders/warp.wgsl",
-      "inputs": [
-        "zoomed"
-      ],
-      "output": "warped"
-    },
-    {
-      "shader": "shaders/shake.wgsl",
-      "inputs": [
-        "warped",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "zoomed"
+        },
+        {
+          "shader": "shaders/warp.wgsl",
+          "inputs": [
+            "zoomed"
+          ],
+          "output": "warped"
+        },
+        {
+          "shader": "shaders/shake.wgsl",
+          "inputs": [
+            "warped",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

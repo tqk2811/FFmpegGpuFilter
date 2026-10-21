@@ -25,34 +25,38 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/signal.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "signal"
-    },
-    {
-      "shader": "shaders/smear.wgsl",
-      "inputs": [
-        "signal"
-      ],
-      "output": "smeared"
-    },
-    {
-      "shader": "shaders/glow.wgsl",
-      "inputs": [
-        "smeared"
-      ],
-      "output": "glowed"
-    },
-    {
-      "shader": "shaders/finish.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "glowed"
+      "passes": [
+        {
+          "shader": "shaders/signal.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "signal"
+        },
+        {
+          "shader": "shaders/smear.wgsl",
+          "inputs": [
+            "signal"
+          ],
+          "output": "smeared"
+        },
+        {
+          "shader": "shaders/glow.wgsl",
+          "inputs": [
+            "smeared"
+          ],
+          "output": "glowed"
+        },
+        {
+          "shader": "shaders/finish.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "glowed"
+          ]
+        }
       ]
     }
   ]

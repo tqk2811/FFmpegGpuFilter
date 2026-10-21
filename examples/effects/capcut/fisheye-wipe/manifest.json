@@ -25,15 +25,19 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/warp.wgsl",
-      "inputs": ["first", "second"],
-      "output": "bent"
-    },
-    {
-      "shader": "shaders/blur.wgsl",
-      "inputs": ["bent"]
+      "passes": [
+        {
+          "shader": "shaders/warp.wgsl",
+          "inputs": ["first", "second"],
+          "output": "bent"
+        },
+        {
+          "shader": "shaders/blur.wgsl",
+          "inputs": ["bent"]
+        }
+      ]
     }
   ]
 }

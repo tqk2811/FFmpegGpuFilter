@@ -25,23 +25,27 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/halftone.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "dots"
-    },
-    {
-      "shader": "shaders/composite.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "dots"
-      ],
-      "output": "out"
+      "passes": [
+        {
+          "shader": "shaders/halftone.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "dots"
+        },
+        {
+          "shader": "shaders/composite.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "dots"
+          ],
+          "output": "out"
+        }
+      ]
     }
   ]
 }

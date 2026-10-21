@@ -25,171 +25,175 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/soften-x.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "soft_x"
-    },
-    {
-      "shader": "shaders/soften-y.wgsl",
-      "inputs": [
-        "soft_x"
-      ],
-      "output": "soft"
-    },
-    {
-      "shader": "shaders/beam.wgsl",
-      "inputs": [
-        "soft"
-      ],
-      "output": "beam"
-    },
-    {
-      "shader": "shaders/glow-gather.wgsl",
-      "inputs": [
-        "beam"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_1",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_1",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_2",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_2",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_3",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_3",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_4",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_4",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_5",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_5",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_6",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_6",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_7",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_7",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_8",
-      "inputs": [
-        "g_y"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_8",
-      "inputs": [
-        "g_x"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "beam",
-        "g_y"
+      "passes": [
+        {
+          "shader": "shaders/soften-x.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "soft_x"
+        },
+        {
+          "shader": "shaders/soften-y.wgsl",
+          "inputs": [
+            "soft_x"
+          ],
+          "output": "soft"
+        },
+        {
+          "shader": "shaders/beam.wgsl",
+          "inputs": [
+            "soft"
+          ],
+          "output": "beam"
+        },
+        {
+          "shader": "shaders/glow-gather.wgsl",
+          "inputs": [
+            "beam"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_1",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_1",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_2",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_2",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_3",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_3",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_4",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_4",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_5",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_5",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_6",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_6",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_7",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_7",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_8",
+          "inputs": [
+            "g_y"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_8",
+          "inputs": [
+            "g_x"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "beam",
+            "g_y"
+          ]
+        }
       ]
     }
   ]

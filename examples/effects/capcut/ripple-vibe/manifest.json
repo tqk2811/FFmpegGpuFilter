@@ -39,15 +39,19 @@
       "description": "true (default) = the shake and the ripples move in real time over `duration`. false = like CapCut's export: both stay frozen at their t = 0 position while only the amplitude and the flash change"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/ripple.wgsl",
-      "inputs": ["first", "second"],
-      "output": "rippled"
-    },
-    {
-      "shader": "shaders/shake.wgsl",
-      "inputs": ["first", "second", "rippled"]
+      "passes": [
+        {
+          "shader": "shaders/ripple.wgsl",
+          "inputs": ["first", "second"],
+          "output": "rippled"
+        },
+        {
+          "shader": "shaders/shake.wgsl",
+          "inputs": ["first", "second", "rippled"]
+        }
+      ]
     }
   ]
 }

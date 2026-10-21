@@ -33,9 +33,13 @@
       "description": "Real transition length in seconds; scales the motion blur"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/split.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/split.wgsl"
+        }
+      ]
     }
   ]
 }

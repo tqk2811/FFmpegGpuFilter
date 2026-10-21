@@ -31,282 +31,286 @@
       "path": "textures/curves.png"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/glow-gather.wgsl",
-      "inputs": [
-        "second",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_1",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_1",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_2",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_2",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_3",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_3",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_4",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_4",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_5",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_5",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_6",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_6",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_7",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_7",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glow-x.wgsl",
-      "entry": "round_x_8",
-      "inputs": [
-        "g_y",
-        "curves"
-      ],
-      "output": "g_x"
-    },
-    {
-      "shader": "shaders/glow-y.wgsl",
-      "entry": "round_y_8",
-      "inputs": [
-        "g_x",
-        "curves"
-      ],
-      "output": "g_y"
-    },
-    {
-      "shader": "shaders/glowed.wgsl",
-      "inputs": [
-        "second",
-        "g_y",
-        "curves"
-      ],
-      "output": "bglow"
-    },
-    {
-      "shader": "shaders/motion.wgsl",
-      "inputs": [
-        "first",
-        "bglow",
-        "curves"
-      ],
-      "output": "moved"
-    },
-    {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": [
-        "moved",
-        "curves"
-      ],
-      "output": "back"
-    },
-    {
-      "shader": "shaders/edge-first.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "e_raw"
-    },
-    {
-      "shader": "shaders/edge-soft-x.wgsl",
-      "inputs": [
-        "e_raw"
-      ],
-      "output": "e_x"
-    },
-    {
-      "shader": "shaders/edge-soft-y.wgsl",
-      "inputs": [
-        "e_x"
-      ],
-      "output": "e_soft"
-    },
-    {
-      "shader": "shaders/clip-soft-x-first.wgsl",
-      "inputs": [
-        "first"
-      ],
-      "output": "c_x"
-    },
-    {
-      "shader": "shaders/clip-soft-y.wgsl",
-      "inputs": [
-        "c_x"
-      ],
-      "output": "c_soft"
-    },
-    {
-      "shader": "shaders/sharp-first.wgsl",
-      "inputs": [
-        "first",
-        "c_soft",
-        "e_soft"
-      ],
-      "output": "crisp_a"
-    },
-    {
-      "shader": "shaders/edge-second.wgsl",
-      "inputs": [
-        "second"
-      ],
-      "output": "e_raw"
-    },
-    {
-      "shader": "shaders/edge-soft-x.wgsl",
-      "inputs": [
-        "e_raw"
-      ],
-      "output": "e_x"
-    },
-    {
-      "shader": "shaders/edge-soft-y.wgsl",
-      "inputs": [
-        "e_x"
-      ],
-      "output": "e_soft"
-    },
-    {
-      "shader": "shaders/clip-soft-x-second.wgsl",
-      "inputs": [
-        "second"
-      ],
-      "output": "c_x"
-    },
-    {
-      "shader": "shaders/clip-soft-y.wgsl",
-      "inputs": [
-        "c_x"
-      ],
-      "output": "c_soft"
-    },
-    {
-      "shader": "shaders/sharp-second.wgsl",
-      "inputs": [
-        "second",
-        "c_soft",
-        "e_soft"
-      ],
-      "output": "crisp_b"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": [
-        "first",
-        "second",
-        "back",
-        "crisp_a",
-        "crisp_b",
-        "curves"
+      "passes": [
+        {
+          "shader": "shaders/glow-gather.wgsl",
+          "inputs": [
+            "second",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_1",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_1",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_2",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_2",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_3",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_3",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_4",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_4",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_5",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_5",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_6",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_6",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_7",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_7",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glow-x.wgsl",
+          "entry": "round_x_8",
+          "inputs": [
+            "g_y",
+            "curves"
+          ],
+          "output": "g_x"
+        },
+        {
+          "shader": "shaders/glow-y.wgsl",
+          "entry": "round_y_8",
+          "inputs": [
+            "g_x",
+            "curves"
+          ],
+          "output": "g_y"
+        },
+        {
+          "shader": "shaders/glowed.wgsl",
+          "inputs": [
+            "second",
+            "g_y",
+            "curves"
+          ],
+          "output": "bglow"
+        },
+        {
+          "shader": "shaders/motion.wgsl",
+          "inputs": [
+            "first",
+            "bglow",
+            "curves"
+          ],
+          "output": "moved"
+        },
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": [
+            "moved",
+            "curves"
+          ],
+          "output": "back"
+        },
+        {
+          "shader": "shaders/edge-first.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "e_raw"
+        },
+        {
+          "shader": "shaders/edge-soft-x.wgsl",
+          "inputs": [
+            "e_raw"
+          ],
+          "output": "e_x"
+        },
+        {
+          "shader": "shaders/edge-soft-y.wgsl",
+          "inputs": [
+            "e_x"
+          ],
+          "output": "e_soft"
+        },
+        {
+          "shader": "shaders/clip-soft-x-first.wgsl",
+          "inputs": [
+            "first"
+          ],
+          "output": "c_x"
+        },
+        {
+          "shader": "shaders/clip-soft-y.wgsl",
+          "inputs": [
+            "c_x"
+          ],
+          "output": "c_soft"
+        },
+        {
+          "shader": "shaders/sharp-first.wgsl",
+          "inputs": [
+            "first",
+            "c_soft",
+            "e_soft"
+          ],
+          "output": "crisp_a"
+        },
+        {
+          "shader": "shaders/edge-second.wgsl",
+          "inputs": [
+            "second"
+          ],
+          "output": "e_raw"
+        },
+        {
+          "shader": "shaders/edge-soft-x.wgsl",
+          "inputs": [
+            "e_raw"
+          ],
+          "output": "e_x"
+        },
+        {
+          "shader": "shaders/edge-soft-y.wgsl",
+          "inputs": [
+            "e_x"
+          ],
+          "output": "e_soft"
+        },
+        {
+          "shader": "shaders/clip-soft-x-second.wgsl",
+          "inputs": [
+            "second"
+          ],
+          "output": "c_x"
+        },
+        {
+          "shader": "shaders/clip-soft-y.wgsl",
+          "inputs": [
+            "c_x"
+          ],
+          "output": "c_soft"
+        },
+        {
+          "shader": "shaders/sharp-second.wgsl",
+          "inputs": [
+            "second",
+            "c_soft",
+            "e_soft"
+          ],
+          "output": "crisp_b"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": [
+            "first",
+            "second",
+            "back",
+            "crisp_a",
+            "crisp_b",
+            "curves"
+          ]
+        }
       ]
     }
   ]

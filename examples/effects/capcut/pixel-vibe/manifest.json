@@ -33,28 +33,32 @@
       "description": "Real transition length in seconds; sets the speed of the shake"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/halftone.wgsl",
-      "inputs": [
-        "first",
-        "second"
-      ],
-      "output": "lit"
-    },
-    {
-      "shader": "shaders/zoom.wgsl",
-      "inputs": [
-        "lit"
-      ],
-      "output": "zoomed"
-    },
-    {
-      "shader": "shaders/shake.wgsl",
-      "inputs": [
-        "zoomed",
-        "first",
-        "second"
+      "passes": [
+        {
+          "shader": "shaders/halftone.wgsl",
+          "inputs": [
+            "first",
+            "second"
+          ],
+          "output": "lit"
+        },
+        {
+          "shader": "shaders/zoom.wgsl",
+          "inputs": [
+            "lit"
+          ],
+          "output": "zoomed"
+        },
+        {
+          "shader": "shaders/shake.wgsl",
+          "inputs": [
+            "zoomed",
+            "first",
+            "second"
+          ]
+        }
       ]
     }
   ]

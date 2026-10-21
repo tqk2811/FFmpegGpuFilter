@@ -2,9 +2,9 @@
 """Generates the shaders and the pass list of examples/effects/capcut/golden-sand.
 
 The glow of that effect is seven blur rounds per band, each round with its own constants, so its
-WGSL and the manifest's `passes` are written by this script instead of by hand. Edit this file,
+WGSL and the manifest's pass list is written by this script instead of by hand. Edit this file,
 then run it (no dependencies):  python3 scripts/make-golden-sand.py
-It rewrites examples/effects/capcut/golden-sand/shaders/*.wgsl and the `passes` of its manifest.json.
+It rewrites examples/effects/capcut/golden-sand/shaders/*.wgsl and the pass list (its one group) of its manifest.json.
 """
 import json
 import math
@@ -711,7 +711,7 @@ def main():
 
     path = EFFECT / "manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["passes"] = passes
+    manifest["groups"] = [{"passes": passes}]
     with open(path, "w", newline="\n", encoding="utf-8") as fh:
         fh.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     print(f"{len(passes)} passes written to {EFFECT}")

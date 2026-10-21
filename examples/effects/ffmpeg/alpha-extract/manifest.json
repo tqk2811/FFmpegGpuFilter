@@ -17,9 +17,13 @@
       "description": "White where transparent instead of where opaque"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/alpha_extract.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/alpha_extract.wgsl"
+        }
+      ]
     }
   ]
 }

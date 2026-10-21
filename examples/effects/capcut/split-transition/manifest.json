@@ -25,25 +25,29 @@
       "description": "0 = first clip, 1 = second clip"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/highlight.wgsl",
-      "inputs": ["second"],
-      "output": "bright"
-    },
-    {
-      "shader": "shaders/blur-h.wgsl",
-      "inputs": ["bright"],
-      "output": "glow_h"
-    },
-    {
-      "shader": "shaders/blur-v.wgsl",
-      "inputs": ["glow_h"],
-      "output": "glow_v"
-    },
-    {
-      "shader": "shaders/final.wgsl",
-      "inputs": ["first", "second", "glow_v"]
+      "passes": [
+        {
+          "shader": "shaders/highlight.wgsl",
+          "inputs": ["second"],
+          "output": "bright"
+        },
+        {
+          "shader": "shaders/blur-h.wgsl",
+          "inputs": ["bright"],
+          "output": "glow_h"
+        },
+        {
+          "shader": "shaders/blur-v.wgsl",
+          "inputs": ["glow_h"],
+          "output": "glow_v"
+        },
+        {
+          "shader": "shaders/final.wgsl",
+          "inputs": ["first", "second", "glow_v"]
+        }
+      ]
     }
   ]
 }

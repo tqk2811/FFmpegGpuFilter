@@ -42,9 +42,13 @@
       "description": "Edge width"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/circle_reveal.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/circle_reveal.wgsl"
+        }
+      ]
     }
   ]
 }
