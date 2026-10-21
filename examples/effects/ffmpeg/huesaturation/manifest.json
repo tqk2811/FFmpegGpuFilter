@@ -1,0 +1,96 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.huesaturation",
+  "name": "Hue Saturation",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Shifts hue, saturation and intensity, for all colors or only some.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "hue",
+      "type": "float",
+      "default": 0,
+      "min": -180,
+      "max": 180,
+      "description": "Hue shift in degrees"
+    },
+    {
+      "name": "saturation",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Saturation shift"
+    },
+    {
+      "name": "intensity",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Intensity shift"
+    },
+    {
+      "name": "colors",
+      "type": "int",
+      "default": 63,
+      "min": 0,
+      "max": 63,
+      "description": "Colors to change, a bit mask: 1 = reds, 2 = yellows, 4 = greens, 8 = cyans, 16 = blues, 32 = magentas, 63 = all"
+    },
+    {
+      "name": "strength",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 100,
+      "description": "Strength of the filtering for the selected colors"
+    },
+    {
+      "name": "rw",
+      "type": "float",
+      "default": 0.333,
+      "min": 0,
+      "max": 1,
+      "description": "Red weight"
+    },
+    {
+      "name": "gw",
+      "type": "float",
+      "default": 0.334,
+      "min": 0,
+      "max": 1,
+      "description": "Green weight"
+    },
+    {
+      "name": "bw",
+      "type": "float",
+      "default": 0.333,
+      "min": 0,
+      "max": 1,
+      "description": "Blue weight"
+    },
+    {
+      "name": "lightness",
+      "type": "bool",
+      "default": false,
+      "description": "Preserve lightness"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/huesaturation.wgsl"
+        }
+      ]
+    }
+  ]
+}

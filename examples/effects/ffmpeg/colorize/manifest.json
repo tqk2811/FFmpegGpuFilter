@@ -1,0 +1,58 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colorize",
+  "name": "Colorize",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Overlays a solid HSL color: the chroma of the color over the luma of the picture.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "hue",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 360,
+      "description": "Hue in degrees"
+    },
+    {
+      "name": "saturation",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "Saturation"
+    },
+    {
+      "name": "lightness",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "Lightness"
+    },
+    {
+      "name": "mix",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Mix of the source lightness (1 = keep the picture luma, 0 = the color's own luma)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colorize.wgsl"
+        }
+      ]
+    }
+  ]
+}

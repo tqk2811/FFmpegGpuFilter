@@ -1,0 +1,48 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.exposure",
+  "name": "Exposure",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Exposure and black level correction.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "exposure",
+      "type": "float",
+      "default": 0,
+      "min": -3,
+      "max": 3,
+      "description": "Exposure in stops; positive values brighten"
+    },
+    {
+      "name": "black",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Black level correction"
+    },
+    {
+      "name": "linear",
+      "type": "bool",
+      "default": false,
+      "description": "Apply on linear light: the picture is converted from sRGB to linear light and back"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/exposure.wgsl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.pseudocolor",
+  "name": "Pseudocolor",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Maps the luma of the picture to a color palette (magma, viridis, turbo...) or marks luma ranges.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "preset",
+      "type": "int",
+      "default": 3,
+      "min": -1,
+      "max": 20,
+      "description": "Preset: -1 = none (unchanged), 0 = magma, 1 = inferno, 2 = plasma, 3 = viridis, 4 = turbo, 5 = cividis, 6 = range1, 7 = range2, 8 = shadows, 9 = highlights, 10 = solar, 11 = nominal, 12 = preferred, 13 = total, 14 = spectral, 15 = cool, 16 = heat, 17 = fiery, 18 = blues, 19 = green, 20 = helix"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Opacity of the false color over the picture"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/pseudocolor.wgsl"
+        }
+      ]
+    }
+  ]
+}

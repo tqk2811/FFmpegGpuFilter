@@ -1,0 +1,151 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.selectivecolor",
+  "name": "Selective Color",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Photoshop-style selective color: CMYK corrections limited to a color range.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "correction_method",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Correction method: 0 = absolute, 1 = relative"
+    },
+    {
+      "name": "reds",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the red regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "yellows",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the yellow regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "greens",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the green regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "cyans",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the cyan regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "blues",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the blue regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "magentas",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the magenta regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "whites",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the white regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "neutrals",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the neutral regions: cyan, magenta, yellow, black"
+    },
+    {
+      "name": "blacks",
+      "type": "vec4",
+      "default": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": -1,
+      "max": 1,
+      "description": "Adjustment of the black regions: cyan, magenta, yellow, black"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/selectivecolor.wgsl"
+        }
+      ]
+    }
+  ]
+}

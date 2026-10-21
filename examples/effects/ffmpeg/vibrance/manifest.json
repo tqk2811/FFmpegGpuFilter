@@ -1,0 +1,88 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.vibrance",
+  "name": "Vibrance",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Boosts the saturation of dull colors more than that of vivid ones.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "intensity",
+      "type": "float",
+      "default": 0,
+      "min": -2,
+      "max": 2,
+      "description": "Strength; negative values desaturate"
+    },
+    {
+      "name": "rbal",
+      "type": "float",
+      "default": 1,
+      "min": -10,
+      "max": 10,
+      "description": "Red balance (scales the intensity for red)"
+    },
+    {
+      "name": "gbal",
+      "type": "float",
+      "default": 1,
+      "min": -10,
+      "max": 10,
+      "description": "Green balance"
+    },
+    {
+      "name": "bbal",
+      "type": "float",
+      "default": 1,
+      "min": -10,
+      "max": 10,
+      "description": "Blue balance"
+    },
+    {
+      "name": "rlum",
+      "type": "float",
+      "default": 0.212656,
+      "min": 0,
+      "max": 1,
+      "description": "Red luma coefficient"
+    },
+    {
+      "name": "glum",
+      "type": "float",
+      "default": 0.715158,
+      "min": 0,
+      "max": 1,
+      "description": "Green luma coefficient"
+    },
+    {
+      "name": "blum",
+      "type": "float",
+      "default": 0.072186,
+      "min": 0,
+      "max": 1,
+      "description": "Blue luma coefficient"
+    },
+    {
+      "name": "alternate",
+      "type": "bool",
+      "default": false,
+      "description": "Start the processing from the vivid colors instead"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/vibrance.wgsl"
+        }
+      ]
+    }
+  ]
+}
