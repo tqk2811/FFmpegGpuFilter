@@ -163,6 +163,67 @@ fn bundle_variant(package_json: &[u8], scale: Option<u32>) -> Result<String, Err
     }))
 }
 
+/// Checks, without a GPU, that the package at `path` (a `.zip` or a directory; a bundle's variant of `scale`, the
+/// first one without) is a model for `filter` (`used_for::AI_UPSCALE` / `AI_FRAMERATE`): not another kind of
+/// package, listing `filter`, and an io.json `kind` that `filter` runs. A directory is read only for
+/// `manifest.json`, `model.json`, `package.json` and `io.json`; a zip is read whole (weights included). The full
+/// load ([`NnModel::load_with`]) is left to the first frame.
+pub fn check_model_package(path: impl AsRef<Path>, filter: &str, scale: Option<u32>) -> Result<(), Error> {
+    #[derive(serde::Deserialize)]
+    struct Head {
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        used_for: Vec<String>,
+    }
+    let path = path.as_ref();
+    let zipped = if path.is_dir() { None } else { Some(crate::package::read_files(path)?) };
+    let get = |name: &str| -> Result<Option<Vec<u8>>, Error> {
+        match &zipped {
+            Some(f) => Ok(f.get(name).cloned()),
+            None => match std::fs::read(path.join(name)) {
+                Ok(b) => Ok(Some(b)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.into()),
+            },
+        }
+    };
+    let mut files = HashMap::new();
+    for n in ["manifest.json", "model.json", "package.json"] {
+        if let Some(b) = get(n)? {
+            files.insert(n.to_string(), b);
+        }
+    }
+    let dir = match files.get("package.json") {
+        Some(b) => {
+            // without a scale the first variant stands for all: they share their filters
+            let first = serde_json::from_slice::<serde_json::Value>(b).ok().and_then(|v| v["variants"][0]["scale"].as_u64());
+            let scale = scale.or(first.and_then(|s| u32::try_from(s).ok()));
+            format!("{}/", bundle_variant(b, scale)?)
+        }
+        None => String::new(),
+    };
+    for n in ["model.json", "io.json"] {
+        if let Some(b) = get(&format!("{dir}{n}"))? {
+            files.insert(format!("{dir}{n}"), b);
+        }
+    }
+    let Some(model) = files.get(&format!("{dir}model.json")) else {
+        return Err(if dir.is_empty() {
+            crate::used_for::wrong_kind(&files, "model.json")
+        } else {
+            Error::Package(format!("missing {dir}model.json"))
+        });
+    };
+    let head: Head = serde_json::from_slice(model).map_err(|e| Error::Package(format!("{dir}model.json: {e}")))?;
+    crate::used_for::check(&head.name, &head.used_for, filter)?;
+    if let Some(io) = files.get(&format!("{dir}io.json")) {
+        let io: serde_json::Value = serde_json::from_slice(io).map_err(|e| Error::Package(format!("io.json: {e}")))?;
+        crate::used_for::check_kind(&head.name, &io, filter)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn conv_shape(c: &model::ConvParams) -> ConvShape {
     ConvShape { kh: c.kernel[0], kw: c.kernel[1], sh: c.stride[0], sw: c.stride[1], dh: c.dilation[0], dw: c.dilation[1] }
 }

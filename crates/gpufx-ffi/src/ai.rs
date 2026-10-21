@@ -4,7 +4,8 @@
 use std::ffi::{c_char, c_int, CString};
 use std::sync::Arc;
 
-use gpufx_core::nn::{InterpFrames, Precision, UpscaleFrames, UpscaleOptions};
+use gpufx_core::nn::{check_model_package, InterpFrames, Precision, UpscaleFrames, UpscaleOptions};
+use gpufx_core::used_for::{AI_FRAMERATE, AI_UPSCALE};
 use gpufx_core::GpuContext;
 
 use super::{
@@ -52,10 +53,8 @@ impl GpufxAiInterp {
 pub unsafe extern "C" fn gpufx_ai_interp_open(model: *const c_char) -> *mut GpufxAiInterp {
     guard(std::ptr::null_mut(), || {
         let path = str_arg(model, "model")?;
-        let meta = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?;
-        if !meta.is_file() {
-            return Err(format!("{path}: not a file"));
-        }
+        std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?;
+        check_model_package(path, AI_FRAMERATE, None).map_err(|e| format!("{path}: {e}"))?;
         let ai = GpufxAiInterp { path: path.to_string(), run: None, device: CString::default(), threshold: 0.0 };
         Ok(Box::into_raw(Box::new(ai)))
     })
@@ -407,6 +406,7 @@ pub unsafe extern "C" fn gpufx_ai_upscale_open(model: *const c_char, scale: u32,
             PRECISION_F32 => Precision::F32,
             p => return Err(format!("unknown precision {p}")),
         };
+        check_model_package(path, AI_UPSCALE, Some(scale)).map_err(|e| format!("{path}: {e}"))?;
         let options = UpscaleOptions { tile: (tile > 0).then_some(tile), max_tensor_bytes: None, precision };
         let ai = GpufxAiUpscale { path: path.to_string(), scale, options, run: None, device: CString::default() };
         Ok(Box::into_raw(Box::new(ai)))
@@ -642,6 +642,67 @@ mod tests {
         unsafe { CStr::from_ptr(crate::gpufx_last_error()) }.to_string_lossy().into_owned()
     }
 
+    const UPSCALE_MODEL: &str = r#"{"name":"up","used_for":["gpufx_ai_upscale"]}"#;
+    const INTERP_MODEL: &str = r#"{"name":"fi","used_for":["gpufx_ai_framerate"]}"#;
+    const SR_IO: &str = r#"{"kind":"super_resolution"}"#;
+    const INTERP_IO: &str = r#"{"kind":"frame_interp"}"#;
+
+    /// A package directory of `files` under the temp dir, as a C path.
+    fn package(name: &str, files: &[(&str, &str)]) -> CString {
+        let dir = std::env::temp_dir().join(format!("gpufx-ai-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (f, content) in files {
+            let p = dir.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, content).unwrap();
+        }
+        CString::new(dir.to_str().unwrap()).unwrap()
+    }
+
+    /// A model for the other filter, a model whose `used_for` and io.json `kind` disagree and an effect package are
+    /// refused at open, not by the first frame. Both filters accept their own model, a bundle by its variant.
+    #[test]
+    fn ai_open_checks_used_for() {
+        let up = package("up", &[("model.json", UPSCALE_MODEL), ("io.json", SR_IO)]);
+        let fi = package("fi", &[("model.json", INTERP_MODEL), ("io.json", INTERP_IO)]);
+        let both = r#"{"name":"both","used_for":["gpufx_ai_upscale","gpufx_ai_framerate"]}"#;
+        let mismatch = package("mismatch", &[("model.json", both), ("io.json", INTERP_IO)]);
+        let effect = package("effect", &[("manifest.json", r#"{"used_for":["gpufx"]}"#)]);
+        let bundle_json = r#"{"format":"gpufx-nn-bundle","version":1,"variants":[{"scale":2,"dir":"x2"}]}"#;
+        let bundle = package("bundle", &[("package.json", bundle_json), ("x2/model.json", UPSCALE_MODEL), ("x2/io.json", SR_IO)]);
+
+        let open_up = |p: &CString| unsafe { gpufx_ai_upscale_open(p.as_ptr(), 2, 0, PRECISION_F32) };
+        let open_fi = |p: &CString| unsafe { gpufx_ai_interp_open(p.as_ptr()) };
+
+        assert!(open_up(&fi).is_null());
+        assert!(last_error().contains("is for gpufx_ai_framerate, not gpufx_ai_upscale"), "{}", last_error());
+        assert!(open_fi(&up).is_null());
+        assert!(last_error().contains("is for gpufx_ai_upscale, not gpufx_ai_framerate"), "{}", last_error());
+        assert!(open_up(&mismatch).is_null());
+        assert!(last_error().contains("used_for/kind mismatch"), "{}", last_error());
+        let mismatch_sr = package("mismatch-sr", &[("model.json", both), ("io.json", SR_IO)]);
+        assert!(open_fi(&mismatch_sr).is_null());
+        assert!(last_error().contains("used_for/kind mismatch"), "{}", last_error());
+        assert!(open_up(&effect).is_null());
+        assert!(last_error().contains("missing model.json: it is a gpufx effect package"), "{}", last_error());
+        assert!(open_fi(&effect).is_null());
+        assert!(last_error().contains("missing model.json: it is a gpufx effect package"), "{}", last_error());
+        assert!(open_fi(&bundle).is_null());
+        assert!(last_error().contains("is for gpufx_ai_upscale, not gpufx_ai_framerate"), "{}", last_error());
+
+        let ok = open_up(&up);
+        assert!(!ok.is_null(), "{}", last_error());
+        let ok_bundle = open_up(&bundle);
+        assert!(!ok_bundle.is_null(), "{}", last_error());
+        let ok_fi = open_fi(&fi);
+        assert!(!ok_fi.is_null(), "{}", last_error());
+        unsafe {
+            gpufx_ai_upscale_free(ok);
+            gpufx_ai_upscale_free(ok_bundle);
+            gpufx_ai_interp_free(ok_fi);
+        }
+    }
+
     /// The arguments are checked at open; the model itself only loads on a device.
     #[test]
     fn upscale_open_checks_its_arguments() {
@@ -655,7 +716,8 @@ mod tests {
         assert!(last_error().contains("precision 7"), "{}", last_error());
         assert!(unsafe { gpufx_ai_upscale_open(std::ptr::null(), 2, 0, PRECISION_F32) }.is_null());
 
-        let ai = unsafe { gpufx_ai_upscale_open(here.as_ptr(), 4, 256, PRECISION_F32) };
+        let model = package("ok", &[("model.json", UPSCALE_MODEL), ("io.json", SR_IO)]);
+        let ai = unsafe { gpufx_ai_upscale_open(model.as_ptr(), 4, 256, PRECISION_F32) };
         assert!(!ai.is_null(), "{}", last_error());
         unsafe {
             assert_eq!(CStr::from_ptr(gpufx_ai_upscale_device(ai)).to_bytes(), b"");

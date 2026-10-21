@@ -11,6 +11,9 @@ pub const GPUFX: &str = "gpufx";
 pub const AI_UPSCALE: &str = "gpufx_ai_upscale";
 /// The `gpufx_ai_framerate` filter: gpufx-nn `frame_interp` models.
 pub const AI_FRAMERATE: &str = "gpufx_ai_framerate";
+/// The io.json `kind` each AI filter runs. Same table as `gpufx-nnconv` (`package::FILTERS`), which does not
+/// depend on this crate.
+const KINDS: &[(&str, &str)] = &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp")];
 /// Every filter name `used_for` may list.
 pub const FILTERS: &[&str] = &[GPUFX, AI_UPSCALE, AI_FRAMERATE];
 
@@ -37,6 +40,22 @@ pub fn check(name: &str, used_for: &[String], filter: &str) -> Result<(), Error>
     }
     let name = if name.is_empty() { "(unnamed)" } else { name };
     Err(Error::Package(format!("package `{name}` is for {}, not {filter}", used_for.join(", "))))
+}
+
+/// Fails when the io.json `kind` of the package `name` is not the one `filter` runs: its `used_for` lists the
+/// filter, but the model is for another (`gpufx-nnconv` refuses to write such a package). No `kind` passes.
+pub fn check_kind(name: &str, io: &serde_json::Value, filter: &str) -> Result<(), Error> {
+    let kind = io.get("kind").and_then(serde_json::Value::as_str);
+    let (Some(kind), Some((_, runs))) = (kind, KINDS.iter().find(|(f, _)| *f == filter)) else {
+        return Ok(());
+    };
+    if kind == *runs {
+        return Ok(());
+    }
+    let name = if name.is_empty() { "(unnamed)" } else { name };
+    Err(Error::Package(format!(
+        "package `{name}`: used_for/kind mismatch: it lists {filter}, which runs {runs} models, but io.json has kind \"{kind}\""
+    )))
 }
 
 /// The error for `files` missing `what` (the file the opener reads first): says what kind of package they are
@@ -95,6 +114,19 @@ mod tests {
         assert!(check("a", &list(&[AI_UPSCALE, AI_FRAMERATE]), AI_FRAMERATE).is_ok());
         let e = check("realesr-x4", &list(&[AI_UPSCALE]), AI_FRAMERATE).unwrap_err().to_string();
         assert_eq!(e, "package: package `realesr-x4` is for gpufx_ai_upscale, not gpufx_ai_framerate");
+    }
+
+    #[test]
+    fn check_kind_reports_a_used_for_kind_mismatch() {
+        let io = |k: &str| serde_json::json!({ "kind": k });
+        assert!(check_kind("a", &io("super_resolution"), AI_UPSCALE).is_ok());
+        assert!(check_kind("a", &io("frame_interp"), AI_FRAMERATE).is_ok());
+        assert!(check_kind("a", &serde_json::Value::Null, AI_UPSCALE).is_ok());
+        let e = check_kind("m", &io("frame_interp"), AI_UPSCALE).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            "package: package `m`: used_for/kind mismatch: it lists gpufx_ai_upscale, which runs super_resolution models, but io.json has kind \"frame_interp\""
+        );
     }
 
     #[test]
