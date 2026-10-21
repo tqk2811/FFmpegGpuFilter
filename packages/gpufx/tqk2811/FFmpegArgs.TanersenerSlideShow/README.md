@@ -23,9 +23,9 @@ easing can differ; the README of each effect lists what is different.
 | [sliding-bars](sliding-bars/README.md) | `transition_scripts/sliding_bars_horizontal.sh`, `sliding_bars_vertical.sh` |
 | [spin-transition](spin-transition/README.md) | `transition_scripts/spin_blur_rotation.sh` |
 
-`collapse_*.sh` and `expand_*.sh` moved to [collapse](../tqk2811/TqkLibrary.FFmpegTransition/collapse/README.md) and [expand](../tqk2811/TqkLibrary.FFmpegTransition/expand/README.md) in the [TqkLibrary.FFmpegTransition](../tqk2811/TqkLibrary.FFmpegTransition/README.md) group.
+`collapse_*.sh` and `expand_*.sh` moved to [collapse](../TqkLibrary.FFmpegTransition/collapse/README.md) and [expand](../TqkLibrary.FFmpegTransition/expand/README.md) in the [TqkLibrary.FFmpegTransition](../TqkLibrary.FFmpegTransition/README.md) group.
 
-Some scripts are covered by the general effects in [../ffmpeg](../ffmpeg) and that group: `clock.sh` by
-[clock-wipe](../tqk2811/TqkLibrary.FFmpegTransition/clock-wipe/README.md), `fade_in_*.sh` by [crossfade](../tqk2811/TqkLibrary.FFmpegTransition/crossfade/README.md) and
-[dip-to-color](../tqk2811/TqkLibrary.FFmpegTransition/dip-to-color/README.md), `wipe_*.sh` by [wipe-transition](../ffmpeg/wipe-transition/README.md),
-and `cover_*.sh` and `push_*.sh` by the modes of [slide-transition](../ffmpeg/slide-transition/README.md).
+Some scripts are covered by the general effects in [../../ffmpeg](../../ffmpeg) and that group: `clock.sh` by
+[clock-wipe](../TqkLibrary.FFmpegTransition/clock-wipe/README.md), `fade_in_*.sh` by [crossfade](../TqkLibrary.FFmpegTransition/crossfade/README.md) and
+[dip-to-color](../TqkLibrary.FFmpegTransition/dip-to-color/README.md), `wipe_*.sh` by [wipe-transition](../../ffmpeg/wipe-transition/README.md),
+and `cover_*.sh` and `push_*.sh` by the modes of [slide-transition](../../ffmpeg/slide-transition/README.md).

@@ -332,7 +332,7 @@ make -j"$(nproc)"
 | `ffmpeg/` | The `vf_gpufx.c` filter and the integration script |
 | `external/FFmpeg` | FFmpeg source submodule |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx with one command in Docker |
-| `packages/gpufx/` | 38 sample effects in `ffmpeg/`, `slideshow/` and `standalone/` groups |
+| `packages/gpufx/` | Effect packages, in group folders (`ffmpeg/`, `capcut/`, `standalone/`, `tqk2811/...`) |
 | `scripts/` | `build-prebuilt.sh` (fast build on a prebuilt FFmpeg), `test-bundle.sh`, `install-libgpufx.sh`, `pack-packages.sh`/`.ps1` (zip packaging) |
 
 ## License

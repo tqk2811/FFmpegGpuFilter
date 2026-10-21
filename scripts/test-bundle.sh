@@ -302,7 +302,7 @@ ok "hstack of 3 inputs" -i "$A" -i "$A" -i "$A" -filter_complex "[0][1][2]gpufx=
 ok "vstack" -i "$A" -i "$A" -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/vstack.zip'" -an $NULL
 for m in 0 1 2 3; do
     # shellcheck disable=SC2086
-    ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/slideshow/fit.zip=mode=$m'" -an $NULL
+    ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/FFmpegArgs.TanersenerSlideShow/fit.zip=mode=$m'" -an $NULL
 done
 echo "expressions, sendcmd, timeline, chains:"
 # shellcheck disable=SC2086
