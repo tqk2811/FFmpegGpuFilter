@@ -1,0 +1,23 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.edgedetect",
+  "name": "Edge Detect (Canny)",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Canny edge detector: gaussian blur, Sobel gradient, non-maximum suppression and double threshold.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "high", "type": "float", "default": 0.196078431, "min": 0, "max": 1, "description": "High threshold (default 50/255)" },
+    { "name": "low", "type": "float", "default": 0.0784313725, "min": 0, "max": 1, "description": "Low threshold (default 20/255)" },
+    { "name": "mode", "type": "int", "default": 0, "min": 0, "max": 2, "description": "0 = wires (gray wires on black, from the luma), 1 = colormix (edges of R, G, B averaged with the source), 2 = canny (edges of R, G, B on black)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/blur.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/nms.wgsl", "inputs": ["tmp"], "output": "tmp2" },
+        { "shader": "shaders/threshold.wgsl", "inputs": ["tmp2", "src"], "output": "out" }
+      ]
+    }
+  ]
+}

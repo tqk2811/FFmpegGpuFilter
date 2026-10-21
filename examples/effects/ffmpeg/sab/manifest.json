@@ -1,0 +1,22 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.sab",
+  "name": "Shape Adaptive Blur",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Edge preserving blur: neighbours weigh by distance and by their difference after a gaussian pre-filter.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "luma_radius", "type": "float", "default": 1, "min": 0.1, "max": 4, "description": "Blur radius (`lr`)" },
+    { "name": "luma_pre_filter_radius", "type": "float", "default": 1, "min": 0.1, "max": 2, "description": "Radius of the pre-filter that decides which neighbours look alike (`lpfr`)" },
+    { "name": "luma_strength", "type": "float", "default": 1, "min": 0.1, "max": 100, "description": "Tolerance to value differences, in 8-bit levels: low keeps edges, high blurs across them (`ls`)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/prefilter.wgsl", "inputs": ["src"], "output": "tmp" },
+        { "shader": "shaders/blur.wgsl", "inputs": ["src", "tmp"], "output": "out" }
+      ]
+    }
+  ]
+}

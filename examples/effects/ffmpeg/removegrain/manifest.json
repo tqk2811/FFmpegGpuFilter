@@ -1,0 +1,21 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.removegrain",
+  "name": "Remove Grain",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Spatial denoiser/sharpener with 25 modes over the 3x3 neighbourhood (clip to neighbours, medians, blurs, edge-directed averages).",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "m0", "type": "int", "default": 0, "min": 0, "max": 24, "description": "Mode for the red channel (0 = unchanged)" },
+    { "name": "m1", "type": "int", "default": 0, "min": 0, "max": 24, "description": "Mode for the green channel (0 = unchanged)" },
+    { "name": "m2", "type": "int", "default": 0, "min": 0, "max": 24, "description": "Mode for the blue channel (0 = unchanged)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/removegrain.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}
