@@ -25,7 +25,7 @@ gpufx pack my-effect my-effect.zip
 Package several effects at once (no FFmpeg build or Docker needed):
 
 ```sh
-scripts/pack-effects.sh                         # every directory in examples/effects -> dist/effects/<group>/<name>.zip
+scripts/pack-effects.sh                         # every directory in packages/effects -> dist/effects/<group>/<name>.zip
 scripts/pack-effects.sh --check -o out my-fx    # compile the shaders on the GPU first, write to out/
 .\scripts\pack-effects.ps1 -Check                # Windows
 ```
@@ -167,7 +167,7 @@ fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions of inpu
 fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad of input i at level 0 (0 when out of range)
 ```
 
-See `examples/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
+See `packages/effects/ffmpeg/hstack/shaders/hstack.wgsl`.
 
 ## Pass groups and device requirements
 
@@ -509,39 +509,39 @@ let x = gpufx_expr_path_x(u, p, x0);   // the arguments in the order of `vars`, 
 
 ## Included examples
 
-The examples live in three group folders under `examples/effects/`: `ffmpeg/` (equivalents of FFmpeg built-in filters and `xfade`), `slideshow/` (ports of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)) and `standalone/` (our own effects). See [examples/effects/README.md](../examples/effects/README.md). The group is only a folder: a package is still referred to by its own name.
+The examples live in three group folders under `packages/effects/`: `ffmpeg/` (equivalents of FFmpeg built-in filters and `xfade`), `slideshow/` (ports of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)) and `standalone/` (our own effects). See [packages/effects/README.md](../packages/effects/README.md). The group is only a folder: a package is still referred to by its own name.
 
 | Package | Demonstrates |
 |---------|--------------|
-| `examples/effects/ffmpeg/vignette` | `float` + `color` parameters |
-| `examples/effects/ffmpeg/gaussian-blur` | 2 passes through an intermediate `tmp` texture |
-| `examples/effects/ffmpeg/wipe-transition` | 2 inputs (`first`, `second`), a `progress` parameter |
-| `examples/effects/standalone/gradient-map` | A bundled PNG texture used as a LUT |
-| `examples/effects/standalone/rgb-split` | GLSL, uses `globals.frame` as animated noise |
-| `examples/effects/ffmpeg/color-adjust` | Brightness, contrast, saturation, gamma, hue, color temperature |
-| `examples/effects/ffmpeg/grayscale`, `examples/effects/ffmpeg/sepia`, `examples/effects/ffmpeg/invert` | Basic color filters, an `amount` parameter |
-| `examples/effects/ffmpeg/sharpen` | 3×3 unsharp mask using `textureLoad` |
-| `examples/effects/ffmpeg/edge-detect` | Sobel |
-| `examples/effects/ffmpeg/pixelate` | Block mosaic |
-| `examples/effects/ffmpeg/mirror` | Horizontal/vertical flip, an `int` parameter |
-| `examples/effects/ffmpeg/transform` | Zoom, rotate, pan (Ken Burns), a `vec2` parameter |
-| `examples/effects/ffmpeg/fade` | Fade to a color |
-| `examples/effects/ffmpeg/chroma-key` | Green screen → alpha; input `formats` **rules**, output `rgba`/`yuva420p`/`yuva444p` |
-| `examples/effects/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
-| `examples/effects/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
-| `examples/effects/ffmpeg/hstack`, `examples/effects/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and `output.size` `hstack`/`vstack`, an output larger than the inputs |
-| `examples/effects/ffmpeg/crossfade`, `examples/effects/ffmpeg/slide-transition`, `examples/effects/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
-| `examples/effects/ffmpeg/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
-| `examples/effects/ffmpeg/blend` | 2 inputs, an `int` `mode` choosing one of 40 formulas |
-| `examples/effects/ffmpeg/masked-merge` | 3 inputs (base, overlay, mask) with the `same_size` **rule** |
-| `examples/effects/ffmpeg/selectivecolor` | `vec4` parameters |
-| `examples/effects/ffmpeg/box-blur` | 6 passes; rounds above `power` copy their input through |
-| `examples/effects/ffmpeg/displace` | 3 inputs, two of them used as displacement maps |
-| `examples/effects/slideshow/collapse`, `examples/effects/slideshow/expand` | The first clip shrinks into the center / the second clip grows out of the center: horizontal, vertical, box, circle (`mode`) |
-| `examples/effects/ffmpeg/dip-to-color` | Fade to a color (black by default), then reveal the second clip |
-| `examples/effects/ffmpeg/dissolve` | Random particles (integer hash, identical on every GPU) |
-| `examples/effects/ffmpeg/pixelize-transition`, `examples/effects/ffmpeg/zoom-transition`, `examples/effects/ffmpeg/fade-grays`, `examples/effects/slideshow/blinds` | `xfade`-style transitions: pixel break-up, zoom, through grayscale, blinds |
-| `examples/effects/slideshow/checkerboard`, `examples/effects/slideshow/push-box`, `examples/effects/slideshow/push-film`, `examples/effects/slideshow/photo-collection` | Slideshow transitions after [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (written anew as shaders): growing squares, shrink-push-grow boxes, a procedural perforated film strip, a photo that flies in spinning and lands tilted on the first clip (chain it to stack photos) |
-| `examples/effects/slideshow/box-in`, `examples/effects/slideshow/sliding-bars`, `examples/effects/slideshow/spin-transition` | From the same scripts: the first clip zooms out into a box that slides out, a box of the second slides in from the same side and zooms in (`box_in_*`), bars of the second clip slide in one after another (`stagger`), the first clip spins out shrinking and the second spins in growing with motion blur (a loop of samples along the angle). `slide-transition` also has a `mode` for push / cover / uncover / push through a `color` gap, `blinds` an `origin` to open from the middle of each bar |
-| `examples/effects/slideshow/fit` | The screen modes of those scripts (center, crop, stretch, blurred background) for a picture of any size: the first input only sets the frame; **two passes**, a separable box blur with a fixed number of bilinear taps |
-| `examples/effects/standalone/falling-maple`, `examples/effects/standalone/falling-ginkgo` | Falling red maple / yellow ginkgo leaves (api 2): a 2×2 atlas cut into a **texture array** (`grid`) with **mipmaps** and **premultiplied alpha**, the mip level computed per leaf, stateless particles (depend only on `t`, so seeking is correct), `var<workgroup>` + `workgroupBarrier`, 4 motion styles (`mode`) and a custom path (`mode=4`, **`expr` parameters** `path_x`, `path_y`, `angle`). Source images and licenses are in `assets/leaves/` |
+| `packages/effects/ffmpeg/vignette` | `float` + `color` parameters |
+| `packages/effects/ffmpeg/gaussian-blur` | 2 passes through an intermediate `tmp` texture |
+| `packages/effects/ffmpeg/wipe-transition` | 2 inputs (`first`, `second`), a `progress` parameter |
+| `packages/effects/standalone/gradient-map` | A bundled PNG texture used as a LUT |
+| `packages/effects/standalone/rgb-split` | GLSL, uses `globals.frame` as animated noise |
+| `packages/effects/ffmpeg/color-adjust` | Brightness, contrast, saturation, gamma, hue, color temperature |
+| `packages/effects/ffmpeg/grayscale`, `packages/effects/ffmpeg/sepia`, `packages/effects/ffmpeg/invert` | Basic color filters, an `amount` parameter |
+| `packages/effects/ffmpeg/sharpen` | 3×3 unsharp mask using `textureLoad` |
+| `packages/effects/ffmpeg/edge-detect` | Sobel |
+| `packages/effects/ffmpeg/pixelate` | Block mosaic |
+| `packages/effects/ffmpeg/mirror` | Horizontal/vertical flip, an `int` parameter |
+| `packages/effects/ffmpeg/transform` | Zoom, rotate, pan (Ken Burns), a `vec2` parameter |
+| `packages/effects/ffmpeg/fade` | Fade to a color |
+| `packages/effects/ffmpeg/chroma-key` | Green screen → alpha; input `formats` **rules**, output `rgba`/`yuva420p`/`yuva444p` |
+| `packages/effects/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
+| `packages/effects/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
+| `packages/effects/ffmpeg/hstack`, `packages/effects/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and `output.size` `hstack`/`vstack`, an output larger than the inputs |
+| `packages/effects/ffmpeg/crossfade`, `packages/effects/ffmpeg/slide-transition`, `packages/effects/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
+| `packages/effects/ffmpeg/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
+| `packages/effects/ffmpeg/blend` | 2 inputs, an `int` `mode` choosing one of 40 formulas |
+| `packages/effects/ffmpeg/masked-merge` | 3 inputs (base, overlay, mask) with the `same_size` **rule** |
+| `packages/effects/ffmpeg/selectivecolor` | `vec4` parameters |
+| `packages/effects/ffmpeg/box-blur` | 6 passes; rounds above `power` copy their input through |
+| `packages/effects/ffmpeg/displace` | 3 inputs, two of them used as displacement maps |
+| `packages/effects/slideshow/collapse`, `packages/effects/slideshow/expand` | The first clip shrinks into the center / the second clip grows out of the center: horizontal, vertical, box, circle (`mode`) |
+| `packages/effects/ffmpeg/dip-to-color` | Fade to a color (black by default), then reveal the second clip |
+| `packages/effects/ffmpeg/dissolve` | Random particles (integer hash, identical on every GPU) |
+| `packages/effects/ffmpeg/pixelize-transition`, `packages/effects/ffmpeg/zoom-transition`, `packages/effects/ffmpeg/fade-grays`, `packages/effects/slideshow/blinds` | `xfade`-style transitions: pixel break-up, zoom, through grayscale, blinds |
+| `packages/effects/slideshow/checkerboard`, `packages/effects/slideshow/push-box`, `packages/effects/slideshow/push-film`, `packages/effects/slideshow/photo-collection` | Slideshow transitions after [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (written anew as shaders): growing squares, shrink-push-grow boxes, a procedural perforated film strip, a photo that flies in spinning and lands tilted on the first clip (chain it to stack photos) |
+| `packages/effects/slideshow/box-in`, `packages/effects/slideshow/sliding-bars`, `packages/effects/slideshow/spin-transition` | From the same scripts: the first clip zooms out into a box that slides out, a box of the second slides in from the same side and zooms in (`box_in_*`), bars of the second clip slide in one after another (`stagger`), the first clip spins out shrinking and the second spins in growing with motion blur (a loop of samples along the angle). `slide-transition` also has a `mode` for push / cover / uncover / push through a `color` gap, `blinds` an `origin` to open from the middle of each bar |
+| `packages/effects/slideshow/fit` | The screen modes of those scripts (center, crop, stretch, blurred background) for a picture of any size: the first input only sets the frame; **two passes**, a separable box blur with a fixed number of bilinear taps |
+| `packages/effects/standalone/falling-maple`, `packages/effects/standalone/falling-ginkgo` | Falling red maple / yellow ginkgo leaves (api 2): a 2×2 atlas cut into a **texture array** (`grid`) with **mipmaps** and **premultiplied alpha**, the mip level computed per leaf, stateless particles (depend only on `t`, so seeking is correct), `var<workgroup>` + `workgroupBarrier`, 4 motion styles (`mode`) and a custom path (`mode=4`, **`expr` parameters** `path_x`, `path_y`, `angle`). Source images and licenses are in `assets/leaves/` |

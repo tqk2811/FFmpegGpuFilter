@@ -1,6 +1,6 @@
 /target
 *.zip
-!examples/**/*.zip
+!packages/**/*.zip
 /out
 /dist
 /build

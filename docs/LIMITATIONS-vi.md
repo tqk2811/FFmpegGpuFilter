@@ -184,7 +184,7 @@ D3D11 và D3D12 (giữ alpha, giống kết quả Vulkan); `-init_hw_device list
 - **FFmpeg không có bản vá: frame D3D không có alpha.** `hwdownload` chỉ ra `nv12`/`p010le`
   (D3D12) hoặc không có `rgba` (D3D11), nên output có alpha mất alpha ở đây, và `out_format=rgba`, `yuva420p` hay
   `yuva444p` báo lỗi (`Unsupported pixel format: rgba`). Vulkan giữ alpha với `out_format=rgba`. Trên D3D, tách kết
-  quả làm hai và cho một bản đi qua [alpha-extract](../examples/effects/ffmpeg/alpha-extract/README.md) để lấy alpha
+  quả làm hai và cho một bản đi qua [alpha-extract](../packages/effects/ffmpeg/alpha-extract/README.md) để lấy alpha
   thành ảnh xám, rồi ghép hai bản trên CPU bằng `alphamerge`.
 - **libavutil của bundle prebuilt là bản build lại.** `scripts/build-avutil.sh` build lại libavutil trong image
   của BtbN với đúng dòng configure lưu trong bản dựng sẵn, rồi kiểm export, thư viện nạp lúc chạy và các loại thiết

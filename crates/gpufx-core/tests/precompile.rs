@@ -35,7 +35,7 @@ fn precompiled_shaders_are_used_only_when_trusted() {
         eprintln!("skipping: {e}");
         return;
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects");
     let mut dirs: Vec<_> = std::fs::read_dir(root)
         .unwrap()
         .map(|g| g.unwrap().path())

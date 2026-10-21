@@ -27,7 +27,7 @@ FF=$DIST/bin/ffmpeg
 # Effects are passed relative to the bundle: a Windows path (C:/...) would break the
 # filter graph, where ':' separates options.
 FX=effects
-# Package of an effect by name: effects/<group>/<name>.zip, as in examples/effects.
+# Package of an effect by name: effects/<group>/<name>.zip, as in packages/effects.
 fx() { set -- "$FX"/*/"$1".zip; echo "$1"; }
 
 if [ ! -f "$CLIPS/straight.png" ]; then

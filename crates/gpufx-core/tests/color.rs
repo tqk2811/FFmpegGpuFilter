@@ -39,7 +39,7 @@ fn identity(ctx: &std::sync::Arc<GpuContext>, tag: &str) -> Effect {
 }
 
 fn examples() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects")
 }
 
 /// Every example effect directory (inside the ffmpeg, slideshow and standalone groups), sorted.

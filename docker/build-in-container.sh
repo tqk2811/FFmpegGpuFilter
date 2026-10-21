@@ -111,8 +111,8 @@ else
     patchelf --set-rpath '$ORIGIN' "$OUT/bin/ffmpeg" "$OUT/bin/ffprobe"
 fi
 cp -r "$PREFIX/include" "$OUT/"
-for dir in "$SRC"/examples/effects/*/*/; do
-    # Same layout as examples/effects: effects/<group>/<name>.zip.
+for dir in "$SRC"/packages/effects/*/*/; do
+    # Same layout as packages/effects: effects/<group>/<name>.zip.
     group=$(basename "$(dirname "$dir")")
     name=$(basename "$dir")
     mkdir -p "$OUT/effects/$group"

@@ -1,6 +1,6 @@
 # Packs effect folders into .zip packages only: no FFmpeg, no Docker.
 # Every package is validated first (manifest, rules, file references) by `gpufx pack`.
-#   .\scripts\pack-effects.ps1                          all of examples\effects -> dist\effects\<group>\<name>.zip
+#   .\scripts\pack-effects.ps1                          all of packages\effects -> dist\effects\<group>\<name>.zip
 #   .\scripts\pack-effects.ps1 -Out out my-fx other-fx   chosen folders -> out\
 #   .\scripts\pack-effects.ps1 -Check                   also compile every shader on the GPU
 param(
@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path $root "dist/effects" }
-if (-not $Dirs) { $Dirs = Get-ChildItem -Directory (Join-Path $root "examples/effects") | Get-ChildItem -Directory | ForEach-Object FullName }
+if (-not $Dirs) { $Dirs = Get-ChildItem -Directory (Join-Path $root "packages/effects") | Get-ChildItem -Directory | ForEach-Object FullName }
 
 cargo build --release --quiet --manifest-path (Join-Path $root "Cargo.toml") -p gpufx-cli
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
@@ -24,10 +24,10 @@ foreach ($dir in $Dirs) {
         & $gpufx check $dir
         if ($LASTEXITCODE -ne 0) { throw "check failed: $dir" }
     }
-    # Effects of examples\effects keep their group folder (out\<group>\<name>.zip);
+    # Effects of packages\effects keep their group folder (out\<group>\<name>.zip);
     # other folders are packed flat (out\<name>.zip).
     $full = (Resolve-Path $dir).Path.TrimEnd('\', '/')
-    $examples = (Resolve-Path (Join-Path $root "examples/effects")).Path
+    $examples = (Resolve-Path (Join-Path $root "packages/effects")).Path
     $rel = Split-Path -Leaf $full
     if ($full.StartsWith($examples + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         $rel = $full.Substring($examples.Length + 1)

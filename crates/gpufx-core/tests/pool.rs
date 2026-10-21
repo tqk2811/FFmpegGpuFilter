@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gpufx_core::{Effect, EffectGraph, FrameInfo, GpuContext, Image, ImageMut, Package};
 
 fn examples() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/effects")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects")
 }
 
 /// Every example effect directory (inside the ffmpeg, slideshow and standalone groups), sorted.
