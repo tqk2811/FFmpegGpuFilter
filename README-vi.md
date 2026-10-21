@@ -195,8 +195,8 @@ Cần Rust (stable) và một driver GPU (Linux không có GPU có thể dùng `
 ```sh
 cargo build --release
 cargo test --release                       # chạy các hiệu ứng mẫu trên GPU hiện có
-./target/release/gpufx run 'examples/effects/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
-scripts/pack-effects.sh                    # chỉ đóng gói hiệu ứng: examples/effects -> dist/effects/<group>/<name>.zip
+./target/release/gpufx run 'packages/effects/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
+scripts/pack-effects.sh                    # chỉ đóng gói hiệu ứng: packages/effects -> dist/effects/<group>/<name>.zip
 ```
 
 Thêm hoặc sửa hiệu ứng **không cần build lại FFmpeg**: chạy `scripts/pack-effects.sh`
@@ -290,7 +290,7 @@ Kết quả nằm trong `dist/<target>/`:
 
 ```
 bin/      ffmpeg, ffprobe, libgpufx.so | gpufx.dll, gpufx-cli
-effects/  các hiệu ứng mẫu đã đóng gói .zip (ffmpeg/, slideshow/, standalone/ như examples/effects)
+effects/  các hiệu ứng mẫu đã đóng gói .zip (ffmpeg/, slideshow/, standalone/ như packages/effects)
 include/  gpufx.h
 ```
 
@@ -321,7 +321,7 @@ make -j"$(nproc)"
 | `ffmpeg/` | Filter `vf_gpufx.c` và script tích hợp |
 | `external/FFmpeg` | Submodule mã nguồn FFmpeg |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx một lệnh trong Docker |
-| `examples/effects/` | 38 hiệu ứng mẫu, chia nhóm `ffmpeg/`, `slideshow/`, `standalone/` |
+| `packages/effects/` | 38 hiệu ứng mẫu, chia nhóm `ffmpeg/`, `slideshow/`, `standalone/` |
 | `scripts/` | `build-prebuilt.sh` (build nhanh trên FFmpeg build sẵn), `test-bundle.sh`, `install-libgpufx.sh`, `pack-effects.sh`/`.ps1` (đóng gói zip) |
 
 ## Giấy phép

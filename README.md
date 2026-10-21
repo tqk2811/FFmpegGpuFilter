@@ -199,8 +199,8 @@ You need Rust (stable) and a GPU driver (on Linux without a GPU you can use `mes
 ```sh
 cargo build --release
 cargo test --release                       # run the sample effects on the available GPU
-./target/release/gpufx run 'examples/effects/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
-scripts/pack-effects.sh                    # only package the effects: examples/effects -> dist/effects/<group>/<name>.zip
+./target/release/gpufx run 'packages/effects/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
+scripts/pack-effects.sh                    # only package the effects: packages/effects -> dist/effects/<group>/<name>.zip
 ```
 
 Adding or editing effects **does not require rebuilding FFmpeg**: run `scripts/pack-effects.sh`
@@ -295,7 +295,7 @@ The result is in `dist/<target>/`:
 
 ```
 bin/      ffmpeg, ffprobe, libgpufx.so | gpufx.dll, gpufx-cli
-effects/  the sample effects packaged as .zip (ffmpeg/, slideshow/, standalone/ as in examples/effects)
+effects/  the sample effects packaged as .zip (ffmpeg/, slideshow/, standalone/ as in packages/effects)
 include/  gpufx.h
 ```
 
@@ -326,7 +326,7 @@ make -j"$(nproc)"
 | `ffmpeg/` | The `vf_gpufx.c` filter and the integration script |
 | `external/FFmpeg` | FFmpeg source submodule |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx with one command in Docker |
-| `examples/effects/` | 38 sample effects in `ffmpeg/`, `slideshow/` and `standalone/` groups |
+| `packages/effects/` | 38 sample effects in `ffmpeg/`, `slideshow/` and `standalone/` groups |
 | `scripts/` | `build-prebuilt.sh` (fast build on a prebuilt FFmpeg), `test-bundle.sh`, `install-libgpufx.sh`, `pack-effects.sh`/`.ps1` (zip packaging) |
 
 ## License

@@ -192,7 +192,7 @@ run); `-init_hw_device list` still has all 9 device types.
 - **FFmpeg without the patches: no alpha with D3D frames.** `hwdownload` gives `nv12`/`p010le`
   only (D3D12) or no `rgba` (D3D11), so an output with alpha loses it there, and `out_format=rgba`, `yuva420p` or
   `yuva444p` fails (`Unsupported pixel format: rgba`). Vulkan keeps alpha with `out_format=rgba`. On D3D, split
-  the result and send one copy through [alpha-extract](../examples/effects/ffmpeg/alpha-extract/README.md) to get
+  the result and send one copy through [alpha-extract](../packages/effects/ffmpeg/alpha-extract/README.md) to get
   the alpha as a gray picture, then join both on the CPU with `alphamerge`.
 - **The prebuilt bundle's libavutil is a rebuild.** `scripts/build-avutil.sh` rebuilds libavutil in BtbN's image
   with the configure line stored in the prebuilt library, then checks that the exports, the libraries loaded at
