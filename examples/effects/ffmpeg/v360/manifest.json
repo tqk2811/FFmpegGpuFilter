@@ -1,0 +1,45 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.v360",
+  "name": "V360",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Converts 360 degree video between projections (equirect, cubemap, eac, fisheye, flat...) with rotation, like FFmpeg's v360.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    { "name": "input", "type": "int", "default": 0, "min": 0, "max": 19, "description": "Input projection: 0 equirect, 1 cube3x2, 2 cube6x1, 3 cube1x6, 4 eac, 5 flat, 6 dfisheye, 7 fisheye, 8 stereographic, 9 mercator, 10 ball, 11 hammer, 12 sinusoidal, 13 pannini, 14 cylindrical, 15 cylindricalea, 16 equisolid, 17 orthographic, 18 octahedron, 19 hequirect" },
+    { "name": "output", "type": "int", "default": 1, "min": 0, "max": 19, "description": "Output projection, same numbering as input" },
+    { "name": "interp", "type": "int", "default": 1, "min": 0, "max": 2, "description": "Interpolation: 0 nearest, 1 linear, 2 cubic" },
+    { "name": "yaw", "type": "float", "default": 0, "min": -360, "max": 360, "description": "Yaw rotation in degrees" },
+    { "name": "pitch", "type": "float", "default": 0, "min": -360, "max": 360, "description": "Pitch rotation in degrees" },
+    { "name": "roll", "type": "float", "default": 0, "min": -360, "max": 360, "description": "Roll rotation in degrees" },
+    { "name": "rorder", "type": "int", "default": 0, "min": 0, "max": 5, "description": "Rotation order: 0 ypr, 1 yrp, 2 pyr, 3 pry, 4 ryp, 5 rpy" },
+    { "name": "h_fov", "type": "float", "default": 0, "min": 0, "max": 360, "description": "Output horizontal field of view in degrees, 0 = default of the projection (flat and cylindrical 90, fisheye like 180, others 360)" },
+    { "name": "v_fov", "type": "float", "default": 0, "min": 0, "max": 360, "description": "Output vertical field of view in degrees, 0 = default of the projection (flat and cylindrical 45, fisheye like 180, others 180)" },
+    { "name": "d_fov", "type": "float", "default": 0, "min": 0, "max": 360, "description": "Output diagonal field of view in degrees; when above 0 it replaces h_fov and v_fov using the frame size" },
+    { "name": "ih_fov", "type": "float", "default": 0, "min": 0, "max": 360, "description": "Input horizontal field of view in degrees, 0 = default of the projection" },
+    { "name": "iv_fov", "type": "float", "default": 0, "min": 0, "max": 360, "description": "Input vertical field of view in degrees, 0 = default of the projection" },
+    { "name": "id_fov", "type": "float", "default": 0, "min": 0, "max": 360, "description": "Input diagonal field of view in degrees; when above 0 it replaces ih_fov and iv_fov" },
+    { "name": "h_flip", "type": "bool", "default": false, "description": "Flip the output horizontally" },
+    { "name": "v_flip", "type": "bool", "default": false, "description": "Flip the output vertically" },
+    { "name": "d_flip", "type": "bool", "default": false, "description": "Flip the output in depth" },
+    { "name": "ih_flip", "type": "bool", "default": false, "description": "Flip the input horizontally" },
+    { "name": "iv_flip", "type": "bool", "default": false, "description": "Flip the input vertically" },
+    { "name": "h_offset", "type": "float", "default": 0, "min": -1, "max": 1, "description": "Output horizontal off-axis offset" },
+    { "name": "v_offset", "type": "float", "default": 0, "min": -1, "max": 1, "description": "Output vertical off-axis offset" },
+    { "name": "background", "type": "color", "default": "#000000", "description": "Fill for pixels the output projection or the input does not cover" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/v360.wgsl"
+        }
+      ]
+    }
+  ]
+}

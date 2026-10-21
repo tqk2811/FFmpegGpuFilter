@@ -1,0 +1,29 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.xstack",
+  "name": "Grid Stack",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Places the inputs in a grid, row by row, each scaled into a cell of the first input's frame, like FFmpeg's xstack grid layout.",
+  "inputs": [
+    {
+      "name": "src",
+      "description": "Videos to place in the grid, any sizes",
+      "repeat": { "default": 4, "min": 2, "max": 16 }
+    }
+  ],
+  "params": [
+    { "name": "columns", "type": "int", "default": 2, "min": 0, "max": 16, "description": "Columns of the grid; the rows follow from the number of inputs. 0 = the square root of the number of inputs, rounded up" },
+    { "name": "fit", "type": "bool", "default": false, "description": "Keep each input's aspect ratio inside its cell (bars in the fill color) instead of stretching it to the cell" },
+    { "name": "fill", "type": "color", "default": "#000000", "description": "Fill for unused cells and for the bars of fit" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/xstack.wgsl"
+        }
+      ]
+    }
+  ]
+}
