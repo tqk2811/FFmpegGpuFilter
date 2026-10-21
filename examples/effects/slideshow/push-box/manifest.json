@@ -47,9 +47,13 @@
       "description": "Background around the boxes"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/push_box.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/push_box.wgsl"
+        }
+      ]
     }
   ]
 }

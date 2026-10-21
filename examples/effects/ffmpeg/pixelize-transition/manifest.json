@@ -33,9 +33,13 @@
       "description": "Pixel size in the middle of the transition"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/pixelize_transition.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/pixelize_transition.wgsl"
+        }
+      ]
     }
   ]
 }

@@ -26,7 +26,7 @@ fn open(ctx: &Arc<GpuContext>, glsl: bool) -> Effect {
     let shader = if glsl { "main.glsl" } else { "main.wgsl" };
     let manifest = format!(
         r#"{{"api":2,"id":"t.expr","name":"Expr","params":[{{"name":"gain","type":"float","default":1}},
-            {{"name":"level","type":"expr","vars":["x","gain"],"default":"x * gain"}}],"passes":[{{"shader":"{shader}"}}]}}"#
+            {{"name":"level","type":"expr","vars":["x","gain"],"default":"x * gain"}}],"groups":[{{"passes":[{{"shader":"{shader}"}}]}}]}}"#
     );
     std::fs::write(dir.join("manifest.json"), manifest).unwrap();
     let body = if glsl {

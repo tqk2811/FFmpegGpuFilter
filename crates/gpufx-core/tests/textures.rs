@@ -45,7 +45,7 @@ fn package_dir(tag: &str, manifest: &str, shader: &str, glsl: bool) -> Dir {
 }
 
 fn manifest(extra: &str) -> String {
-    format!(r#"{{"api":2,"id":"t.tex","name":"Tex","passes":[{{"shader":"main.wgsl"}}]{extra}}}"#)
+    format!(r#"{{"api":2,"id":"t.tex","name":"Tex","groups":[{{"passes":[{{"shader":"main.wgsl"}}]}}]{extra}}}"#)
 }
 
 const RED: [u8; 4] = [255, 0, 0, 255];
@@ -95,7 +95,7 @@ void main() {
     if (!gpufx_in_bounds(id)) { return; }
     gpufx_write(id, textureLod(sampler2DArray(pics, smp), vec3(gpufx_uv(id), 1.0), 0.0));
 }";
-    let m = r#"{"api":2,"id":"t.tex","name":"Tex","textures":[{"name":"pics","path":"atlas.png","grid":[1,2]}],"passes":[{"shader":"main.glsl"}]}"#;
+    let m = r#"{"api":2,"id":"t.tex","name":"Tex","textures":[{"name":"pics","path":"atlas.png","grid":[1,2]}],"groups":[{"passes":[{"shader":"main.glsl"}]}]}"#;
     let dir = package_dir("glsl", m, shader, true);
     png(&dir.0.join("atlas.png"), 2, 4, |_, y| if y < 2 { RED } else { BLUE });
     let mut fx = Effect::new(ctx, Package::open(&dir.0).unwrap()).unwrap();
@@ -254,7 +254,7 @@ fn image_sizes_are_checked_before_decoding() {
 fn api_1_packages_keep_api_1_rules() {
     let dir = package_dir(
         "api1",
-        r#"{"id":"t.x","name":"X","textures":[{"name":"t","path":"a.png","mipmaps":true}],"passes":[{"shader":"main.wgsl"}]}"#,
+        r#"{"id":"t.x","name":"X","textures":[{"name":"t","path":"a.png","mipmaps":true}],"groups":[{"passes":[{"shader":"main.wgsl"}]}]}"#,
         "",
         false,
     );
@@ -262,7 +262,8 @@ fn api_1_packages_keep_api_1_rules() {
     let err = open_err(&dir);
     assert!(err.contains("\"api\": 2"), "{err}");
     // A package for a newer runtime names the api, not its unknown fields.
-    let dir = package_dir("api3", r#"{"api":3,"id":"t.x","name":"X","future":1,"passes":[{"shader":"main.wgsl"}]}"#, "", false);
+    let dir =
+        package_dir("api3", r#"{"api":3,"id":"t.x","name":"X","future":1,"groups":[{"passes":[{"shader":"main.wgsl"}]}]}"#, "", false);
     let err = open_err(&dir);
     assert!(err.contains("unsupported manifest api 3"), "{err}");
     assert!(matches!(Package::open(&dir.0), Err(Error::Manifest(_))));

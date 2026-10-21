@@ -19,9 +19,13 @@
       "description": "Mix with the original"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/invert.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/invert.wgsl"
+        }
+      ]
     }
   ]
 }

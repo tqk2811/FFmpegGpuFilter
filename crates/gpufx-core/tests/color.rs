@@ -23,8 +23,11 @@ fn gpu() -> Option<std::sync::Arc<GpuContext>> {
 fn identity(ctx: &std::sync::Arc<GpuContext>, tag: &str) -> Effect {
     let dir = std::env::temp_dir().join(format!("gpufx-identity-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("shaders")).unwrap();
-    std::fs::write(dir.join("manifest.json"), r#"{"id":"t.identity","name":"Identity","passes":[{"shader":"shaders/main.wgsl"}]}"#)
-        .unwrap();
+    std::fs::write(
+        dir.join("manifest.json"),
+        r#"{"id":"t.identity","name":"Identity","groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+    )
+    .unwrap();
     std::fs::write(
         dir.join("shaders/main.wgsl"),
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",

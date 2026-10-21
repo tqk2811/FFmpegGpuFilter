@@ -19,9 +19,13 @@
       "description": "Mix with the original"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/sepia.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/sepia.wgsl"
+        }
+      ]
     }
   ]
 }

@@ -41,9 +41,13 @@
       "max": 1000
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/dissolve.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/dissolve.wgsl"
+        }
+      ]
     }
   ]
 }

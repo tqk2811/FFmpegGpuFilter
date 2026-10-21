@@ -1,5 +1,11 @@
 # Việc còn treo
 
+### [Vừa] Gói mà mọi group cần tính năng noop device không có thì mở effect lỗi
+- **Vấn đề**: `gpufx_effect_open` kiểm shader trên noop device trước khi có device thật. Gói có mọi group đều `requires` `cooperative-matrix*` (noop device không có) bị loại hết ở nhánh noop của `Program::new` và báo lỗi "every group needs features the device is not known to have yet", dù GPU thật chạy được.
+- **Vị trí**: [runtime.rs:419](../crates/gpufx-core/src/runtime.rs#L419) (nhánh `target.is_noop` của `Program::new`), [lib.rs:75](../crates/gpufx-ffi/src/lib.rs#L75) (`noop_context`)
+- **Vì sao**: nên hoãn việc kiểm shader của các group đó sang device thật (vd noop chỉ kiểm phần manifest, group thiếu tính năng thì để lúc compile trên device thật), để gói chỉ có đường Tensor Core vẫn mở được.
+- **Ngày ghi**: 2026-10-21
+
 ### [Vừa] DXIL precompile cho pixel khác đường thường ở 23 gói CapCut
 
 Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/gpufx-core/tests/precompile.rs`) đỏ ở `assert_eq!(trusted, plain)` khi có `dxcompiler.dll` trên PATH (vd `dist/win64/bin`). Đỏ cả trên master, không do hstack/vstack. Các gói lệch: big-wave, blu-ray-scanning, delay-zoom, digital-paint, doodle-scratch, fade-up, film-blur, glassblock-zoom-2, golden-sand, hot-shimmers, layers, left-transition, neon-graffiti, pink-grunge, signal-glitch-2, slide-bars, subject-flash, tear-apart, thermal-imaging-3, turn-table, tv-glitch, varnish-wash, zoom-switch. Chạy thường thì test bị skip vì thiếu dxcompiler, nên CI không thấy. Nên làm vì bật `GPUFX_TRUST_PRECOMPILED=1` sẽ cho hình khác bản biên dịch lúc chạy (có thể do cờ tối ưu DXC khác nhau, hoặc hiệu ứng phụ thuộc phép tính float không ổn định).

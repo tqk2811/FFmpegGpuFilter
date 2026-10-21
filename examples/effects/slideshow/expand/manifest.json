@@ -41,9 +41,13 @@
       "description": "Edge width"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/expand.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/expand.wgsl"
+        }
+      ]
     }
   ]
 }

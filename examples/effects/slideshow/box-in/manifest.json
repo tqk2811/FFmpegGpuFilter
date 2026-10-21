@@ -47,9 +47,13 @@
       "description": "Background around the boxes"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/box_in.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/box_in.wgsl"
+        }
+      ]
     }
   ]
 }

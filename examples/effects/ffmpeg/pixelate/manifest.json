@@ -19,9 +19,13 @@
       "description": "Block size in pixels"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/pixelate.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/pixelate.wgsl"
+        }
+      ]
     }
   ]
 }

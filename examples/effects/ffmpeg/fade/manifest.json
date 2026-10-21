@@ -25,9 +25,13 @@
       "description": "Target color"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/fade.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/fade.wgsl"
+        }
+      ]
     }
   ]
 }

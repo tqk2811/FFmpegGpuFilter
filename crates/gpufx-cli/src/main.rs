@@ -76,13 +76,9 @@ fn info(path: &str) -> Result<(), String> {
         };
         println!("  {} : {:?} = {default}{range}  {}", p.name, p.kind, p.description);
     }
-    if m.groups.is_empty() {
-        println!("passes: {}", m.passes.len());
-    } else {
-        println!("groups (the first matching the device runs):");
-        for (g, group) in m.groups.iter().enumerate() {
-            println!("  {}: requires {}, {} pass(es)", m.group_label(g), group.requires.describe(), group.passes.len());
-        }
+    println!("groups (the first matching the device runs):");
+    for (g, group) in m.groups.iter().enumerate() {
+        println!("  {}: requires {}, {} pass(es)", m.group_label(g), group.requires.describe(), group.passes.len());
     }
     Ok(())
 }

@@ -47,9 +47,13 @@
       "description": "Background between the clips in mode 3"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/slide_transition.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/slide_transition.wgsl"
+        }
+      ]
     }
   ]
 }

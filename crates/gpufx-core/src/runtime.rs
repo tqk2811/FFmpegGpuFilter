@@ -403,12 +403,14 @@ pub struct Program {
 }
 
 impl Program {
-    /// A manifest with pass groups is compiled with the first group matching the device,
+    /// The package is compiled with the first pass group matching the device,
     /// which becomes the passes of [`Program::package`]. On the noop device (see
     /// [`GpuContext::noop`]) every group of this OS is compiled, to check its shaders, and
     /// the first one kept; a group needing features the noop device lacks is left out, its
-    /// shaders could not be checked there.
+    /// shaders could not be checked there. A package already resolved to one group is compiled
+    /// as is.
     pub fn new(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
+        // Already resolved to one group, e.g. the package of another program.
         if package.manifest.groups.is_empty() {
             return Self::compile(ctx, package);
         }
@@ -437,7 +439,7 @@ impl Program {
         Self::compile(ctx, package.with_group(found[0]))
     }
 
-    /// [`Program::new`] for a package without groups.
+    /// [`Program::new`] for a package resolved to one group.
     fn compile(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
         debug_assert!(package.manifest.groups.is_empty(), "only a package resolved to one group is compiled (see Program::new)");
         // Only the layout of the block matters for compiling; values live in each Effect.

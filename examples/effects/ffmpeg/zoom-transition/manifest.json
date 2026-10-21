@@ -42,9 +42,13 @@
       "description": "Point to zoom into (0..1)"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/zoom_transition.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/zoom_transition.wgsl"
+        }
+      ]
     }
   ]
 }

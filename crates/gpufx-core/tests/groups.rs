@@ -125,9 +125,9 @@ fn no_matching_group_is_an_error_naming_each_group() {
 }
 
 #[test]
-fn plain_passes_still_run() {
+fn a_group_without_requires_runs() {
     let Some(ctx) = gpu() else { return };
-    let pkg = TempPackage::new("plain", r#"{"id":"t.plain","name":"Plain","passes":[{"shader":"red.wgsl"}]}"#);
+    let pkg = TempPackage::new("plain", r#"{"id":"t.plain","name":"Plain","groups":[{"passes":[{"shader":"red.wgsl"}]}]}"#);
     assert_eq!(first_pixel(&ctx, pkg.open()), [255, 0, 0, 255]);
 }
 

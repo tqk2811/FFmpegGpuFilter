@@ -67,9 +67,13 @@
       "description": "Negative = green, positive = magenta"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/color_adjust.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/color_adjust.wgsl"
+        }
+      ]
     }
   ]
 }

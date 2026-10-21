@@ -41,9 +41,13 @@
       "description": "Edge width"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/collapse.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/collapse.wgsl"
+        }
+      ]
     }
   ]
 }

@@ -59,9 +59,13 @@
       "description": "Removes the key tint from the remaining edges"
     }
   ],
-  "passes": [
+  "groups": [
     {
-      "shader": "shaders/chroma_key.wgsl"
+      "passes": [
+        {
+          "shader": "shaders/chroma_key.wgsl"
+        }
+      ]
     }
   ]
 }
