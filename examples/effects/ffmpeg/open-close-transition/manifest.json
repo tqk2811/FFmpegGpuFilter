@@ -1,0 +1,18 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.open-close-transition",
+  "name": "Open Close",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "The second clip opens from the center as a circle, a vertical slit or a horizontal slit, or closes in from the edges (`shape`, `direction`). Drive `progress` from 0 to 1.",
+  "inputs": [
+    { "name": "first", "description": "Outgoing clip" },
+    { "name": "second", "description": "Incoming clip (same size as the first)", "same_size": true }
+  ],
+  "params": [
+    { "name": "progress", "type": "float", "default": 0.5, "min": 0, "max": 1, "description": "0 = first clip, 1 = second clip" },
+    { "name": "shape", "type": "int", "default": 0, "min": 0, "max": 2, "description": "0 = circle, 1 = vertical (opens left and right), 2 = horizontal (opens up and down)" },
+    { "name": "direction", "type": "int", "default": 0, "min": 0, "max": 1, "description": "0 = open (the second clip appears in the center and spreads out), 1 = close (the second clip comes in from the edges toward the center)" }
+  ],
+  "groups": [{ "passes": [{ "shader": "shaders/open_close_transition.wgsl" }] }]
+}
