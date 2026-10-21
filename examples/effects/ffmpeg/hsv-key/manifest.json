@@ -1,0 +1,82 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.hsv-key",
+  "name": "HSV Key",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Turns pixels close to a hue/saturation/value into transparency. Use a format with alpha after it, or overlay it.",
+  "inputs": [
+    {
+      "name": "src",
+      "formats": [
+        "yuv420p",
+        "yuv422p",
+        "yuv444p",
+        "yuvj420p",
+        "nv12",
+        "rgb24",
+        "bgr24",
+        "rgba",
+        "bgra"
+      ]
+    }
+  ],
+  "output": {
+    "formats": [
+      "rgba",
+      "yuva420p",
+      "yuva444p"
+    ]
+  },
+  "params": [
+    {
+      "name": "hue",
+      "type": "float",
+      "default": 0,
+      "min": -360,
+      "max": 360,
+      "description": "Key hue in degrees; a negative value ignores the hue"
+    },
+    {
+      "name": "sat",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Key saturation; a negative value ignores the saturation"
+    },
+    {
+      "name": "val",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Key value (brightness); a negative value ignores the value"
+    },
+    {
+      "name": "similarity",
+      "type": "float",
+      "default": 0.01,
+      "min": 0.00001,
+      "max": 1,
+      "description": "Distance from the key that becomes transparent"
+    },
+    {
+      "name": "blend",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Width of the soft edge above the similarity; 0 = hard cut"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/hsv_key.wgsl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.draw-grid",
+  "name": "Draw Grid",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Draws a grid of colored lines on the picture.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "x",
+      "type": "int",
+      "default": 0,
+      "min": -100000,
+      "max": 100000,
+      "description": "Horizontal offset of the grid, in pixels"
+    },
+    {
+      "name": "y",
+      "type": "int",
+      "default": 0,
+      "min": -100000,
+      "max": 100000,
+      "description": "Vertical offset of the grid, in pixels"
+    },
+    {
+      "name": "width",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "Width of a cell in pixels; 0 = the width of the picture"
+    },
+    {
+      "name": "height",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "Height of a cell in pixels; 0 = the height of the picture"
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "Color of the lines; alpha is its opacity"
+    },
+    {
+      "name": "thickness",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 100000,
+      "description": "Thickness of the lines in pixels"
+    },
+    {
+      "name": "replace",
+      "type": "bool",
+      "default": false,
+      "description": "Replace the color and alpha of the pixels instead of blending"
+    },
+    {
+      "name": "invert",
+      "type": "bool",
+      "default": false,
+      "description": "Invert the color of the pixels on the lines instead of drawing `color` (FFmpeg: color `invert`)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/draw_grid.wgsl"
+        }
+      ]
+    }
+  ]
+}

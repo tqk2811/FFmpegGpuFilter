@@ -1,0 +1,86 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.despill",
+  "name": "Despill",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Removes green or blue spill from the edges of a keyed subject.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "screen",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Screen type: 0 = green, 1 = blue (FFmpeg: type)"
+    },
+    {
+      "name": "mix",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "Spillmap mix: how much of red is compared with the screen color"
+    },
+    {
+      "name": "expand",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Spillmap expand: how much of the other channel is ignored"
+    },
+    {
+      "name": "red",
+      "type": "float",
+      "default": 0,
+      "min": -100,
+      "max": 100,
+      "description": "Red scale applied to the spill"
+    },
+    {
+      "name": "green",
+      "type": "float",
+      "default": -1,
+      "min": -100,
+      "max": 100,
+      "description": "Green scale applied to the spill"
+    },
+    {
+      "name": "blue",
+      "type": "float",
+      "default": 0,
+      "min": -100,
+      "max": 100,
+      "description": "Blue scale applied to the spill"
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 0,
+      "min": -10,
+      "max": 10,
+      "description": "Brightness added back where the spill was"
+    },
+    {
+      "name": "alpha",
+      "type": "bool",
+      "default": false,
+      "description": "Write the spillmap into alpha (1 - spill)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/despill.wgsl"
+        }
+      ]
+    }
+  ]
+}

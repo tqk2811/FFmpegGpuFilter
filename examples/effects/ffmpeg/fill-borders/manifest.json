@@ -1,0 +1,70 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.fill-borders",
+  "name": "Fill Borders",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Fills the borders of the picture by smearing, mirroring, reflecting, wrapping, fading or with a fixed color.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "left",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "description": "Width of the left border in pixels"
+    },
+    {
+      "name": "right",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "description": "Width of the right border in pixels"
+    },
+    {
+      "name": "top",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "description": "Height of the top border in pixels"
+    },
+    {
+      "name": "bottom",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "description": "Height of the bottom border in pixels"
+    },
+    {
+      "name": "mode",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 5,
+      "description": "0 = smear, 1 = mirror, 2 = fixed, 3 = reflect, 4 = wrap, 5 = fade"
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "Color for the fixed and fade modes"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/fill_borders.wgsl"
+        }
+      ]
+    }
+  ]
+}

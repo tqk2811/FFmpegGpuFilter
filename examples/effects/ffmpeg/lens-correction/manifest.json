@@ -1,0 +1,70 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.lens-correction",
+  "name": "Lens Correction",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Corrects or adds radial lens distortion (barrel/pincushion) around a center point.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "cx",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "Relative x of the distortion center, 0..1 of the width"
+    },
+    {
+      "name": "cy",
+      "type": "float",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "description": "Relative y of the distortion center, 0..1 of the height"
+    },
+    {
+      "name": "k1",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Quadratic distortion factor"
+    },
+    {
+      "name": "k2",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Double quadratic distortion factor"
+    },
+    {
+      "name": "i",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Interpolation: 0 = nearest, 1 = bilinear"
+    },
+    {
+      "name": "fc",
+      "type": "color",
+      "default": "#00000000",
+      "description": "Color of the pixels that map outside the source"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/lens_correction.wgsl"
+        }
+      ]
+    }
+  ]
+}

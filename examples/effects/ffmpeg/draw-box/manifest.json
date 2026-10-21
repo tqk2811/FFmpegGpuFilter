@@ -1,0 +1,88 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.draw-box",
+  "name": "Draw Box",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Draws a colored box (outline or filled) on the picture.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "x",
+      "type": "int",
+      "default": 0,
+      "min": -100000,
+      "max": 100000,
+      "description": "Left edge of the box, in pixels"
+    },
+    {
+      "name": "y",
+      "type": "int",
+      "default": 0,
+      "min": -100000,
+      "max": 100000,
+      "description": "Top edge of the box, in pixels"
+    },
+    {
+      "name": "width",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "Width of the box in pixels; 0 = the width of the picture"
+    },
+    {
+      "name": "height",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "Height of the box in pixels; 0 = the height of the picture"
+    },
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "Color of the box; alpha is its opacity"
+    },
+    {
+      "name": "thickness",
+      "type": "int",
+      "default": 3,
+      "min": 0,
+      "max": 100000,
+      "description": "Thickness of the outline in pixels"
+    },
+    {
+      "name": "fill",
+      "type": "bool",
+      "default": false,
+      "description": "Fill the whole box (FFmpeg: thickness `fill`)"
+    },
+    {
+      "name": "replace",
+      "type": "bool",
+      "default": false,
+      "description": "Replace the color and alpha of the pixels instead of blending"
+    },
+    {
+      "name": "invert",
+      "type": "bool",
+      "default": false,
+      "description": "Invert the color of the pixels of the box instead of drawing `color` (FFmpeg: color `invert`)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/draw_box.wgsl"
+        }
+      ]
+    }
+  ]
+}
