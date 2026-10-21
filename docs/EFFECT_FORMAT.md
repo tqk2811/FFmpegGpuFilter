@@ -34,7 +34,7 @@ scripts/pack-effects.sh --check -o out my-fx    # compile the shaders on the GPU
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `api` | number | no (1) | Format version. `2` is needed for texture arrays, `mipmaps`, `premultiply`, `expr` parameters, a `repeat` input and an `output.size` other than `first`; packages without those keep `1` and run as before. A runtime older than the package says `unsupported manifest api 2` |
+| `api` | number | no (1) | Format version. `2` is needed for texture arrays, `mipmaps`, `premultiply`, `expr` and `enum` parameters, a `repeat` input and an `output.size` other than `first`; packages without those keep `1` and run as before. A runtime older than the package says `unsupported manifest api 2` |
 | `id` | string | yes | Identifier in reverse-DNS form |
 | `name` | string | yes | Display name |
 | `used_for` | array | yes | The FFmpeg filters the package is for: `["gpufx"]` for an effect. An empty list or an unknown name (known: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) fails to load; the `gpufx` filter refuses a package whose list lacks `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
@@ -123,13 +123,14 @@ Each element of `params`:
 | Field | Meaning |
 |-------|---------|
 | `name` | Name, also the field name in `params.<name>` |
-| `type` | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `color`, `expr` (api 2) |
-| `default` | A number, an array of numbers, `true/false`, or a string (`"#ff8800"`; the expression of an `expr`) |
-| `min`, `max` | The value is clamped to this range (not for `expr`) |
+| `type` | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `color`, `expr` (api 2), `enum` (api 2) |
+| `default` | A number, an array of numbers, `true/false`, or a string (`"#ff8800"`; the expression of an `expr`; a value name of an `enum`). An `enum` without `default` starts at its first value |
+| `min`, `max` | The value is clamped to this range (not for `expr` or `enum`) |
 | `vars` | `expr` only: the variable names of the expression, in the order of the shader function's arguments |
+| `values` | `enum` only: the value names, see [Enum parameters](#enum-parameters) |
 | `description` | Description |
 
-Types in the shader: `float`→`f32`/`float`, `int`→`i32`/`int`, `bool`→`u32`/`uint` (0 or 1),
+Types in the shader: `float`→`f32`/`float`, `int` and `enum`→`i32`/`int`, `bool`→`u32`/`uint` (0 or 1),
 `vecN`→`vecNf`/`vecN`, `color`→`vec4f`/`vec4` (RGBA 0..1). An `expr` is not in `params`: it becomes a
 function, see [Expression parameters](#expression-parameters).
 
@@ -335,6 +336,7 @@ A non-finite time becomes 0.
 |---------------|------|------|----------------------|-------|
 | `float` | `f32` | `float` | 4 / 4 | |
 | `int` | `i32` | `int` | 4 / 4 | Rounded to the nearest integer |
+| `enum` | `i32` | `int` | 4 / 4 | The number of the chosen value name |
 | `bool` | `u32` | `uint` | 4 / 4 | 0 or 1 |
 | `vec2` | `vec2f` | `vec2` | 8 / 8 | |
 | `vec3` | `vec3f` | `vec3` | 16 / 12 | A scalar may follow in the fourth slot |
@@ -506,6 +508,35 @@ let x = gpufx_expr_path_x(u, p, x0);   // the arguments in the order of `vars`, 
   inline keys are separated by `&` (no escaping needed): `graph='x.zip=angle=max(90*u\,0)&speed=2'`. The
   FFmpeg-style `:` is also accepted but must be written `\:` there (`...\,0)\:speed=2`). In the effect string
   `\&` is a literal `&` (escapable set: `\ ' : & ; | = [ ]`).
+
+## Enum parameters
+
+A parameter of type `enum` (api 2) is one of a list of named choices. In the shader it is an `i32`/`int`
+like `int` (`params.<name>`), holding the number of the chosen name. `values` gives the names in one
+of two forms:
+
+- an array of names, numbered from 0 in order: `"values": ["fade", "wipeleft", "wiperight"]`;
+- an object giving each name its number (any `i32`, for example to match FFmpeg's numbering):
+  `"values": {"custom": -1, "fade": 0, "wipeleft": 1}`.
+
+```json
+{ "name": "transition", "type": "enum", "values": {"custom": -1, "fade": 0, "wipeleft": 1}, "default": "fade" }
+```
+
+Rules: at least one value; names are letters, digits, `_` or `-`, are not numbers and are not
+repeated; two names never share a number; `default` (a name or one of the numbers) is optional and
+defaults to the first value (the first of the array, the lowest number of an object); no `min`/`max`.
+
+Every place that takes a parameter as text (inline `pkg.zip=transition=wipeleft` in `graph=`, the
+`params` option, `sendcmd`/`process_command`, the graph text of `gpufx run`, `gpufx_effect_set_param()`)
+accepts the name, or for convenience its number (`transition=1`). Names are looked up first; an
+unknown name fails with the allowed names (`unknown value `wipeup` (allowed: custom, fade, wipeleft)`).
+In the FFmpeg filter a text that is neither a name nor a number is then tried as an FFmpeg expression
+evaluated every frame (`transition=if(lt(t\,2)\,0\,1)`), like for any scalar parameter: its result is
+rounded and must be one of the numbers, otherwise that frame fails and the filter stops with an
+error. A plain number that is not one of the values is refused when the option is set. Numbers
+set with `gpufx_effect_set_param_values()` follow the same rule. `gpufx info` lists the names with
+their numbers.
 
 ## Included examples
 

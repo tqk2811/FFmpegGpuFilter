@@ -208,6 +208,17 @@ pub enum ParamType {
     /// A math expression over `vars`, compiled into the shaders as the function
     /// `gpufx_expr_<name>` (api 2). Not in the `params` struct.
     Expr,
+    /// One of the named `values` (api 2): an `i32` in shaders, set by name or by number.
+    Enum,
+}
+
+/// The choices of an `enum` parameter: names numbered 0, 1, ... in order, or an object
+/// giving each name its number.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum EnumValues {
+    List(Vec<String>),
+    Map(serde_json::Map<String, serde_json::Value>),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -227,6 +238,32 @@ pub struct ParamDef {
     /// Variables of an `expr` parameter: the arguments of its shader function, in order.
     #[serde(default)]
     pub vars: Vec<String>,
+    /// The choices of an `enum` parameter.
+    #[serde(default)]
+    pub values: Option<EnumValues>,
+}
+
+impl ParamDef {
+    /// The `(name, number)` choices of an `enum` parameter, in declaration order for a
+    /// list and by number for an object; empty for other types. Numbers that are not
+    /// integers fitting `i32` are left out (the manifest check rejects them).
+    pub fn enum_values(&self) -> Vec<(&str, i32)> {
+        match &self.values {
+            None => Vec::new(),
+            Some(EnumValues::List(l)) => l.iter().enumerate().map(|(i, n)| (n.as_str(), i as i32)).collect(),
+            Some(EnumValues::Map(m)) => {
+                let mut v: Vec<(&str, i32)> =
+                    m.iter().filter_map(|(n, j)| j.as_i64().and_then(|x| i32::try_from(x).ok()).map(|x| (n.as_str(), x))).collect();
+                v.sort_by_key(|&(n, x)| (x, n));
+                v
+            }
+        }
+    }
+
+    /// The allowed names of an `enum` parameter, comma separated (for error messages).
+    pub fn enum_names(&self) -> String {
+        self.enum_values().iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -578,6 +615,11 @@ impl Manifest {
             } else if !p.vars.is_empty() {
                 return bad(format!("param `{}`: only an expr has vars", p.name));
             }
+            if p.kind == ParamType::Enum {
+                check_enum(p, self.api)?;
+            } else if p.values.is_some() {
+                return bad(format!("param `{}`: only an enum has values", p.name));
+            }
         }
         for (label, passes) in self.pass_lists() {
             let mut names = names.clone();
@@ -746,6 +788,58 @@ impl Manifest {
     }
 }
 
+/// Checks the rules of an `enum` parameter.
+fn check_enum(p: &ParamDef, api: u32) -> Result<(), Error> {
+    let bad = |m: String| Err(Error::Manifest(format!("param `{}`: {m}", p.name)));
+    if api < 2 {
+        return bad("type enum needs \"api\": 2".into());
+    }
+    if p.min.is_some() || p.max.is_some() {
+        return bad("an enum has no min or max".into());
+    }
+    let names: Vec<&str> = match &p.values {
+        None => return bad("an enum needs values".into()),
+        Some(EnumValues::List(l)) => l.iter().map(String::as_str).collect(),
+        Some(EnumValues::Map(m)) => {
+            for (n, j) in m {
+                if !j.as_i64().is_some_and(|x| i32::try_from(x).is_ok()) {
+                    return bad(format!("value `{n}` must be an integer that fits i32 (got {j})"));
+                }
+            }
+            m.keys().map(String::as_str).collect()
+        }
+    };
+    if names.is_empty() {
+        return bad("an enum needs at least one value".into());
+    }
+    for (k, n) in names.iter().enumerate() {
+        let plain = !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') && n.parse::<f64>().is_err();
+        if !plain {
+            return bad(format!("value name `{n}` must be letters, digits, `_` or `-`, and not a number"));
+        }
+        if names[..k].contains(n) {
+            return bad(format!("duplicate value name `{n}`"));
+        }
+    }
+    let values = p.enum_values();
+    for (k, (n, x)) in values.iter().enumerate() {
+        if let Some((other, _)) = values[..k].iter().find(|(_, y)| y == x) {
+            return bad(format!("values `{other}` and `{n}` share the number {x}"));
+        }
+    }
+    if let Some(d) = &p.default {
+        let ok = match d {
+            serde_json::Value::String(s) => values.iter().any(|(n, _)| n == s),
+            serde_json::Value::Number(x) => values.iter().any(|(_, v)| x.as_f64() == Some(*v as f64)),
+            _ => false,
+        };
+        if !ok {
+            return bad(format!("default {d} is not one of the values ({})", p.enum_names()));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -887,6 +981,36 @@ mod tests {
         assert!(param("enable").unwrap_err().to_string().contains("`enable` is reserved"));
         assert!(param("bypass").unwrap_err().to_string().contains("`bypass` is reserved"));
         assert!(err(3, r#"{"name":"a","path":"x.png","colorspace":"linear"}"#).contains("unsupported manifest api 3"));
+    }
+
+    #[test]
+    fn enum_params_follow_the_rules() {
+        let parse = |api: u32, p: &str| {
+            Manifest::parse(
+                format!(r#"{{"api":{api},"id":"t.x","name":"X","used_for":["gpufx"],"params":[{{"name":"m","type":"enum",{p}}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#)
+                    .as_bytes(),
+            )
+        };
+        let m = parse(2, r#""values":{"custom":-1,"fade":0,"wipeleft":1},"default":"fade""#).unwrap();
+        assert_eq!(m.params[0].enum_values(), [("custom", -1), ("fade", 0), ("wipeleft", 1)]);
+        let m = parse(2, r#""values":["b","a"],"default":1"#).unwrap();
+        assert_eq!(m.params[0].enum_values(), [("b", 0), ("a", 1)]);
+        let err = |api: u32, p: &str| parse(api, p).unwrap_err().to_string();
+        assert!(err(1, r#""values":["a"]"#).contains(r#"type enum needs "api": 2"#));
+        assert!(err(2, "\"default\":\"a\"").contains("needs values"));
+        assert!(err(2, r#""values":[]"#).contains("at least one value"));
+        assert!(err(2, r#""values":["a","a"]"#).contains("duplicate value name `a`"));
+        assert!(err(2, r#""values":{"a":1,"b":1}"#).contains("share the number 1"));
+        assert!(err(2, r#""values":{"a":1.5}"#).contains("integer"));
+        assert!(err(2, r#""values":["a","2"]"#).contains("not a number"));
+        assert!(err(2, r#""values":["a b"]"#).contains("letters, digits"));
+        assert!(err(2, r#""values":["a","b"],"default":"c""#).contains("not one of the values (a, b)"));
+        assert!(err(2, r#""values":["a","b"],"default":2"#).contains("not one of the values"));
+        assert!(err(2, r#""values":["a"],"max":3"#).contains("no min or max"));
+        let other = Manifest::parse(
+            br#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"m","type":"int","values":["a"]}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
+        );
+        assert!(other.unwrap_err().to_string().contains("only an enum has values"));
     }
 
     fn grouped(groups: &str) -> Result<Manifest, Error> {
