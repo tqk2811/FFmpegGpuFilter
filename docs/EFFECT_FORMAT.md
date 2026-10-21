@@ -37,6 +37,7 @@ scripts/pack-effects.sh --check -o out my-fx    # compile the shaders on the GPU
 | `api` | number | no (1) | Format version. `2` is needed for texture arrays, `mipmaps`, `premultiply`, `expr` parameters, a `repeat` input and an `output.size` other than `first`; packages without those keep `1` and run as before. A runtime older than the package says `unsupported manifest api 2` |
 | `id` | string | yes | Identifier in reverse-DNS form |
 | `name` | string | yes | Display name |
+| `used_for` | array | yes | The FFmpeg filters the package is for: `["gpufx"]` for an effect. An empty list or an unknown name (known: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) fails to load; the `gpufx` filter refuses a package whose list lacks `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | string | no | |
 | `inputs` | array | no (`[{"name":"src"}]`) | The video inputs, in the filter's pad order, with their rules (see below) |
 | `output` | `{formats, size}` | no (`rgba` and every format converted on the GPU; the size of the first input) | Allowed output pixel formats and the output size |
@@ -201,6 +202,8 @@ numbers of passes. The top-level `passes` of older manifests is gone: wrap the p
 {
   "id": "io.github.tqk2811.glow",
   "name": "Glow",
+  "used_for": ["gpufx"],
+
   "inputs": [{ "name": "src" }],
   "params": [{ "name": "radius", "type": "float", "default": 8, "min": 0, "max": 64 }],
   "groups": [
