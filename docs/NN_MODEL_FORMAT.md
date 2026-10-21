@@ -6,12 +6,14 @@ A `gpufx-nn` package is a small inference graph and its weights, run by gpufx's 
 ncnn, ONNX or other runtime at run time). `gpufx-nnconv` makes it offline from an ncnn model:
 
 ```
-gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> \
+gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> --used-for <filter>[,<filter>] \
                   [--license <file>] [--readme <file>] [--name <name>] -o <out.zip|out_dir>
 ```
 
 `-o` ending in `.zip` writes a zip, anything else a directory with the same files. The name defaults to the
-output file stem. Model files are not in git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` download the
+output file stem. `--used-for` (required) is written to `used_for` of `model.json`: `gpufx_ai_upscale` for a
+`super_resolution` model, `gpufx_ai_framerate` for a `frame_interp` one (checked against the `kind` of `io.json`).
+Each `models/*/source.json` has its `"used_for"`, which the fetch scripts pass on. Model files are not in git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` download the
 models listed in `models/*/source.json` (pinned URLs, sha256 checked) into `build/models/<name>/` and convert them
 to `build/models/<name>.zip`.
 
@@ -42,13 +44,19 @@ original tensor. `outputs` are the tensors no op reads.
 ## model.json (version 1)
 
 ```json
-{ "format": "gpufx-nn", "version": 1, "name": "rife-v4.6",
+{ "format": "gpufx-nn", "version": 1, "name": "rife-v4.6", "used_for": ["gpufx_ai_framerate"],
   "source": { "kind": "ncnn" },
   "weights": { "file": "weights.bin" },
   "inputs": [ { "name": "in0" }, { "name": "in1" }, { "name": "in2" } ],
   "outputs": [ "out0" ],
   "ops": [ { "op": "conv2d", "name": "convrelu_0", "inputs": ["18"], "output": "20", "...": "params" } ] }
 ```
+
+`used_for` (required) lists the FFmpeg filters the model is for: `gpufx_ai_upscale`, `gpufx_ai_framerate`. A
+missing or empty list, or an unknown name, fails to load. Each filter checks its own name is listed
+(`package rife-v4.6 is for gpufx_ai_framerate, not gpufx_ai_upscale`); an effect package given to an AI filter, or
+a model given to `gpufx`, fails saying what kind of package it is and which filter takes it. A package converted
+before `used_for` existed must be converted again.
 
 Ops are in execution order; every op has `op`, `name` (the ncnn layer name), `inputs`, one `output` and the
 parameters of its kind. Unknown ncnn layer types or parameters make the converter fail, never skip.
@@ -136,7 +144,8 @@ A bundle holds several variants of one model family, picked at run time by scale
 ```
 
 Each variant's `kind` and `scale` are read from its `io.json`; all variants must share the kind and have distinct
-scales and simple directory names. A package without `package.json` is a single model package (RIFE).
+scales and simple directory names, and the same `used_for` in their `model.json`.
+A package without `package.json` is a single model package (RIFE).
 `source.json` of a model may list several variants; the fetch scripts convert each and bundle them.
 
 ## Not supported (converter fails)

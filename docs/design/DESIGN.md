@@ -77,6 +77,7 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   "api": 1,
   "id": "io.github.tqk2811.gaussian-blur",
   "name": "Gaussian Blur",
+  "used_for": ["gpufx"],
   "inputs": [{ "name": "src" }],
   "params": [{ "name": "radius", "type": "float", "default": 6, "min": 0, "max": 48 }],
   "groups": [

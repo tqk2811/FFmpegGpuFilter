@@ -37,6 +37,7 @@ scripts/pack-effects.sh --check -o out my-fx    # biên dịch shader trên GPU 
 | `api` | số | không (1) | Phiên bản định dạng. Cần `2` cho texture mảng, `mipmaps`, `premultiply`, tham số `expr`, input `repeat` và `output.size` khác `first`; gói không dùng các trường này giữ `1` và chạy như cũ. Runtime cũ hơn gói sẽ báo `unsupported manifest api 2` |
 | `id` | chuỗi | có | Định danh dạng reverse-DNS |
 | `name` | chuỗi | có | Tên hiển thị |
+| `used_for` | mảng | có | Các filter FFmpeg dùng package này: effect ghi `["gpufx"]`. Mảng rỗng hoặc tên lạ (tên hợp lệ: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) thì không load được; filter `gpufx` từ chối package mà danh sách không có `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | chuỗi | không | |
 | `inputs` | mảng | không (`[{"name":"src"}]`) | Các video input, theo thứ tự pad của filter, kèm quy tắc (xem bên dưới) |
 | `output` | `{formats, size}` | không (`rgba` và mọi format chuyển trên GPU; kích thước input đầu) | Pixel format output được phép và kích thước output |
@@ -199,6 +200,8 @@ Các khoá của `requires` (bỏ qua = `"*"`):
 {
   "id": "io.github.tqk2811.glow",
   "name": "Glow",
+  "used_for": ["gpufx"],
+
   "inputs": [{ "name": "src" }],
   "params": [{ "name": "radius", "type": "float", "default": 8, "min": 0, "max": 64 }],
   "groups": [

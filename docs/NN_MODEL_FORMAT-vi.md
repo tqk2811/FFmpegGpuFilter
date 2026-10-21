@@ -6,12 +6,14 @@ Package `gpufx-nn` là một graph inference nhỏ kèm weights, chạy bằng r
 không cần ncnn, ONNX hay runtime nào khác). `gpufx-nnconv` tạo nó offline từ model ncnn:
 
 ```
-gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> \
+gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> --used-for <filter>[,<filter>] \
                   [--license <file>] [--readme <file>] [--name <name>] -o <out.zip|out_dir>
 ```
 
 `-o` kết thúc bằng `.zip` thì ghi zip, còn lại ghi thư mục có cùng các file. Mặc định tên model là tên file output
-(bỏ đuôi). File model không nằm trong git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` tải các model
+(bỏ đuôi). `--used-for` (bắt buộc) được ghi vào `used_for` của `model.json`: `gpufx_ai_upscale` cho model
+`super_resolution`, `gpufx_ai_framerate` cho model `frame_interp` (đối chiếu với `kind` của `io.json`). Mỗi
+`models/*/source.json` có `"used_for"` riêng, script fetch truyền tiếp cho converter. File model không nằm trong git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` tải các model
 liệt kê trong `models/*/source.json` (URL ghim commit, kiểm sha256) vào `build/models/<name>/` rồi convert thành
 `build/models/<name>.zip`.
 
@@ -42,13 +44,19 @@ không op nào đọc.
 ## model.json (version 1)
 
 ```json
-{ "format": "gpufx-nn", "version": 1, "name": "rife-v4.6",
+{ "format": "gpufx-nn", "version": 1, "name": "rife-v4.6", "used_for": ["gpufx_ai_framerate"],
   "source": { "kind": "ncnn" },
   "weights": { "file": "weights.bin" },
   "inputs": [ { "name": "in0" }, { "name": "in1" }, { "name": "in2" } ],
   "outputs": [ "out0" ],
   "ops": [ { "op": "conv2d", "name": "convrelu_0", "inputs": ["18"], "output": "20", "...": "params" } ] }
 ```
+
+`used_for` (bắt buộc) liệt kê các filter FFmpeg dùng model: `gpufx_ai_upscale`, `gpufx_ai_framerate`. Thiếu, mảng
+rỗng hoặc tên lạ thì không load được. Mỗi filter kiểm tên của chính nó có trong danh sách
+(`package rife-v4.6 is for gpufx_ai_framerate, not gpufx_ai_upscale`); đưa package effect cho filter AI, hoặc model
+cho `gpufx`, thì lỗi nói rõ đó là loại package gì và filter nào dùng được. Package convert từ trước khi có
+`used_for` phải convert lại.
 
 Các op theo thứ tự thực thi; mỗi op có `op`, `name` (tên layer ncnn), `inputs`, một `output` và tham số theo loại.
 Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
@@ -135,9 +143,9 @@ Bundle chứa nhiều biến thể của cùng một họ model, lúc chạy ch�
   "variants": [ { "scale": 2, "dir": "x2" }, { "scale": 3, "dir": "x3" }, { "scale": 4, "dir": "x4" } ] }
 ```
 
-`kind` và `scale` của từng biến thể đọc từ `io.json` của nó; mọi biến thể phải cùng kind, khác scale và tên thư
-mục là tên đơn. Package không có `package.json` là package một model (RIFE). `source.json` của model có thể liệt
-kê nhiều biến thể; script fetch convert từng cái rồi gộp thành bundle.
+`kind` và `scale` của từng biến thể đọc từ `io.json` của nó; mọi biến thể phải cùng kind, cùng `used_for` trong
+`model.json`, khác scale và tên thư mục là tên đơn. Package không có `package.json` là package một model (RIFE).
+`source.json` của model có thể liệt kê nhiều biến thể; script fetch convert từng cái rồi gộp thành bundle.
 
 ## Chưa hỗ trợ (converter báo lỗi)
 
