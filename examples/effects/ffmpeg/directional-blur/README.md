@@ -2,7 +2,7 @@
 
 Gaussian blur along a straight line at a given angle.
 
-Port of FFmpeg's `dblur`.
+Approximation of FFmpeg's `dblur` (different algorithm, similar look).
 
 ## Inputs
 

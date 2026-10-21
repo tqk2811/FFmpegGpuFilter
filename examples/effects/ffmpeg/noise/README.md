@@ -2,7 +2,7 @@
 
 Adds gaussian or uniform noise, static or changing every frame.
 
-Port of FFmpeg's `noise`.
+Approximation of FFmpeg's `noise` (different algorithm, similar look).
 
 ## Inputs
 
@@ -51,7 +51,7 @@ gpufx run 'noise.zip=strength=30&temporal=1' -i in.png -o out.png
 
 ## Notes
 
-One pass; the noise is a hash of the pixel position, the seed and, with `temporal=1`, the frame number of the filter (`globals.frame`, which restarts on a seek, so a seek changes the noise of a temporal grain; for a seed that follows the time of the clip drive `seed` with an expression in `t`). Gaussian noise has the standard deviation `strength / sqrt(3)` levels and uniform noise spans `strength` levels, as in FFmpeg.
+One pass; the noise is a hash of the pixel position, the seed and, with `temporal=1`, the timestamp of the frame (`globals.time_int` / `time_frac`, in milliseconds, so the same time gives the same noise even after a seek). This is an approximation of FFmpeg's `noise` (different random generator, similar look), not an exact port. Gaussian noise has the standard deviation `strength / sqrt(3)` levels and uniform noise spans `strength` levels, as in FFmpeg.
 
 Differences from FFmpeg:
 

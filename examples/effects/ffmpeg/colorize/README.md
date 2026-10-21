@@ -26,6 +26,8 @@ Written inline after the package name: `colorize.zip=name=value`. Several option
 
 Port of FFmpeg's `colorize`: the chroma planes are set to those of the HSL color and the luma is `lerp(color luma, source luma, mix)`.
 
+The 219/255 and 224/255 factors match FFmpeg on full-range input; limited-range video differs more (chroma about 12% weaker).
+
 Differences: FFmpeg works in the YUV planes of the input; here the math is done in full-range BT.709 on the RGB values, with FFmpeg's 219/255 and 224/255 factors on the color's Y, U and V. Compared with FFmpeg on full-range BT.709 YUV input the result differs by a few levels at most.
 
 ## Example

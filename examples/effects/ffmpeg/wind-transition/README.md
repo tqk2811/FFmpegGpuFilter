@@ -44,4 +44,4 @@ Still pictures with the CLI:
 
 ## Notes
 
-Port of FFmpeg's `xfade` transition `hlwind` (`direction=0`), `hrwind` (1), `vuwind` (2) and `vdwind` (3). The random offset is FFmpeg's `fract(sin(x * 12.9898 + y * 78.233) * 43758.545)`: per row for the horizontal winds (`x` = 0) and per column for the vertical ones (`y` = 0), so it is the same for every frame. GPUs compute `sin` less precisely than a CPU for large arguments, so the ragged edge can differ from FFmpeg's.
+Port of FFmpeg's `xfade` transition `hlwind` (`direction=0`), `hrwind` (1), `vuwind` (2) and `vdwind` (3). The random offset is FFmpeg's `fract(sin(x * 12.9898 + y * 78.233) * 43758.545)`: per row for the horizontal winds (`x` = 0) and per column for the vertical ones (`y` = 0), so it is the same for every frame. GPUs compute `sin` less precisely than a CPU for large arguments, so the ragged edge can differ from FFmpeg's. The pattern takes `sin` of large arguments, so it can also differ between GPUs and backends.

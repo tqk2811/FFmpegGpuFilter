@@ -34,8 +34,8 @@ fn preservel(c: vec3f, l_in: f32) -> vec3f {
         h += 360.0;
     }
     var s = 0.0;
-    if (!(mx == 1.0 || mn == 0.0)) {
-        s = (mx - mn) / (1.0 - abs(2.0 * l - 1.0));
+    if (!(mx == 1.0 || mn == 0.0) && l > 0.0 && l < 1.0) {
+        s = (mx - mn) / max(1.0 - abs(2.0 * l - 1.0), 1e-6);
     }
     return vec3f(hfun(0.0, h, s, l), hfun(8.0, h, s, l), hfun(4.0, h, s, l));
 }

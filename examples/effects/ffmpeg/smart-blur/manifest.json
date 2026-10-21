@@ -17,8 +17,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/smartblur_h.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/smartblur_v.wgsl", "inputs": ["tmp", "src"], "output": "out" }
+        { "shader": "shaders/smartblur.wgsl", "inputs": ["src"], "output": "out" }
       ]
     }
   ]

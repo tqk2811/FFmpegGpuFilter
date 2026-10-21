@@ -8,18 +8,22 @@ const dither = array<u32, 64>(
     0x14u, 0x74u, 0x0Cu, 0x6Cu, 0x12u, 0x72u, 0x0Au, 0x6Au,
     0x54u, 0x34u, 0x4Cu, 0x2Cu, 0x52u, 0x32u, 0x4Au, 0x2Au);
 
-// Pass 2: vertical box average gives the local gradient; pixels near it move towards it, then ordered dither.
+// Single pass: r x r box average in float (r = radius rounded down to even, FFmpeg's r x r window) gives the
+// local gradient; pixels near it move towards it, then ordered dither.
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
     if (!gpufx_in_bounds(id)) { return; }
     let size = vec2i(textureDimensions(src));
     let p = vec2i(id.xy);
-    let r = params.radius;
+    let r = (params.radius / 2) * 2;
+    let h = r / 2;
     var sum = vec3f(0.0);
-    for (var j = -r; j <= r; j++) {
-        sum += textureLoad(tmp, clamp(p + vec2i(0, j), vec2i(0), size - 1), 0).rgb;
+    for (var j = -h; j < h; j++) {
+        for (var i = -h; i < h; i++) {
+            sum += textureLoad(src, clamp(p + vec2i(i, j), vec2i(0), size - 1), 0).rgb;
+        }
     }
-    let dc = sum / f32(2 * r + 1);
+    let dc = sum / f32(r * r);
     let s = textureLoad(src, p, 0);
     let delta = dc - s.rgb;
     // FFmpeg works in 1/128 of a level: m = max(0, 127 - |delta| / (2 * strength)), weight = m * m / 16384

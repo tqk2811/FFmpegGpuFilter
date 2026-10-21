@@ -13,8 +13,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/gradfun_h.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/gradfun_v.wgsl", "inputs": ["tmp", "src"], "output": "out" }
+        { "shader": "shaders/gradfun.wgsl", "inputs": ["src"], "output": "out" }
       ]
     }
   ]

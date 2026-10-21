@@ -41,7 +41,8 @@ fn plane(orig: f32, blur: f32, strength: f32, thr: f32) -> f32 {
     return filtered;
 }
 
-// Pass 2: vertical gaussian of the pass-1 result, then strength and threshold against the original.
+// Single pass: 2D gaussian (sigma = radius, separable weights, 3 sigma each side) of luma and chroma in float,
+// then strength and threshold against the original.
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
     if (!gpufx_in_bounds(id)) { return; }
@@ -54,16 +55,22 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     var luma = 0.0;
     var wl = 0.0;
     for (var j = -rl; j <= rl; j++) {
-        let k = gw(j, sl);
-        luma += k * textureLoad(tmp, clamp(p + vec2i(0, j), vec2i(0), size - 1), 0).x;
-        wl += k;
+        let kj = gw(j, sl);
+        for (var i = -rl; i <= rl; i++) {
+            let k = kj * gw(i, sl);
+            luma += k * ld(p + vec2i(i, j), size).x;
+            wl += k;
+        }
     }
     var chroma = vec2f(0.0);
     var wc = 0.0;
     for (var j = -rc; j <= rc; j++) {
-        let k = gw(j, sc);
-        chroma += k * (textureLoad(tmp, clamp(p + vec2i(0, j), vec2i(0), size - 1), 0).yz - 0.5);
-        wc += k;
+        let kj = gw(j, sc);
+        for (var i = -rc; i <= rc; i++) {
+            let k = kj * gw(i, sc);
+            chroma += k * ld(p + vec2i(i, j), size).yz;
+            wc += k;
+        }
     }
     let s = textureLoad(src, p, 0);
     let c = to_ycc(s.rgb);

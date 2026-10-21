@@ -51,7 +51,7 @@ gpufx run 'smart-blur.zip=luma_radius=2&luma_threshold=10' -i in.png -o out.png
 
 ## Notes
 
-Two passes (horizontal, then vertical gaussian with sigma = radius, up to 3 sigma on each side) through an intermediate texture; the second pass applies strength and threshold against the original, with the same rules as FFmpeg.
+One pass (2D gaussian with sigma = radius, up to 3 sigma on each side, in float, no intermediate texture; cost grows with the square of the radius); it applies strength and threshold against the original, with the same rules as FFmpeg.
 
 Differences from FFmpeg:
 

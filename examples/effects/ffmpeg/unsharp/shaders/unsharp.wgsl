@@ -13,23 +13,30 @@ fn ld(p: vec2i, size: vec2i) -> vec3f {
     return to_ycc(textureLoad(src, clamp(p, vec2i(0), size - 1), 0).rgb);
 }
 
-// Pass 2: vertical box average of the pass-1 result, then out = c + (c - blurred) * amount per plane.
+// Single pass: 2D box average of luma (luma_msize_x/y) and chroma (chroma_msize_x/y) in float,
+// then out = c + (c - blurred) * amount per plane.
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
     if (!gpufx_in_bounds(id)) { return; }
     let size = vec2i(textureDimensions(src));
     let p = vec2i(id.xy);
-    let vl = params.luma_msize_y / 2;
-    let vc = params.chroma_msize_y / 2;
+    let hlx = params.luma_msize_x / 2;
+    let hly = params.luma_msize_y / 2;
+    let hcx = params.chroma_msize_x / 2;
+    let hcy = params.chroma_msize_y / 2;
     var luma = 0.0;
-    for (var j = -vl; j <= vl; j++) {
-        luma += textureLoad(tmp, clamp(p + vec2i(0, j), vec2i(0), size - 1), 0).x;
+    for (var j = -hly; j <= hly; j++) {
+        for (var i = -hlx; i <= hlx; i++) {
+            luma += ld(p + vec2i(i, j), size).x;
+        }
     }
     var chroma = vec2f(0.0);
-    for (var j = -vc; j <= vc; j++) {
-        chroma += textureLoad(tmp, clamp(p + vec2i(0, j), vec2i(0), size - 1), 0).yz - 0.5;
+    for (var j = -hcy; j <= hcy; j++) {
+        for (var i = -hcx; i <= hcx; i++) {
+            chroma += ld(p + vec2i(i, j), size).yz;
+        }
     }
-    let blur = vec3f(luma / f32(2 * vl + 1), chroma / f32(2 * vc + 1));
+    let blur = vec3f(luma / f32((2 * hlx + 1) * (2 * hly + 1)), chroma / f32((2 * hcx + 1) * (2 * hcy + 1)));
     let s = textureLoad(src, p, 0);
     let c = to_ycc(s.rgb);
     let amount = vec3f(params.luma_amount, params.chroma_amount, params.chroma_amount);

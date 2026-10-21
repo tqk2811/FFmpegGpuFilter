@@ -47,12 +47,11 @@ gpufx run 'gradfun.zip=strength=1.5&radius=24' -i in.png -o out.png
 
 ## Notes
 
-Two passes (horizontal, then vertical box average) through an intermediate texture. A pixel near the local average is pulled to it, with a weight that falls to 0 at `strength` levels; the same 8x8 ordered dither as FFmpeg is added.
+One pass: an r x r box average in float (r = radius rounded down to even, as in FFmpeg), so the cost is O(r^2) per pixel. A pixel near the local average is pulled to it, with a weight that falls to 0 at `strength` levels; the same 8x8 ordered dither as FFmpeg is added.
 
 Differences from FFmpeg:
 
-- FFmpeg averages 2x2 blocks into a half resolution buffer; this port averages a full-resolution box of 2 * radius + 1 pixels, which is close to FFmpeg's box of about 2 * radius pixels.
+- FFmpeg averages 2x2 blocks into a half resolution buffer; this port averages the full-resolution r x r box directly (r = radius rounded down to even, offsets -r/2 .. r/2-1).
 - The filter runs on R, G and B instead of the YUV planes. The alpha channel is passed through unchanged.
 - The dither is centred (about half a level is subtracted) because the shader output is rounded to a level and FFmpeg's is truncated.
-- The 8-bit intermediate texture limits the precision of the average on 8-bit video (the texture is 16-bit float for 10-bit video).
 - gradfun and `deband` are separate effects: they share the goal but not the method (gradient fit with dither versus random-point averaging).

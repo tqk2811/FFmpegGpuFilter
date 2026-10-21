@@ -524,6 +524,11 @@ Các ví dụ nằm trong ba thư mục nhóm dưới `examples/effects/`: `ffmp
 | `examples/effects/ffmpeg/hstack`, `examples/effects/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `output.size` `hstack`/`vstack`, output lớn hơn input |
 | `examples/effects/ffmpeg/crossfade`, `examples/effects/ffmpeg/slide-transition`, `examples/effects/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
 | `examples/effects/ffmpeg/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
+| `examples/effects/ffmpeg/blend` | 2 input, tham số `int` `mode` chọn 1 trong 40 công thức |
+| `examples/effects/ffmpeg/masked-merge` | 3 input (nền, lớp phủ, mask) với **quy tắc** `same_size` |
+| `examples/effects/ffmpeg/selectivecolor` | Tham số `vec4` |
+| `examples/effects/ffmpeg/box-blur` | 6 pass; các vòng vượt `power` chép nguyên input sang output |
+| `examples/effects/ffmpeg/displace` | 3 input, 2 trong số đó làm bản đồ dịch chuyển |
 | `examples/effects/slideshow/collapse`, `examples/effects/slideshow/expand` | Clip đầu thu vào giữa / clip sau nở ra từ giữa: theo chiều ngang, chiều dọc, hộp, hình tròn (`mode`) |
 | `examples/effects/ffmpeg/dip-to-color` | Tối dần về một màu (mặc định đen) rồi hiện clip sau |
 | `examples/effects/ffmpeg/dissolve` | Hạt ngẫu nhiên (hash số nguyên, giống nhau trên mọi GPU) |

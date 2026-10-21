@@ -55,5 +55,5 @@ One pass. Each pixel gets its own offset from a hash of its position, as in FFmp
 Differences from FFmpeg:
 
 - One `threshold` for R, G and B instead of `1thr`..`4thr` per YUV plane; the comparison is done on RGB. The alpha channel is passed through unchanged.
-- The hash uses a float `sin` as FFmpeg does, so the offsets can differ by a pixel on some GPUs.
+- The hash uses a float `sin` as FFmpeg does, so the offsets can differ by a pixel on some GPUs. The random pattern uses `sin` of large arguments, so it can differ between GPUs/backends, not just from FFmpeg.
 - The related `gradfun` filter is a separate effect (`gradfun`): it fits a smooth gradient instead of averaging four points.
