@@ -11,7 +11,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
     // FFmpeg turns the hue option into radians; a negative component means "use the pixel's own value"
     let hue_opt = params.hue;
-    let hue_key = select(1.0, -1.0, hue_opt < 0.0) * PI * ((526.0 - abs(hue_opt)) % 360.0) / 180.0;
+    let hue_key = select(-1.0, 1.0, hue_opt > 0.0) * PI * ((526.0 - abs(hue_opt)) % 360.0) / 180.0;
     let sat_key = params.sat;
     let val_key = params.val;
 

@@ -532,6 +532,11 @@ The examples live in three group folders under `examples/effects/`: `ffmpeg/` (e
 | `examples/effects/ffmpeg/hstack`, `examples/effects/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and `output.size` `hstack`/`vstack`, an output larger than the inputs |
 | `examples/effects/ffmpeg/crossfade`, `examples/effects/ffmpeg/slide-transition`, `examples/effects/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
 | `examples/effects/ffmpeg/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
+| `examples/effects/ffmpeg/blend` | 2 inputs, an `int` `mode` choosing one of 40 formulas |
+| `examples/effects/ffmpeg/masked-merge` | 3 inputs (base, overlay, mask) with the `same_size` **rule** |
+| `examples/effects/ffmpeg/selectivecolor` | `vec4` parameters |
+| `examples/effects/ffmpeg/box-blur` | 6 passes; rounds above `power` copy their input through |
+| `examples/effects/ffmpeg/displace` | 3 inputs, two of them used as displacement maps |
 | `examples/effects/slideshow/collapse`, `examples/effects/slideshow/expand` | The first clip shrinks into the center / the second clip grows out of the center: horizontal, vertical, box, circle (`mode`) |
 | `examples/effects/ffmpeg/dip-to-color` | Fade to a color (black by default), then reveal the second clip |
 | `examples/effects/ffmpeg/dissolve` | Random particles (integer hash, identical on every GPU) |

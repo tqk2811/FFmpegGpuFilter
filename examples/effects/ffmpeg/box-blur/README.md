@@ -54,4 +54,4 @@ Differences from FFmpeg:
 
 - The same radius and power apply to the colour channels and the alpha channel (FFmpeg has separate `chroma_*` and `alpha_*` options and works per YUV plane); the blur runs on RGBA.
 - The radius is an integer in pixels, capped at 64 (FFmpeg's `boxblur` takes an expression and `avgblur` goes to 1024). Use a value that changes with time through the usual FFmpeg expression in the option.
-- Pixels outside the picture repeat the edge pixel.
+- Pixels outside the picture clamp to the edge pixel, where FFmpeg mirrors.

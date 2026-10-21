@@ -12,7 +12,10 @@ fn rnd(key: u32, k: u32) -> f32 {
 fn noise_at(x: u32, y: u32, ch: u32) -> f32 {
     let s = f32(params.strength);
     var frame = 0u;
-    if (params.temporal != 0u) { frame = globals.frame; }
+    if (params.temporal != 0u) {
+        // stable per timestamp (globals.frame restarts on seek): time in 1/1000 s
+        frame = u32(globals.time_int * 1000 + i32(floor(globals.time_frac * 1000.0)));
+    }
     let key = hash(x + hash(y + hash(u32(params.seed) + hash(ch * 31415u + frame * 2654435u))));
     let patt = array<f32, 4>(-1.0, 0.0, 1.0, 0.0)[(x + 2u * y) & 3u];
     var n = 0.0;

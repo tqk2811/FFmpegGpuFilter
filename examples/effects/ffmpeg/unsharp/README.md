@@ -51,7 +51,7 @@ gpufx run 'unsharp.zip=luma_amount=1.5' -i in.png -o out.png
 
 ## Notes
 
-Two passes (horizontal, then vertical box average) through an intermediate texture. The effect separates the picture into luma and chroma (BT.709), as FFmpeg's planes, and the result is `c + (c - blurred) * amount`. The existing `sharpen` effect is a simpler fixed 3x3 mask.
+One pass (a 2D box average in float, no intermediate texture). The effect separates the picture into luma and chroma (BT.709), as FFmpeg's planes, and the result is `c + (c - blurred) * amount`. The existing `sharpen` effect is a simpler fixed 3x3 mask.
 
 Differences from FFmpeg:
 

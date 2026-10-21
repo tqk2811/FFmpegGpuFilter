@@ -43,4 +43,4 @@ Still pictures with the CLI:
 
 ## Notes
 
-Port of FFmpeg's `xfade` transition `hblur`. The box is `1 + width / 2 * k` pixels wide, where `k` rises from 0 to 1 at `progress` 0.5 and falls back to 0, and it reaches to the right of the pixel only (shortened at the right edge), as in FFmpeg. The cost per pixel grows with the width of the box.
+Port of FFmpeg's `xfade` transition `hblur`. The box is `1 + width / 2 * k` pixels wide, where `k` rises from 0 to 1 at `progress` 0.5 and falls back to 0, and it reaches to the right of the pixel only (shortened at the right edge), as in FFmpeg. The cost per pixel grows with the width of the box: up to width / 2 taps per pixel at progress 0.5, so on 4K it may be slow enough to hit a GPU timeout.

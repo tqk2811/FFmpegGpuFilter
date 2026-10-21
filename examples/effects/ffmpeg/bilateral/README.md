@@ -2,7 +2,7 @@
 
 Edge-preserving smoothing: neighbours are weighted by distance and by luma difference.
 
-Port of FFmpeg's `bilateral`.
+Approximation of FFmpeg's `bilateral` (different algorithm, similar look).
 
 ## Inputs
 
@@ -53,3 +53,5 @@ Differences from FFmpeg:
 
 - FFmpeg approximates the filter with a recursive (separable) implementation that has no window limit and takes `sigmaS` up to 512; this port sums the window directly, hence `sigmaS` is limited to 8 (a 16 pixel radius). Results are close but not identical.
 - The range weight uses the luma difference and the same weight applies to R, G, B and alpha; FFmpeg filters the planes selected by `planes` (default: luma only) independently, which is not ported.
+- This port filters R, G, B and A all; FFmpeg with the default `planes=1` filters the first plane only.
+- The brute-force window is cut at 2 sigma, where FFmpeg uses a recursive filter without a window limit; `sigmaS` is capped at 8 (FFmpeg 512). So the result is an approximation.

@@ -117,7 +117,7 @@ fn transitions_start_on_the_first_clip_and_end_on_the_second() {
         }
         checked += 1;
     }
-    assert!(checked >= 17, "only {checked} transitions found");
+    assert!(checked >= 31, "only {checked} transitions found");
 }
 
 /// The modes that the endpoint test above does not reach (it runs the defaults only):

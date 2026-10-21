@@ -141,6 +141,36 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: giống demo hơn và tránh giật ở chỗ nối. Sửa xong chấm lại bằng `scripts/capcut-compare.py`.
 - **Ngày ghi**: 2026-10-17
 
+### [Vừa] `hblur-transition` đọc tới width/2 pixel mỗi điểm ảnh
+- **Vấn đề**: ở progress 0.5 trên 4K mỗi pixel đọc ~1920 lần mỗi texture (~32 G lần đọc một frame), dễ chạm GPU timeout (TDR) trên D3D12/Windows.
+- **Vị trí**: [hblur_transition.wgsl](../examples/effects/ffmpeg/hblur-transition/shaders/hblur_transition.wgsl)
+- **Vì sao**: nên tính tổng theo hàng bằng prefix-sum hoặc shared memory để chi phí không phụ thuộc progress; cần texture trung gian float (xem mục `tmp` 8-bit dưới).
+- **Ngày ghi**: 2026-10-21
+
+### [Thấp] Texture trung gian `tmp` chỉ 8-bit với video 8-bit
+- **Vấn đề**: pass trung gian ghi `rgba8unorm` khi input/output 8-bit, nên filter cần độ chính xác giữa các pass (gradfun, unsharp, smart-blur) phải gộp về một pass 2D tốn hơn bản tách hàng/cột.
+- **Vị trí**: [EFFECT_FORMAT.md:118](EFFECT_FORMAT.md#L118); các gói `examples/effects/ffmpeg/{gradfun,unsharp,smart-blur}`
+- **Vì sao**: manifest nên cho pass/texture khai báo `rgba16float`, rồi tách lại các filter trên thành 2 pass.
+- **Ngày ghi**: 2026-10-21
+
+### [Thấp] Effect port FFmpeg: test chỉ chạy tham số mặc định
+- **Vấn đề**: `every_example_compiles_and_runs` chỉ chạy tham số mặc định, mà nhiều gói mặc định là no-op (colorbalance, curves preset 0...). Các nhánh `mode`/`direction`/`corner`/`shape`/`preset`/bool khác mặc định chưa từng chạy; lỗi NaN của colorbalance `pl` và lệch mặc định của hsv-key chỉ được review bắt.
+- **Vị trí**: [effects.rs:61](../crates/gpufx-core/tests/effects.rs#L61); các gói `examples/effects/ffmpeg/*`
+- **Vì sao**: nên có smoke test cho từng giá trị enum/bool, và vài bài so pixel với giá trị tính tay từ công thức C của FFmpeg.
+- **Ngày ghi**: 2026-10-21
+
+### [Thấp] Filter FFmpeg chưa port sang gpufx
+- **Vấn đề**: chưa có: lut3d/haldclut (gói chỉ chứa ảnh cố định, không nhận file LUT lúc chạy), filter temporal (atadenoise, hqdn3d, lagfun, tmix...), edge kirsch/canny, convolution theo hàng/cột và ma trận theo plane, fillborders `margins`, colorhold/hsvhold, danh sách điểm của curves và `psfile`, biểu thức `c0..c3` của pseudocolor, colorlevels auto (giá trị âm), maskedclamp/maskedthreshold.
+- **Vị trí**: `examples/effects/ffmpeg/`
+- **Vì sao**: phủ thêm filter gốc FFmpeg cho gói zip; vài mục cần tính năng mới của định dạng effect (input LUT, frame trước).
+- **Ngày ghi**: 2026-10-21
+
+### [Thấp] Effect port FFmpeg: các finding review để sau
+- **Vấn đề**: (1) blend/masked-merge/masked-minmax lấy alpha của input đầu, tính trên RGB thay vì plane YUV. (2) distance-transition đo khác màu trên YUV BT.601 quy đổi, bỏ alpha. (3) perspective dựng ma trận bằng f32 mỗi pixel (méo nhiều thì lệch ~1 px), tứ giác suy biến ra NaN. (4) displace dùng luma của map cho mọi kênh. (5) colorchannelmixer: ngưỡng `lout` 1/510 lệch 255 lần so với FFmpeg, case pwr dùng `pow(abs)` mất dấu thay `cbrt`. (6) huesaturation dựng ma trận 4x4 và curves giải spline mỗi pixel, nên tính sẵn khi đổi tham số. (7) chroma-shift/hsv-key/luma-key cố định BT.709 full-range.
+- **Vị trí**: các gói tương ứng trong `examples/effects/ffmpeg/`
+- **Vì sao**: chỉ lệch nhỏ so với FFmpeg hoặc tốn hiệu năng; README đã ghi phần lớn.
+- **Ngày ghi**: 2026-10-21
+
 ### [Thấp] Test box-in chưa phủ direction 1 và 3
 - **Vấn đề**: test chỉ thử `direction` 0 và 2; đảo dấu riêng ở nhánh 1/3 không bị bắt.
 - **Vị trí**: [crates/gpufx-core/tests/effects.rs](../crates/gpufx-core/tests/effects.rs) (`transition_modes_have_clean_endpoints_and_their_own_midpoint`), [box_in.wgsl](../examples/effects/slideshow/box-in/shaders/box_in.wgsl).

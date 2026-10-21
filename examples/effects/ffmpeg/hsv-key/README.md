@@ -16,7 +16,7 @@ Written inline after the package name: `hsv-key.zip=name=value`. Several options
 
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
-| `hue` | float | `0` | -360 to 360 | Key hue in degrees; a negative value ignores the hue |
+| `hue` | float | `0` | -360 to 360 | Key hue in degrees; zero or a negative value ignores the hue |
 | `sat` | float | `0` | -1 to 1 | Key saturation; a negative value ignores the saturation |
 | `val` | float | `0` | -1 to 1 | Key value (brightness); a negative value ignores the value |
 | `similarity` | float | `0.01` | 0.00001 to 1 | Distance from the key that becomes transparent |

@@ -49,4 +49,4 @@ gpufx run 'shear.zip=shx=0.3:shy=0' -i in.png -o out.png
 
 ## Notes
 
-Port of FFmpeg's `shear` filter (`fillcolor` is also `c` there). Differences: `fillcolor` is an RGBA color (alpha is written to the output, FFmpeg fills with the color in the stream's format); the shear is computed on the full-resolution picture, FFmpeg shears each plane at its own resolution.
+Port of FFmpeg's `shear` filter (`fillcolor` is also `c` there). Differences: `fillcolor` is an RGBA color (alpha is written to the output, FFmpeg fills with the color in the stream's format); the shear is computed on the full-resolution picture, FFmpeg shears each plane at its own resolution.  Like FFmpeg, the last column and the last row are always `fillcolor`, even with `shx=shy=0`.

@@ -51,4 +51,4 @@ gpufx run 'perspective.zip=top_left=0.1,0.05:top_right=0.9,0:bottom_left=0,1:bot
 
 ## Notes
 
-Port of FFmpeg's `perspective` filter. Differences: the corners are `vec2` parameters in 0..1 of the frame instead of pixel expressions `x0`..`y3` (multiply by `w`/`h` in an FFmpeg expression for pixels, for example `top_left=40/w,20/h`); there is no `eval` option, a parameter that is an expression is already evaluated per frame; interpolation is done in floating point on the GPU (FFmpeg uses 1/16 pixel steps and integer weights). Pixels that map outside the source repeat the edge, as in FFmpeg.
+Port of FFmpeg's `perspective` filter. Differences: the corners are `vec2` parameters in 0..1 of the frame instead of pixel expressions `x0`..`y3` (multiply by `w`/`h` in an FFmpeg expression for pixels, for example `top_left=40/w,20/h`); there is no `eval` option, a parameter that is an expression is already evaluated per frame; interpolation is done in floating point on the GPU (FFmpeg uses 1/256 pixel steps (SUB_PIXEL_BITS 8) and integer weights). Pixels that map outside the source repeat the edge, as in FFmpeg.

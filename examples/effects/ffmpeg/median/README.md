@@ -2,7 +2,7 @@
 
 Median (or any percentile) filter over a rectangular window, per channel.
 
-Port of FFmpeg's `median`.
+Approximation of FFmpeg's `median` (different algorithm, similar look).
 
 ## Inputs
 
@@ -48,7 +48,7 @@ gpufx run 'median.zip=radius=2' -i in.png -o out.png
 
 ## Notes
 
-One pass; the 11x11 window at most is read once, then each channel (R, G, B, A) is ranked by bisecting the value (12 steps) and snapping to the largest sample below it, which gives the exact sample value.
+One pass; the 11x11 window at most is read once, then each channel (R, G, B, A) is ranked by a 12-step binary search on the value (1/4096 precision; values above 1 are not handled) and snapping to the largest sample below it, which approximates the exact sample value.
 
 Differences from FFmpeg:
 
