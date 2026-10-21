@@ -1,0 +1,86 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.lutyuv",
+  "name": "LUT YUV",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Look-up by expression on the luma and chroma channels (BT.709 full range), plus alpha.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "y",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Luma result for the input value `val`, 0..255"
+    },
+    {
+      "name": "u",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Blue-difference chroma result for `val`, 0..255 (128 = neutral)"
+    },
+    {
+      "name": "v",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Red-difference chroma result for `val`, 0..255 (128 = neutral)"
+    },
+    {
+      "name": "a",
+      "type": "expr",
+      "vars": [
+        "val",
+        "maxval",
+        "minval",
+        "negval",
+        "clipval",
+        "w",
+        "h"
+      ],
+      "default": "clipval",
+      "description": "Alpha result for `val`, 0..255"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/lutyuv.wgsl"
+        }
+      ]
+    }
+  ]
+}
