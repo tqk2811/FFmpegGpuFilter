@@ -1,0 +1,76 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.histogram",
+  "name": "Histogram",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Luma, or R, G, B histogram bars (scope).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "display",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "description": "0 luma, 1 red/green/blue overlay (additive colors), 2 red/green/blue parade (three panels side by side)"
+    },
+    {
+      "name": "gain",
+      "type": "float",
+      "default": 1,
+      "min": 0.01,
+      "max": 100,
+      "description": "Bar height factor. Linear: a bin 10x fuller than an even spread reaches the top at 1"
+    },
+    {
+      "name": "log_scale",
+      "type": "bool",
+      "default": false,
+      "description": "Logarithmic bar height"
+    },
+    {
+      "name": "samples",
+      "type": "int",
+      "default": 128,
+      "min": 8,
+      "max": 256,
+      "description": "The histogram is taken from a grid of samples x samples input pixels (bounded cost, whatever the picture size)"
+    },
+    {
+      "name": "opacity",
+      "type": "float",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/count.wgsl",
+          "inputs": [
+            "src"
+          ],
+          "output": "tmp"
+        },
+        {
+          "shader": "shaders/draw.wgsl",
+          "inputs": [
+            "src",
+            "tmp"
+          ],
+          "output": "out"
+        }
+      ]
+    }
+  ]
+}
