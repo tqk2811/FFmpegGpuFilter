@@ -129,7 +129,3 @@ Still pictures with the CLI:
 ```sh
 ./target/release/gpufx run '[0][1]packages/effects/ffmpeg/xfade=transition=wipeleft:progress=0.5' -i a.png -i b.png -o out.png
 ```
-
-## Notes
-
-Single-transition packages of the same FFmpeg code exist with their own parameters (for example `slide-transition`, `smooth-transition`, `open-close-transition`); this package is the full set under FFmpeg's names.
