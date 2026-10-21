@@ -18,6 +18,7 @@ pub mod package;
 pub mod params;
 mod pool;
 mod profile;
+pub mod requires;
 pub mod runtime;
 mod shader_cache;
 mod stage;

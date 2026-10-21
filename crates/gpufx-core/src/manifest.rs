@@ -2,6 +2,7 @@
 
 use serde::Deserialize;
 
+use crate::requires::{Requires, Target};
 use crate::Error;
 
 /// Highest manifest `api` version this runtime understands.
@@ -34,6 +35,27 @@ pub struct Manifest {
     #[serde(default)]
     pub textures: Vec<TextureDef>,
     /// Compute passes, executed in order. The output of the last pass is the effect output.
+    /// Empty in a manifest written with `groups` until it is resolved for a device
+    /// (see [`Manifest::resolve`]).
+    #[serde(default)]
+    pub passes: Vec<PassDef>,
+    /// Alternative pass lists, the first whose `requires` match the device runs. Either
+    /// this or `passes`; empty in a manifest written with `passes`.
+    #[serde(default)]
+    pub groups: Vec<GroupDef>,
+}
+
+/// One alternative pass list of an effect (see [`Manifest::groups`]).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupDef {
+    /// Names the group in errors and `gpufx info`; its index otherwise.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The devices the group runs on. Omitted: any.
+    #[serde(default)]
+    pub requires: Requires,
+    /// Like the top-level `passes`; the last one writes the effect output.
     pub passes: Vec<PassDef>,
 }
 
@@ -432,8 +454,21 @@ impl Manifest {
         if self.inputs.is_empty() {
             return bad("an effect needs at least one input".into());
         }
-        if self.passes.is_empty() {
-            return bad("an effect needs at least one pass".into());
+        if !self.passes.is_empty() && !self.groups.is_empty() {
+            return bad("`passes` and `groups` do not go together: put every pass list in `groups`".into());
+        }
+        if self.passes.is_empty() && self.groups.is_empty() {
+            return bad("an effect needs at least one pass (`passes` or `groups`)".into());
+        }
+        for (g, group) in self.groups.iter().enumerate() {
+            let label = self.group_label(g);
+            if group.passes.is_empty() {
+                return bad(format!("group {label}: a group needs at least one pass"));
+            }
+            if group.name.as_ref().is_some_and(|n| n.is_empty() || self.groups[..g].iter().any(|x| x.name.as_ref() == Some(n))) {
+                return bad(format!("group {g}: empty or duplicate name"));
+            }
+            group.requires.validate().map_err(|e| Error::Manifest(format!("group {label}: {e}")))?;
         }
         let mut names: Vec<&str> = Vec::new();
         let declare = |n: &str, what: &str, names: &mut Vec<&str>| -> Result<(), Error> {
@@ -467,7 +502,7 @@ impl Manifest {
                         i.name, r.min, r.default, r.max
                     ));
                 }
-                if self.passes.iter().any(|p| p.language() == ShaderLanguage::Glsl) {
+                if self.pass_lists().iter().flat_map(|(_, l)| l.iter()).any(|p| p.language() == ShaderLanguage::Glsl) {
                     return bad(format!("input `{}`: repeat is only for WGSL shaders", i.name));
                 }
             }
@@ -530,26 +565,81 @@ impl Manifest {
                 return bad(format!("param `{}`: only an expr has vars", p.name));
             }
         }
-        for (i, pass) in self.passes.iter().enumerate() {
-            for src in pass.inputs.iter().flatten() {
-                if !names.contains(&src.as_str()) {
-                    return bad(format!("pass {i} reads `{src}`, which is not an input, texture or earlier pass output"));
+        for (label, passes) in self.pass_lists() {
+            let mut names = names.clone();
+            let at = |i: usize| match &label {
+                Some(g) => format!("group {g}: pass {i}"),
+                None => format!("pass {i}"),
+            };
+            for (i, pass) in passes.iter().enumerate() {
+                for src in pass.inputs.iter().flatten() {
+                    if !names.contains(&src.as_str()) {
+                        return bad(format!("{} reads `{src}`, which is not an input, texture or earlier pass output", at(i)));
+                    }
                 }
-            }
-            if !is_ident(&pass.output) {
-                return bad(format!("pass {i} output `{}` is not a valid identifier", pass.output));
-            }
-            if pass.inputs.iter().flatten().any(|s| *s == pass.output) {
-                return bad(format!("pass {i} cannot read its own output `{}`", pass.output));
-            }
-            if self.inputs.iter().any(|x| x.name == pass.output) || self.textures.iter().any(|x| x.name == pass.output) {
-                return bad(format!("pass {i} output `{}` shadows an input or texture", pass.output));
-            }
-            if !names.contains(&pass.output.as_str()) {
-                names.push(&pass.output);
+                if !is_ident(&pass.output) {
+                    return bad(format!("{} output `{}` is not a valid identifier", at(i), pass.output));
+                }
+                if pass.inputs.iter().flatten().any(|s| *s == pass.output) {
+                    return bad(format!("{} cannot read its own output `{}`", at(i), pass.output));
+                }
+                if self.inputs.iter().any(|x| x.name == pass.output) || self.textures.iter().any(|x| x.name == pass.output) {
+                    return bad(format!("{} output `{}` shadows an input or texture", at(i), pass.output));
+                }
+                if !names.contains(&pass.output.as_str()) {
+                    names.push(&pass.output);
+                }
             }
         }
         Ok(())
+    }
+
+    /// The pass lists to check: `passes`, or those of every group with its label.
+    fn pass_lists(&self) -> Vec<(Option<String>, &[PassDef])> {
+        if self.groups.is_empty() {
+            return vec![(None, &self.passes)];
+        }
+        self.groups.iter().enumerate().map(|(g, group)| (Some(self.group_label(g)), group.passes.as_slice())).collect()
+    }
+
+    /// The name of group `g`, else its index.
+    pub fn group_label(&self, g: usize) -> String {
+        self.groups[g].name.clone().unwrap_or_else(|| g.to_string())
+    }
+
+    /// The manifest with the passes of group `g` as its `passes` and no groups.
+    pub fn with_group(&self, g: usize) -> Manifest {
+        let mut m = self.clone();
+        m.passes = m.groups.swap_remove(g).passes;
+        m.groups.clear();
+        m
+    }
+
+    /// The manifest for `target`: a manifest written with `passes` as is, else one per
+    /// group whose `requires` match (see [`Manifest::with_group`]), in manifest order, so
+    /// the first is the one that runs. A noop target matches every group of its OS. Fails
+    /// when no group matches, saying why each one does not.
+    pub fn resolve(&self, target: &Target) -> Result<Vec<Manifest>, Error> {
+        if self.groups.is_empty() {
+            return Ok(vec![self.clone()]);
+        }
+        let mut found = Vec::new();
+        let mut why = String::new();
+        for (g, group) in self.groups.iter().enumerate() {
+            match group.requires.rejects(target) {
+                None => found.push(self.with_group(g)),
+                Some(r) => why.push_str(&format!(
+                    "
+  {}: {r}",
+                    self.group_label(g)
+                )),
+            }
+        }
+        if found.is_empty() {
+            let what = if target.is_noop { format!("this OS ({})", target.os) } else { format!("this device ({})", target.describe()) };
+            return Err(Error::Unsupported(format!("effect `{}`: no group matches {what}{why}", self.name)));
+        }
+        Ok(found)
     }
 
     /// Checks input streams against the `inputs` rules (count, pixel format, size).
@@ -614,7 +704,7 @@ impl Manifest {
             let first = m.inputs.is_empty();
             m.inputs.push(InputDef { name: name.clone(), repeat: None, same_size: last.same_size && !first, ..last.clone() });
         }
-        for pass in &mut m.passes {
+        for pass in m.passes.iter_mut().chain(m.groups.iter_mut().flat_map(|g| g.passes.iter_mut())) {
             if let Some(list) = &mut pass.inputs {
                 *list = list.iter().flat_map(|s| if *s == last.name { names.clone() } else { vec![s.clone()] }).collect();
             }
@@ -779,5 +869,113 @@ mod tests {
         assert!(param("enable").unwrap_err().to_string().contains("`enable` is reserved"));
         assert!(param("bypass").unwrap_err().to_string().contains("`bypass` is reserved"));
         assert!(err(3, r#"{"name":"a","path":"x.png","colorspace":"linear"}"#).contains("unsupported manifest api 3"));
+    }
+
+    fn grouped(groups: &str) -> Result<Manifest, Error> {
+        Manifest::parse(format!(r#"{{"id":"t.x","name":"Glow","groups":[{groups}]}}"#).as_bytes())
+    }
+
+    fn target(backend: wgpu::Backend, vendor: u32, name: &str, features: wgpu::Features) -> Target {
+        Target { os: "windows", backend, vendor, name: name.into(), features, coop_f16: false, is_noop: false }
+    }
+
+    const FAST: &str = r#"{"name":"fast","requires":{"backend":["d3d12"],"features":["shader-f16"]},"passes":[{"shader":"d3d12/a.wgsl","output":"x"},{"shader":"b.wgsl","inputs":["x"]}]}"#;
+
+    #[test]
+    fn groups_resolve_to_the_first_match() {
+        let m = grouped(&format!(
+            r#"{FAST},{{"requires":{{"vendor":["nvidia","amd"]}},"passes":[{{"shader":"n.wgsl"}}]}},{{"passes":[{{"shader":"g.wgsl"}}]}}"#
+        ))
+        .unwrap();
+        assert!(m.passes.is_empty() && m.groups.len() == 3);
+        let shaders = |t: &Target| {
+            let r = m.resolve(t).unwrap();
+            assert!(r[0].groups.is_empty());
+            r[0].passes.iter().map(|p| p.shader.clone()).collect::<Vec<_>>()
+        };
+        let f16 = wgpu::Features::SHADER_F16;
+        assert_eq!(shaders(&target(wgpu::Backend::Dx12, 0x8086, "x", f16)), ["d3d12/a.wgsl", "b.wgsl"]);
+        assert_eq!(shaders(&target(wgpu::Backend::Dx12, 0x10DE, "x", wgpu::Features::empty())), ["n.wgsl"]);
+        // Vendor id 0: the adapter name decides.
+        assert_eq!(shaders(&target(wgpu::Backend::Vulkan, 0, "AMD Radeon RX", f16)), ["n.wgsl"]);
+        assert_eq!(shaders(&target(wgpu::Backend::Metal, 0x106B, "Apple M2", f16)), ["g.wgsl"]);
+        assert_eq!(m.resolve(&target(wgpu::Backend::Dx12, 0x10DE, "x", f16)).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn no_matching_group_says_why() {
+        let m = grouped(&format!(
+            r#"{FAST},{{"requires":{{"os":["linux"],"features":["cooperative-matrix-f16"]}},"passes":[{{"shader":"n.wgsl"}}]}}"#
+        ))
+        .unwrap();
+        let err = m.resolve(&target(wgpu::Backend::Metal, 0x106B, "Apple M2", wgpu::Features::empty())).unwrap_err().to_string();
+        assert!(err.contains("effect `Glow`: no group matches this device (Apple M2, metal)"), "{err}");
+        assert!(err.contains("\n  fast: needs backend d3d12; needs feature shader-f16"), "{err}");
+        assert!(err.contains("\n  1: needs os linux; needs feature cooperative-matrix-f16"), "{err}");
+    }
+
+    #[test]
+    fn noop_targets_only_check_the_os() {
+        let m = grouped(&format!(r#"{FAST},{{"requires":{{"os":["linux"]}},"passes":[{{"shader":"n.wgsl"}}]}}"#)).unwrap();
+        let noop =
+            Target { is_noop: true, backend: wgpu::Backend::Noop, ..target(wgpu::Backend::Noop, 0, "noop", wgpu::Features::empty()) };
+        let r = m.resolve(&noop).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].passes[0].shader, "d3d12/a.wgsl");
+        let only_linux = grouped(r#"{"requires":{"os":["linux","macos"]},"passes":[{"shader":"n.wgsl"}]}"#).unwrap();
+        let err = only_linux.resolve(&noop).unwrap_err().to_string();
+        assert!(err.contains("no group matches this OS (windows)\n  0: needs os linux or macos"), "{err}");
+    }
+
+    #[test]
+    fn plain_passes_are_one_group_for_every_device() {
+        let m = manifest(r#"[{"name":"src"}]"#, "").unwrap();
+        assert!(m.groups.is_empty());
+        let r = m.resolve(&target(wgpu::Backend::Gl, 0, "x", wgpu::Features::empty())).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].passes[0].shader, "a.wgsl");
+    }
+
+    #[test]
+    fn invalid_groups_are_manifest_errors() {
+        let err = |g: &str| grouped(g).unwrap_err().to_string();
+        let p = r#""passes":[{"shader":"a.wgsl"}]"#;
+        assert!(err(&format!(r#"{{"requires":{{"backend":"d3d12"}},{p}}}"#)).contains(r#"write "*""#));
+        assert!(err(&format!(r#"{{"requires":{{"backend":["*"]}},{p}}}"#)).contains("stands alone"));
+        assert!(err(&format!(r#"{{"requires":{{"os":[]}},{p}}}"#)).contains("empty list"));
+        assert!(err(&format!(r#"{{"requires":{{"vendor":["apple"]}},{p}}}"#)).contains("unknown value `apple`"));
+        assert!(err(&format!(r#"{{"requires":{{"features":["subgroups"]}},{p}}}"#)).contains("unknown feature `subgroups`"));
+        assert!(err(&format!(r#"{{"requires":{{"features":"*"}},{p}}}"#)).contains("manifest"));
+        assert!(err(&format!(r#"{{"requires":{{"gpu":"*"}},{p}}}"#)).contains("unknown field"));
+        assert!(err(r#"{"name":"a","passes":[]}"#).contains("group a: a group needs at least one pass"));
+        assert!(err(&format!(r#"{{"name":"a",{p}}},{{"name":"a",{p}}}"#)).contains("duplicate name"));
+        assert!(err(r#"{"name":"a","passes":[{"shader":"a.wgsl","inputs":["nope"]}]}"#).contains("group a: pass 0 reads `nope`"));
+        // Every key "*" is fine, and a group need not be named.
+        grouped(&format!(r#"{{"requires":{{"os":"*","backend":"*","vendor":"*","features":[]}},{p}}}"#)).unwrap();
+        // Both or neither of `passes` and `groups`; api 1 may use groups.
+        let both = Manifest::parse(format!(r#"{{"id":"t.x","name":"X",{p},"groups":[{{{p}}}]}}"#).as_bytes()).unwrap_err();
+        assert!(both.to_string().contains("do not go together"), "{both}");
+        let neither = Manifest::parse(br#"{"id":"t.x","name":"X"}"#).unwrap_err();
+        assert!(neither.to_string().contains("at least one pass"), "{neither}");
+        Manifest::parse(format!(r#"{{"api":1,"id":"t.x","name":"X","groups":[{{{p}}}]}}"#).as_bytes()).unwrap();
+        // GLSL in any group rules out a repeated input.
+        let glsl = Manifest::parse(
+            br#"{"api":2,"id":"t.x","name":"X","inputs":[{"name":"s","repeat":{"default":2}}],"groups":[{"passes":[{"shader":"a.wgsl"}]},{"passes":[{"shader":"a.glsl"}]}]}"#,
+        );
+        assert!(glsl.unwrap_err().to_string().contains("only for WGSL"));
+    }
+
+    #[test]
+    fn repeated_inputs_expand_in_every_group() {
+        let m = Manifest::parse(
+            br#"{"api":2,"id":"t.x","name":"X","inputs":[{"name":"a"},{"name":"s","repeat":{"default":2,"max":3}}],
+                "groups":[{"requires":{"backend":["vulkan"]},"passes":[{"shader":"a.wgsl","inputs":["s"]}]},{"passes":[{"shader":"b.wgsl","inputs":["a","s"]}]}]}"#,
+        )
+        .unwrap();
+        let e = m.with_input_count(Some(3)).unwrap();
+        assert_eq!(e.groups[0].passes[0].inputs.as_deref().unwrap(), ["s0", "s1", "s2"]);
+        assert_eq!(e.groups[1].passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
+        let r = e.resolve(&target(wgpu::Backend::Dx12, 0, "x", wgpu::Features::empty())).unwrap();
+        assert_eq!(r[0].passes[0].shader, "b.wgsl");
     }
 }
