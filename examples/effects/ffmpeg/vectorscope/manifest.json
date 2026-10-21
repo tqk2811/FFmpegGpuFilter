@@ -24,10 +24,10 @@
     {
       "name": "samples",
       "type": "int",
-      "default": 128,
+      "default": 64,
       "min": 8,
-      "max": 256,
-      "description": "The plot is taken from a grid of samples x samples input pixels (bounded cost; 128 gives 16384 samples per cell)"
+      "max": 128,
+      "description": "The plot is taken from a grid of samples x samples input pixels (bounded cost; 64 gives 4096 samples per cell; cost is about cells x samples^2 loads per frame)"
     },
     {
       "name": "color_mode",

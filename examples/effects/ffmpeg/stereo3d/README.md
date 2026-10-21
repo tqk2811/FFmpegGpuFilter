@@ -56,6 +56,7 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i sbs.mp4 \
 
 Differences from FFmpeg:
 
+- **Aspect ratio**: each eye is stretched to the whole frame, so its aspect ratio differs from FFmpeg's half-size outputs (e.g. `sbs2l`, `ab2l`) which keep the eye picture at half width or height.
 - **Output size** stays the input's, see Output. The side by side and above below outputs squeeze each eye into half the frame, like FFmpeg's `sbs2l` and `ab2l`; there is no full-size (`sbsl` that doubles the width) variant. The two inputs `sbsl`/`sbs2l` (and `abl`/`ab2l`...) are the same here.
 - **Not ported**: the alternating frames layouts (`al`, `ar`, they need two frames) and `hdmi` (it adds blank lines, so the size changes).
 - Anaglyph colors are computed in floating point; FFmpeg uses integers on 8-bit RGB, so a value can differ by one.

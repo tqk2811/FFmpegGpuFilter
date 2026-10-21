@@ -6,6 +6,8 @@ Port of FFmpeg's swapuv filter: swap the U and V planes (the color difference ch
 
 FFmpeg swaps the U and V planes of a YUV frame. Shaders see RGBA, so the effect converts RGB to YUV (BT.709, full range), swaps U and V, and converts back; this gives the same colors as the plane swap on full-range BT.709 video. Alpha is kept.
 
+Caveat: the RGB to YUV to RGB round trip clips saturated colors (U and V results outside the RGB gamut are clamped), whereas FFmpeg's plane swap is lossless. It also assumes full-range BT.709; other matrices or limited range give different colors than FFmpeg.
+
 ## Inputs
 
 - `src`: Input clip

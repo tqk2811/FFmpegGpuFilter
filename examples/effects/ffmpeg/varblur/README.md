@@ -21,14 +21,14 @@ Written inline after the package name: `varblur.zip=name=value`. Several options
 
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
-| `min_r` | int | `0` | 0 to 7 | Minimum blur radius, used where the map is black |
-| `max_r` | int | `8` | 1 to 8 | Maximum blur radius, used where the map is white (raised to min_r + 1 when not above min_r) |
+| `min_r` | int | `0` | 0 to 3 | Minimum blur radius, used where the map is black |
+| `max_r` | int | `4` | 1 to 4 | Maximum blur radius, used where the map is white (raised to min_r + 1 when not above min_r) |
 
 ## Example
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 -i radius.mp4 \
-  -filter_complex "[0:v]format=nv12[a];[1:v]format=nv12[b];[a][b]gpufx=graph='varblur.zip=max_r=6',hwdownload,format=nv12" out.mp4
+  -filter_complex "[0:v]format=nv12[a];[1:v]format=nv12[b];[a][b]gpufx=graph='varblur.zip=max_r=3',hwdownload,format=nv12" out.mp4
 ```
 
 With the `gpufx` CLI the inputs are given in order with repeated `-i`.
@@ -39,5 +39,5 @@ One pass. The radius at a pixel is `2 * min_r + 1 + max(0, 2 * map + 1 - (2 * mi
 
 Differences from FFmpeg:
 
-- `max_r` is capped at 8 (FFmpeg 255) and `min_r` at 7 because of that cost; at the cap the box reaches about 68 pixels.
+- Range narrowed: `max_r` is 1..4 (FFmpeg 1..255) and `min_r` is 0..3 (FFmpeg 0..254). The cost per pixel grows with the square of the radius (at the cap the box is about 36x36x3 loads per pixel), whereas FFmpeg uses a summed-area table (O(1) per pixel).
 - Applied to R, G, B channels instead of the planes of the pixel format (`planes` is not ported); alpha is passed through. A missing radius frame (FFmpeg passes the picture through) is not possible here: both inputs are required.

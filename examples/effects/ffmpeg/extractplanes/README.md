@@ -6,6 +6,8 @@ Port of FFmpeg's extractplanes filter: output one plane or channel (y, u, v, r, 
 
 FFmpeg's `planes` option (a `+`-separated list) produces one gray output per plane; an effect has a single output, so `plane` chooses one plane (use several effects for several planes). Y, U and V are computed from RGB (BT.709, full range) at full resolution (FFmpeg's U and V planes are subsampled on 4:2:0 input). The output is opaque gray.
 
+Note: `plane` is this effect's own numbering (0 = y, 1 = u, 2 = v, 3 = r, 4 = g, 5 = b, 6 = a), not FFmpeg plane indexes (in FFmpeg plane 1 of a YUV frame is U and of an RGB frame G); channel indexes refer to the RGBA picture the effect sees.
+
 ## Inputs
 
 - `src`: Input clip

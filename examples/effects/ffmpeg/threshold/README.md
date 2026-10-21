@@ -10,8 +10,8 @@ Port of FFmpeg's threshold filter: per channel, output the min clip where the in
 
 - `src`: Input clip
 - `threshold`: Threshold clip (same size as the input)
-- `min`: Clip used where the input is at or below the threshold (same size)
-- `max`: Clip used where the input is above the threshold (same size)
+- `min_in`: Clip used where the input is at or below the threshold (same size)
+- `max_in`: Clip used where the input is above the threshold (same size)
 
 ## Output
 

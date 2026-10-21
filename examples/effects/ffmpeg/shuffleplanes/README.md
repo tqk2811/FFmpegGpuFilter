@@ -6,6 +6,8 @@ Port of FFmpeg's shuffleplanes filter: reorder or duplicate the color channels (
 
 FFmpeg's `map0`..`map3` pick the source plane of each output plane of the frame (Y, U, V, A for YUV; G, B, R, A for planar RGB). Shaders always see RGBA, so here `map0`..`map3` pick the source channel (0 = R, 1 = G, 2 = B, 3 = A) of the output R, G, B and A. Shuffling Y/U/V planes of a YUV clip is therefore not possible; use the `swapuv` effect for the U/V swap.
 
+Note: the indexes are RGBA channels of the picture the effect sees, not FFmpeg plane indexes. For example `map0=1` selects the G channel, which in FFmpeg would mean plane 1 (U for a YUV frame).
+
 ## Inputs
 
 - `src`: Input clip

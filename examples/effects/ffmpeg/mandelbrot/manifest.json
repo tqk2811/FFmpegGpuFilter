@@ -6,7 +6,7 @@
     "gpufx"
   ],
   "version": "1.0.0",
-  "description": "Mandelbrot set zooming in over time (generator).",
+  "description": "Mandelbrot set zooming in over time (generator). Computed in f32: the picture turns blocky after about 60 s at the default zoom speed (FFmpeg uses double).",
   "inputs": [
     {
       "name": "src"

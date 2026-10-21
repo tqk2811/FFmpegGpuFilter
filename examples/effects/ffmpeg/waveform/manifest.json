@@ -48,9 +48,9 @@
     {
       "name": "max_samples",
       "type": "int",
-      "default": 540,
+      "default": 256,
       "min": 16,
-      "max": 4096,
+      "max": 1024,
       "description": "Samples per input line; lines longer than this are sampled at even steps, which bounds the work of each output pixel"
     },
     {

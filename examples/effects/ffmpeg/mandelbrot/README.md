@@ -2,6 +2,8 @@
 
 Mandelbrot set zooming in over time (generator).
 
+Precision: the shader uses f32 (FFmpeg uses double), so the picture turns blocky after about 60 s at the default zoom speed, when the view gets too small for f32 to tell neighbouring pixels apart.
+
 ## Inputs
 
 - `src`

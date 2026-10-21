@@ -24,12 +24,15 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             square_sum += v * v;
         }
     }
-    let n = f32(count);
-    let sumf = vec3f(sum);
-    let mean = floor(sumf / n);
-    let variance = floor((vec3f(square_sum) - floor(sumf * sumf / n)) / n);
-    let sigma = f32(params.sigma);
-    let v0 = round(c.rgb * 255.0);
-    let res = floor((sigma * mean + variance * v0) / (sigma + variance));
-    gpufx_write(id, vec4f(res / 255.0, c.a));
+    let n = count;
+    // sum * sum / n without overflowing i32: with sum = q * n + r this is sum * q + sum * r / n (exact floor).
+    let q = sum / vec3i(n);
+    let r = sum % vec3i(n);
+    let mean = q;
+    let sum_sq_over_n = sum * q + (sum * r) / vec3i(n);
+    let variance = (square_sum - sum_sq_over_n) / vec3i(n);
+    let sigma = params.sigma;
+    let v0 = vec3i(round(c.rgb * 255.0));
+    let res = (sigma * mean + variance * v0) / (sigma + variance);
+    gpufx_write(id, vec4f(vec3f(res) / 255.0, c.a));
 }
