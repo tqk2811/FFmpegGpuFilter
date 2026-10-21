@@ -191,7 +191,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 
 ### [Thấp] Test box-in chưa phủ direction 1 và 3
 - **Vấn đề**: test chỉ thử `direction` 0 và 2; đảo dấu riêng ở nhánh 1/3 không bị bắt.
-- **Vị trí**: [crates/gpufx-core/tests/effects.rs](../crates/gpufx-core/tests/effects.rs) (`transition_modes_have_clean_endpoints_and_their_own_midpoint`), [box_in.wgsl](../packages/gpufx/slideshow/box-in/shaders/box_in.wgsl).
+- **Vị trí**: [crates/gpufx-core/tests/effects.rs](../crates/gpufx-core/tests/effects.rs) (`transition_modes_have_clean_endpoints_and_their_own_midpoint`), [box_in.wgsl](../packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/box-in/shaders/box_in.wgsl).
 - **Vì sao**: rẻ để thêm, chặn hồi quy chiều chạy.
 - **Ngày ghi**: 2026-10-16
 
@@ -267,7 +267,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 
 ### Hiệu ứng thu nhỏ ảnh chưa dùng mipmap của input
 - **Vấn đề**: engine đã có `"mipmaps": true` cho input (api 2, chuỗi mip sinh trên GPU mỗi frame), nhưng `fit`, `push-box`, `photo-collection` vẫn lấy mẫu ở mức 0, nên ảnh lớn hơn khung nhiều (ảnh 4000 px trong `fit`, hộp nhỏ của `push-box`) vẫn răng cưa/nhấp nháy. Nền mờ của `fit` dùng 64 tap bilinear rải đều trên bán kính, bán kính lớn (trên khoảng 64 px) có thể lộ bóng lặp; đọc từ mức mip phù hợp sẽ hết.
-- **Vị trí**: `packages/gpufx/slideshow/{fit,push-box,photo-collection}`, [crates/gpufx-core/src/mips.rs](../crates/gpufx-core/src/mips.rs).
+- **Vị trí**: `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/{fit,push-box,photo-collection}`, [crates/gpufx-core/src/mips.rs](../crates/gpufx-core/src/mips.rs).
 - **Vì sao**: giữ output của các hiệu ứng cũ giống từng byte khi thêm tính năng; chuyển sang api 2 và tự tính `lod` theo tỉ lệ thu nhỏ là thay đổi output, cần làm và kiểm riêng. Mip của input tốn thêm khoảng 1/3 VRAM của texture đó và một pass mỗi mức mỗi frame.
 - **Ngày ghi**: 2026-10-13
 

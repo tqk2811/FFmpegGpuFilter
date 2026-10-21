@@ -326,7 +326,7 @@ make -j"$(nproc)"
 | `ffmpeg/` | Filter `vf_gpufx.c` và script tích hợp |
 | `external/FFmpeg` | Submodule mã nguồn FFmpeg |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx một lệnh trong Docker |
-| `packages/gpufx/` | 38 hiệu ứng mẫu, chia nhóm `ffmpeg/`, `slideshow/`, `standalone/` |
+| `packages/gpufx/` | Gói hiệu ứng, chia theo thư mục nhóm (`ffmpeg/`, `capcut/`, `standalone/`, `tqk2811/...`) |
 | `scripts/` | `build-prebuilt.sh` (build nhanh trên FFmpeg build sẵn), `test-bundle.sh`, `install-libgpufx.sh`, `pack-packages.sh`/`.ps1` (đóng gói zip) |
 
 ## Giấy phép

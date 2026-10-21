@@ -112,19 +112,19 @@ Equivalents of FFmpeg built-in filters and `xfade` transitions.
 - [zoom-pan](ffmpeg/zoom-pan/README.md)
 - [zoom-canvas](ffmpeg/zoom-canvas/README.md)
 
-## slideshow
+## tqk2811/FFmpegArgs.TanersenerSlideShow
 
 Transitions and helpers ported from [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts).
 
-- [blinds](slideshow/blinds/README.md)
-- [box-in](slideshow/box-in/README.md)
-- [checkerboard](slideshow/checkerboard/README.md)
-- [push-box](slideshow/push-box/README.md)
-- [push-film](slideshow/push-film/README.md)
-- [photo-collection](slideshow/photo-collection/README.md)
-- [fit](slideshow/fit/README.md)
-- [sliding-bars](slideshow/sliding-bars/README.md)
-- [spin-transition](slideshow/spin-transition/README.md)
+- [blinds](tqk2811/FFmpegArgs.TanersenerSlideShow/blinds/README.md)
+- [box-in](tqk2811/FFmpegArgs.TanersenerSlideShow/box-in/README.md)
+- [checkerboard](tqk2811/FFmpegArgs.TanersenerSlideShow/checkerboard/README.md)
+- [push-box](tqk2811/FFmpegArgs.TanersenerSlideShow/push-box/README.md)
+- [push-film](tqk2811/FFmpegArgs.TanersenerSlideShow/push-film/README.md)
+- [photo-collection](tqk2811/FFmpegArgs.TanersenerSlideShow/photo-collection/README.md)
+- [fit](tqk2811/FFmpegArgs.TanersenerSlideShow/fit/README.md)
+- [sliding-bars](tqk2811/FFmpegArgs.TanersenerSlideShow/sliding-bars/README.md)
+- [spin-transition](tqk2811/FFmpegArgs.TanersenerSlideShow/spin-transition/README.md)
 
 ## tqk2811/TqkLibrary.FFmpegTransition
 
