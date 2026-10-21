@@ -330,6 +330,16 @@ static int set_param(AVFilterContext *ctx, const char *item, const char *value)
     drop_expr(s, name);
     if (gpufx_effect_set_param(s->fx, name, value) == 0)
         return 0;
+    {
+        /* A plain number the package rejects (e.g. not one of an enum's values) fails now, not at
+         * the first frame as a constant expression would. */
+        char *end;
+        strtod(value, &end);
+        if (end != value && !*end) {
+            av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': %s\n", name, gpufx_last_error());
+            return AVERROR(EINVAL);
+        }
+    }
 
     ret = av_expr_parse(&expr, value, var_names, NULL, NULL, NULL, NULL, 0, ctx);
     if (ret < 0) {

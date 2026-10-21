@@ -76,6 +76,10 @@ fn info(path: &str) -> Result<(), String> {
             _ => String::new(),
         };
         println!("  {} : {:?} = {default}{range}  {}", p.name, p.kind, p.description);
+        if !p.enum_values().is_empty() {
+            let values: Vec<String> = p.enum_values().iter().map(|(n, x)| format!("{n}={x}")).collect();
+            println!("      values: {}", values.join(", "));
+        }
     }
     println!("groups (the first matching the device runs):");
     for (g, group) in m.groups.iter().enumerate() {

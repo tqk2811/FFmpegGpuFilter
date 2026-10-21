@@ -34,7 +34,7 @@ scripts/pack-effects.sh --check -o out my-fx    # biên dịch shader trên GPU 
 
 | Trường | Kiểu | Bắt buộc | Ý nghĩa |
 |--------|------|----------|---------|
-| `api` | số | không (1) | Phiên bản định dạng. Cần `2` cho texture mảng, `mipmaps`, `premultiply`, tham số `expr`, input `repeat` và `output.size` khác `first`; gói không dùng các trường này giữ `1` và chạy như cũ. Runtime cũ hơn gói sẽ báo `unsupported manifest api 2` |
+| `api` | số | không (1) | Phiên bản định dạng. Cần `2` cho texture mảng, `mipmaps`, `premultiply`, tham số `expr` và `enum`, input `repeat` và `output.size` khác `first`; gói không dùng các trường này giữ `1` và chạy như cũ. Runtime cũ hơn gói sẽ báo `unsupported manifest api 2` |
 | `id` | chuỗi | có | Định danh dạng reverse-DNS |
 | `name` | chuỗi | có | Tên hiển thị |
 | `used_for` | mảng | có | Các filter FFmpeg dùng package này: effect ghi `["gpufx"]`. Mảng rỗng hoặc tên lạ (tên hợp lệ: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) thì không load được; filter `gpufx` từ chối package mà danh sách không có `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
@@ -121,13 +121,14 @@ Mỗi phần tử `params`:
 | Trường | Ý nghĩa |
 |--------|---------|
 | `name` | Tên, cũng là tên trường trong `params.<name>` |
-| `type` | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `color`, `expr` (api 2) |
-| `default` | Số, mảng số, `true/false`, hoặc chuỗi (`"#ff8800"`; biểu thức của `expr`) |
-| `min`, `max` | Giá trị bị kẹp vào khoảng này (không dùng cho `expr`) |
+| `type` | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `color`, `expr` (api 2), `enum` (api 2) |
+| `default` | Số, mảng số, `true/false`, hoặc chuỗi (`"#ff8800"`; biểu thức của `expr`; tên một giá trị của `enum`). `enum` không có `default` thì lấy giá trị đầu tiên |
+| `min`, `max` | Giá trị bị kẹp vào khoảng này (không dùng cho `expr` và `enum`) |
 | `vars` | Chỉ cho `expr`: tên các biến của biểu thức, theo thứ tự tham số của hàm trong shader |
+| `values` | Chỉ cho `enum`: tên các giá trị, xem [Tham số enum](#tham-số-enum) |
 | `description` | Mô tả |
 
-Kiểu trong shader: `float`→`f32`/`float`, `int`→`i32`/`int`, `bool`→`u32`/`uint` (0 hoặc 1),
+Kiểu trong shader: `float`→`f32`/`float`, `int` và `enum`→`i32`/`int`, `bool`→`u32`/`uint` (0 hoặc 1),
 `vecN`→`vecNf`/`vecN`, `color`→`vec4f`/`vec4` (RGBA 0..1). `expr` không nằm trong `params` mà trở
 thành một hàm, xem [Tham số biểu thức](#tham-số-biểu-thức).
 
@@ -333,6 +334,7 @@ Thời gian không hữu hạn thành 0.
 |---------------------|------|------|---------------------|---------|
 | `float` | `f32` | `float` | 4 / 4 | |
 | `int` | `i32` | `int` | 4 / 4 | Làm tròn tới số nguyên gần nhất |
+| `enum` | `i32` | `int` | 4 / 4 | Số của tên giá trị được chọn |
 | `bool` | `u32` | `uint` | 4 / 4 | 0 hoặc 1 |
 | `vec2` | `vec2f` | `vec2` | 8 / 8 | |
 | `vec3` | `vec3f` | `vec3` | 16 / 12 | Một scalar có thể nằm ở ô thứ tư |
@@ -499,6 +501,33 @@ let x = gpufx_expr_path_x(u, p, x0);   // tham số theo thứ tự `vars`, đ�
   các key inline phân tách bằng `&` (không cần escape): `graph='x.zip=angle=max(90*u\,0)&speed=2'`. Dấu `:` kiểu
   FFmpeg cũng được chấp nhận nhưng ở đó phải viết `\:` (`...\,0)\:speed=2`). Trong chuỗi effect, `\&` là `&`
   nguyên văn (tập ký tự escape được: `\ ' : & ; | = [ ]`).
+
+## Tham số enum
+
+Tham số kiểu `enum` (api 2) nhận một trong các lựa chọn có tên. Trong shader nó là `i32`/`int` giống
+`int` (`params.<name>`), giữ số của tên được chọn. `values` liệt kê các tên theo một trong hai dạng:
+
+- mảng tên, đánh số từ 0 theo thứ tự: `"values": ["fade", "wipeleft", "wiperight"]`;
+- object gán số cho từng tên (số `i32` bất kỳ, vd để khớp cách đánh số của FFmpeg):
+  `"values": {"custom": -1, "fade": 0, "wipeleft": 1}`.
+
+```json
+{ "name": "transition", "type": "enum", "values": {"custom": -1, "fade": 0, "wipeleft": 1}, "default": "fade" }
+```
+
+Quy tắc: có ít nhất một giá trị; tên gồm chữ, số, `_` hoặc `-`, không phải là số và không trùng nhau;
+hai tên không dùng chung một số; `default` (tên hoặc một trong các số) không bắt buộc, thiếu thì lấy
+giá trị đầu tiên (phần tử đầu của mảng, số nhỏ nhất của object); không có `min`/`max`.
+
+Mọi chỗ nhận tham số dạng chuỗi (inline `pkg.zip=transition=wipeleft` trong `graph=`, option `params`,
+`sendcmd`/`process_command`, chuỗi graph của `gpufx run`, `gpufx_effect_set_param()`) đều nhận tên, và cho
+tiện cũng nhận số (`transition=1`). Tên được tra trước; tên lạ báo lỗi kèm danh sách tên hợp lệ
+(`unknown value `wipeup` (allowed: custom, fade, wipeleft)`). Trong filter FFmpeg, chuỗi không phải
+tên cũng không phải số thì được thử như biểu thức FFmpeg tính lại mỗi frame
+(`transition=if(lt(t\,2)\,0\,1)`), giống mọi tham số vô hướng: kết quả được làm tròn và phải là một
+trong các số, nếu không thì frame đó lỗi và filter dừng với lỗi. Một số trần không thuộc
+danh sách bị từ chối ngay khi đặt option. Số đặt qua `gpufx_effect_set_param_values()`
+theo cùng quy tắc. `gpufx info` in các tên kèm số của chúng.
 
 ## Ví dụ có sẵn
 

@@ -8,7 +8,7 @@ impl ParamType {
     /// `(align, size)` in bytes in the uniform address space.
     fn layout(self) -> (usize, usize) {
         match self {
-            ParamType::Float | ParamType::Int | ParamType::Bool => (4, 4),
+            ParamType::Float | ParamType::Int | ParamType::Enum | ParamType::Bool => (4, 4),
             ParamType::Expr => (1, 0),
             ParamType::Vec2 => (8, 8),
             ParamType::Vec3 => (16, 12),
@@ -19,7 +19,7 @@ impl ParamType {
     pub(crate) fn wgsl(self) -> &'static str {
         match self {
             ParamType::Float | ParamType::Expr => "f32",
-            ParamType::Int => "i32",
+            ParamType::Int | ParamType::Enum => "i32",
             ParamType::Bool => "u32",
             ParamType::Vec2 => "vec2f",
             ParamType::Vec3 => "vec3f",
@@ -30,7 +30,7 @@ impl ParamType {
     pub(crate) fn glsl(self) -> &'static str {
         match self {
             ParamType::Float | ParamType::Expr => "float",
-            ParamType::Int => "int",
+            ParamType::Int | ParamType::Enum => "int",
             ParamType::Bool => "uint",
             ParamType::Vec2 => "vec2",
             ParamType::Vec3 => "vec3",
@@ -41,7 +41,7 @@ impl ParamType {
     fn components(self) -> usize {
         match self {
             ParamType::Expr => 0,
-            ParamType::Float | ParamType::Int | ParamType::Bool => 1,
+            ParamType::Float | ParamType::Int | ParamType::Enum | ParamType::Bool => 1,
             ParamType::Vec2 => 2,
             ParamType::Vec3 => 3,
             ParamType::Vec4 | ParamType::Color => 4,
@@ -86,8 +86,10 @@ impl ParamBlock {
                 continue;
             }
             let v = match &d.default {
+                // An enum starts at its first value.
+                None if d.kind == ParamType::Enum => Value([d.enum_values().first().map_or(0.0, |&(_, x)| x as f64), 0.0, 0.0, 0.0]),
                 None => Value([0.0; 4]),
-                Some(json) => parse_json(d, json)?,
+                Some(json) => check_enum(d, parse_json(d, json)?)?,
             };
             block.values.push(clamp(d, v));
             block.exprs.push(None);
@@ -111,7 +113,8 @@ impl ParamBlock {
         self.defs.iter().position(|d| d.name == name)
     }
 
-    /// Sets a parameter from its textual form (`0.5`, `1,0,0`, `#ff8800`, `true`).
+    /// Sets a parameter from its textual form (`0.5`, `1,0,0`, `#ff8800`, `true`, or an
+    /// enum's value name).
     pub fn set_str(&mut self, name: &str, text: &str) -> Result<(), Error> {
         let i = self.index(name).ok_or_else(|| Error::Param(format!("unknown parameter `{name}`")))?;
         if self.defs[i].kind == ParamType::Expr {
@@ -119,7 +122,7 @@ impl ParamBlock {
             self.exprs[i] = Some(e);
             return Ok(());
         }
-        let v = parse_str(&self.defs[i], text)?;
+        let v = check_enum(&self.defs[i], parse_str(&self.defs[i], text)?)?;
         self.values[i] = clamp(&self.defs[i], v);
         Ok(())
     }
@@ -168,6 +171,7 @@ impl ParamBlock {
         for (dst, src) in v.0.iter_mut().zip(comps) {
             *dst = *src;
         }
+        let v = check_enum(&self.defs[i], v)?;
         self.values[i] = clamp(&self.defs[i], v);
         Ok(())
     }
@@ -209,7 +213,7 @@ impl ParamBlock {
             for c in 0..d.kind.components() {
                 let at = off + c * 4;
                 let raw: [u8; 4] = match d.kind {
-                    ParamType::Int => (v.0[c].round() as i32).to_le_bytes(),
+                    ParamType::Int | ParamType::Enum => (v.0[c].round() as i32).to_le_bytes(),
                     ParamType::Bool => ((v.0[c] != 0.0) as u32).to_le_bytes(),
                     _ => (v.0[c] as f32).to_le_bytes(),
                 };
@@ -218,6 +222,18 @@ impl ParamBlock {
         }
         out
     }
+}
+
+/// An enum value must be the number of one of its names.
+fn check_enum(d: &ParamDef, v: Value) -> Result<Value, Error> {
+    if d.kind != ParamType::Enum {
+        return Ok(v);
+    }
+    let x = v.0[0].round();
+    if d.enum_values().iter().any(|&(_, n)| n as f64 == x) {
+        return Ok(Value([x, 0.0, 0.0, 0.0]));
+    }
+    Err(Error::Param(format!("`{}`: {} is not a value of this enum (allowed: {})", d.name, v.0[0], d.enum_names())))
 }
 
 fn clamp(d: &ParamDef, mut v: Value) -> Value {
@@ -261,6 +277,14 @@ fn parse_str(d: &ParamDef, text: &str) -> Result<Value, Error> {
     let bad = || Error::Param(format!("cannot parse `{text}` as {:?} for `{}`", d.kind, d.name));
     let mut v = [0.0; 4];
     match d.kind {
+        ParamType::Enum => {
+            v[0] = match d.enum_values().iter().find(|(n, _)| *n == text) {
+                Some(&(_, x)) => x as f64,
+                None => text
+                    .parse::<f64>()
+                    .map_err(|_| Error::Param(format!("`{}`: unknown value `{text}` (allowed: {})", d.name, d.enum_names())))?,
+            }
+        }
         ParamType::Bool => {
             v[0] = match text.to_ascii_lowercase().as_str() {
                 "1" | "true" | "yes" | "on" => 1.0,
@@ -302,7 +326,16 @@ mod tests {
     use super::*;
 
     fn def(name: &str, kind: ParamType) -> ParamDef {
-        ParamDef { name: name.into(), kind, default: None, min: None, max: None, description: String::new(), vars: Vec::new() }
+        ParamDef {
+            name: name.into(),
+            kind,
+            default: None,
+            min: None,
+            max: None,
+            description: String::new(),
+            vars: Vec::new(),
+            values: None,
+        }
     }
 
     #[test]
@@ -333,6 +366,34 @@ mod tests {
         let mut b = ParamBlock::new(&[d]).unwrap();
         b.set_str("x", "5").unwrap();
         assert_eq!(b.get("x").unwrap().0[0], 1.0);
+    }
+
+    #[test]
+    fn enums_take_names_or_numbers() {
+        use crate::manifest::EnumValues;
+        let mut list = def("mode", ParamType::Enum);
+        list.values = Some(EnumValues::List(vec!["fade".into(), "wipeleft".into(), "wiperight".into()]));
+        let mut map = def("t", ParamType::Enum);
+        map.values = Some(EnumValues::Map(serde_json::from_str(r#"{"fade":0,"custom":-1,"wipeleft":1}"#).unwrap()));
+        map.default = Some(serde_json::json!("wipeleft"));
+        let mut b = ParamBlock::new(&[list, map]).unwrap();
+        assert_eq!(b.offsets, vec![0, 4]);
+        assert!(b.wgsl_struct().contains("mode: i32") && b.glsl_members().contains("int t;"));
+        assert_eq!(b.get("mode").unwrap().0[0], 0.0, "no default: the first value");
+        assert_eq!(b.get("t").unwrap().0[0], 1.0);
+        b.set_str("mode", "wiperight").unwrap();
+        assert_eq!(b.get("mode").unwrap().0[0], 2.0);
+        b.set_str("t", "custom").unwrap();
+        assert_eq!(b.bytes()[4..8], (-1i32).to_le_bytes());
+        b.set_str("t", "0").unwrap();
+        assert_eq!(b.get("t").unwrap().0[0], 0.0);
+        b.set("mode", &[1.2]).unwrap();
+        assert_eq!(b.get("mode").unwrap().0[0], 1.0);
+        let err = b.set_str("mode", "wipeup").unwrap_err().to_string();
+        assert!(err.contains("unknown value `wipeup`") && err.contains("fade, wipeleft, wiperight"), "{err}");
+        assert!(b.set_str("t", "5").unwrap_err().to_string().contains("allowed: custom, fade, wipeleft"));
+        assert!(b.set("t", &[7.0]).is_err());
+        assert_eq!(b.get("t").unwrap().0[0], 0.0, "a bad value keeps the last good one");
     }
 
     #[test]
