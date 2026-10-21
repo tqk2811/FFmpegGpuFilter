@@ -1,0 +1,24 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.swapuv",
+  "name": "Swap UV",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Port of FFmpeg's swapuv filter: swap the U and V planes (the color difference channels).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/swapuv.wgsl"
+        }
+      ]
+    }
+  ]
+}
