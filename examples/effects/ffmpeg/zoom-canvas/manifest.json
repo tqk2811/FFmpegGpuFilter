@@ -1,0 +1,20 @@
+{
+  "api": 2,
+  "id": "io.github.tqk2811.zoom-canvas",
+  "name": "Zoom Canvas",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Draws the second input zoomed around an anchor point onto the first input (a fixed-size, e.g. transparent, canvas), keeping its aspect ratio.",
+  "inputs": [
+    { "name": "canvas", "description": "Background that sets the output size (e.g. a transparent color source at the largest size)" },
+    { "name": "src", "description": "Picture to zoom (alpha is honoured)", "mipmaps": true }
+  ],
+  "params": [
+    { "name": "zoom", "type": "float", "default": 1, "min": 0, "max": 16, "description": "Size of the picture relative to its fitted size (1 = fitted as set by fit)" },
+    { "name": "fit", "type": "int", "default": 0, "min": 0, "max": 2, "description": "Size at zoom 1: 0 contain (whole picture inside the canvas), 1 cover (fills the canvas), 2 native pixels" },
+    { "name": "anchor", "type": "vec2", "default": [0.5, 0.5], "description": "Canvas point (0..1 of its size) where the picture's pivot is placed" },
+    { "name": "pivot", "type": "vec2", "default": [0.5, 0.5], "description": "Point of the picture (0..1 of its size) that stays on the anchor while zooming" },
+    { "name": "opacity", "type": "float", "default": 1, "min": 0, "max": 1, "description": "Picture opacity" }
+  ],
+  "groups": [{ "passes": [{ "shader": "shaders/zoom_canvas.wgsl" }] }]
+}
