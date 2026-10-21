@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.fit",
   "name": "Fit Picture",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Fits the second input into the frame of the first, like the screen modes of slideshow tools: center, crop, stretch, or centered over a blurred copy. The first input gives the size, and shows through wherever the picture and `color` are transparent.",
   "inputs": [

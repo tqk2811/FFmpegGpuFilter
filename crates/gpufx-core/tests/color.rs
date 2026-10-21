@@ -25,7 +25,7 @@ fn identity(ctx: &std::sync::Arc<GpuContext>, tag: &str) -> Effect {
     std::fs::create_dir_all(dir.join("shaders")).unwrap();
     std::fs::write(
         dir.join("manifest.json"),
-        r#"{"id":"t.identity","name":"Identity","groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+        r#"{"id":"t.identity","name":"Identity","used_for":["gpufx"],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
     )
     .unwrap();
     std::fs::write(

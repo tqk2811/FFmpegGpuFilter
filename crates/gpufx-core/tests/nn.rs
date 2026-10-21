@@ -106,7 +106,7 @@ fn model(inputs: &[&str], outputs: &[&str], ops: &[String]) -> String {
     let ins: Vec<String> = inputs.iter().map(|i| format!(r#"{{"name":"{i}"}}"#)).collect();
     let outs: Vec<String> = outputs.iter().map(|o| format!("\"{o}\"")).collect();
     format!(
-        r#"{{"format":"gpufx-nn","version":1,"name":"test","source":{{"kind":"test"}},"weights":{{"file":"weights.bin"}},
+        r#"{{"format":"gpufx-nn","version":1,"name":"test","used_for":["gpufx_ai_upscale","gpufx_ai_framerate"],"source":{{"kind":"test"}},"weights":{{"file":"weights.bin"}},
         "inputs":[{}],"outputs":[{}],"ops":[{}]}}"#,
         ins.join(","),
         outs.join(","),
@@ -1210,4 +1210,24 @@ fn realesrgan_frames_match_the_cpu_reference() {
         eprintln!("frames x2 {}: {db:.2} dB against the CPU reference on {}", if f16 { "f16" } else { "f32" }, ctx.description());
         assert!(db >= if f16 { 45.0 } else { 50.0 }, "{db:.2} dB");
     }
+}
+
+/// A model runs only in the filters its `used_for` lists; an effect package says which filter takes it.
+#[test]
+fn models_open_only_in_their_filters() {
+    let Some(ctx) = gpu() else { return };
+    let (json, weights, io) = sr_model(false);
+    let upscale_only = json.replace(r#""used_for":["gpufx_ai_upscale","gpufx_ai_framerate"]"#, r#""used_for":["gpufx_ai_upscale"]"#);
+    assert_ne!(upscale_only, json);
+    let model = Arc::new(NnModel::from_parts(ctx.clone(), upscale_only.as_bytes(), &weights, Some(io.as_bytes())).unwrap());
+    FrameUpscale::new(model.clone(), UpscaleOptions::default()).unwrap();
+    let e = FrameInterp::new(model).err().unwrap().to_string();
+    assert!(e.contains("package `test` is for gpufx_ai_upscale, not gpufx_ai_framerate"), "{e}");
+
+    let dir = std::env::temp_dir().join(format!("gpufx-nn-effect-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("manifest.json"), r#"{"id":"t.fx","name":"Fx","used_for":["gpufx"],"groups":[]}"#).unwrap();
+    let e = NnModel::load(ctx, &dir).err().unwrap().to_string();
+    assert!(e.contains("missing model.json: it is a gpufx effect package, use it with the gpufx filter"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

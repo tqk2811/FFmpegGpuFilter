@@ -6,6 +6,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::manifest::Manifest;
+use crate::used_for;
 use crate::Error;
 
 /// Hard limits so a hostile package cannot exhaust memory.
@@ -35,8 +36,11 @@ impl Package {
     }
 
     fn from_files(files: HashMap<String, Vec<u8>>) -> Result<Self, Error> {
-        let manifest_bytes = files.get("manifest.json").ok_or_else(|| Error::Package("missing manifest.json".into()))?;
+        let Some(manifest_bytes) = files.get("manifest.json") else {
+            return Err(used_for::wrong_kind(&files, "manifest.json"));
+        };
         let parsed = Manifest::parse(manifest_bytes)?;
+        used_for::check(&parsed.id, &parsed.used_for, used_for::GPUFX)?;
         let manifest = parsed.with_input_count(None)?;
         let template = parsed.repeat().is_some().then(|| Box::new(parsed));
         let pkg = Package { manifest, template, files };
@@ -201,5 +205,46 @@ impl Package {
         }
         zip.finish().map_err(zip_err)?;
         Ok(compiled.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dir(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("gpufx-package-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for (f, text) in files {
+            let p = d.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        d
+    }
+
+    const SHADER: (&str, &str) = ("a.wgsl", "fn main() {}");
+
+    #[test]
+    fn opens_only_packages_for_gpufx() {
+        let m =
+            |used_for: &str| format!(r#"{{"id":"t.x","name":"X","used_for":{used_for},"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#);
+        let ok = dir("ok", &[("manifest.json", &m(r#"["gpufx"]"#)), SHADER]);
+        Package::open(&ok).unwrap();
+        let ai = dir("ai", &[("manifest.json", &m(r#"["gpufx_ai_upscale"]"#)), SHADER]);
+        let e = Package::open(&ai).unwrap_err().to_string();
+        assert_eq!(e, "package: package `t.x` is for gpufx_ai_upscale, not gpufx");
+        for d in [ok, ai] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    /// A model package given to gpufx says what it is and which filter takes it.
+    #[test]
+    fn a_model_package_names_its_filter() {
+        let model = dir("model", &[("model.json", r#"{"format":"gpufx-nn","used_for":["gpufx_ai_framerate"]}"#)]);
+        let e = Package::open(&model).unwrap_err().to_string();
+        assert!(e.contains("missing manifest.json: it is a gpufx-nn model package, use it with the gpufx_ai_framerate filter"), "{e}");
+        let _ = std::fs::remove_dir_all(model);
     }
 }

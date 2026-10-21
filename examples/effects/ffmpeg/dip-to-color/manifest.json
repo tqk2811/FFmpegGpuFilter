@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.dip-to-color",
   "name": "Dip to Color",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The first clip fades to a color, then the second fades in from it (black by default: fade through black). Drive `progress` from 0 to 1.",
   "inputs": [

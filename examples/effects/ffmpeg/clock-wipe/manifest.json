@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.clock-wipe",
   "name": "Clock Wipe",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Clock hand sweep from 12 o'clock: the second clip appears behind the hand. Drive `progress` from 0 to 1.",
   "inputs": [

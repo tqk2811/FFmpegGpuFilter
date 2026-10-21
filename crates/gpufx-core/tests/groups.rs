@@ -42,7 +42,7 @@ impl Drop for TempPackage {
 }
 
 fn manifest(groups: &str) -> String {
-    format!(r#"{{"id":"t.groups","name":"Groups","groups":[{groups}]}}"#)
+    format!(r#"{{"id":"t.groups","name":"Groups","used_for":["gpufx"],"groups":[{groups}]}}"#)
 }
 
 fn gpu() -> Option<std::sync::Arc<GpuContext>> {
@@ -127,7 +127,8 @@ fn no_matching_group_is_an_error_naming_each_group() {
 #[test]
 fn a_group_without_requires_runs() {
     let Some(ctx) = gpu() else { return };
-    let pkg = TempPackage::new("plain", r#"{"id":"t.plain","name":"Plain","groups":[{"passes":[{"shader":"red.wgsl"}]}]}"#);
+    let pkg =
+        TempPackage::new("plain", r#"{"id":"t.plain","name":"Plain","used_for":["gpufx"],"groups":[{"passes":[{"shader":"red.wgsl"}]}]}"#);
     assert_eq!(first_pixel(&ctx, pkg.open()), [255, 0, 0, 255]);
 }
 

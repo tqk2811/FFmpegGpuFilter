@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.overlay",
   "name": "Picture in Picture",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Draws the second input over the first, scaled and positioned, honouring its alpha.",
   "inputs": [

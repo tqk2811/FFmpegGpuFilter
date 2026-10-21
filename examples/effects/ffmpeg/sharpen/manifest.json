@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.sharpen",
   "name": "Sharpen",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Unsharp mask over a 3x3 neighbourhood.",
   "inputs": [

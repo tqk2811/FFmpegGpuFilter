@@ -431,7 +431,7 @@ impl TwoInputPackage {
         let dir = std::env::temp_dir().join(format!("gpufx-two-inputs-{}-{n}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
-        let manifest = r#"{"api":1,"id":"t.mix","name":"Mix","inputs":[{"name":"a"},{"name":"b","same_size":true}],
+        let manifest = r#"{"api":1,"id":"t.mix","name":"Mix","used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"b","same_size":true}],
             "groups":[{"passes":[{"shader":"mix.wgsl","inputs":["a","b"],"output":"tmp"},{"shader":"copy.wgsl","inputs":["tmp"],"output":"out"}]}]}"#;
         std::fs::write(dir.join("manifest.json"), manifest).unwrap();
         let mix = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {

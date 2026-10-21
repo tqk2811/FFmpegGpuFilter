@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.transform",
   "name": "Transform",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Zoom, rotate and pan (Ken Burns style when driven by expressions).",
   "inputs": [

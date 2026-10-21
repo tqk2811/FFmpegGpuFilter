@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.slide-transition",
   "name": "Slide",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "The second clip slides into the frame: it pushes the first out, covers it, uncovers it or pushes it through a gap of `color` (`mode`). Drive `progress` from 0 to 1.",
   "inputs": [

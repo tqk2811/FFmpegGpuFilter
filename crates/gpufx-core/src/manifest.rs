@@ -18,6 +18,8 @@ pub struct Manifest {
     pub id: String,
     /// Human readable name.
     pub name: String,
+    /// The filters the package is for (see [`crate::used_for`]); an effect package lists `gpufx`.
+    pub used_for: Vec<String>,
     #[serde(default)]
     pub version: String,
     #[serde(default)]
@@ -444,6 +446,8 @@ impl Manifest {
             let msg = e.to_string();
             if msg.starts_with("unknown field `passes`") || msg.starts_with("missing field `groups`") {
                 Error::Manifest(format!(r#"{msg}: put the passes in `groups`, e.g. "groups": [{{ "passes": [...] }}]"#))
+            } else if msg.starts_with("missing field `used_for`") {
+                Error::Manifest(format!(r#"{msg}: list the filters the package is for, e.g. "used_for": ["gpufx"]"#))
             } else {
                 Error::Manifest(msg)
             }
@@ -457,6 +461,7 @@ impl Manifest {
         if self.api == 0 || self.api > MANIFEST_API {
             return bad(format!("unsupported manifest api {} (runtime supports <= {MANIFEST_API})", self.api));
         }
+        crate::used_for::validate(&self.used_for).map_err(Error::Manifest)?;
         if self.inputs.is_empty() {
             return bad("an effect needs at least one input".into());
         }
@@ -747,7 +752,7 @@ mod tests {
 
     fn manifest(inputs: &str, output: &str) -> Result<Manifest, Error> {
         Manifest::parse(
-            format!(r#"{{"id":"t.x","name":"X","inputs":{inputs}{output},"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes(),
+            format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],"inputs":{inputs}{output},"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes(),
         )
     }
 
@@ -802,7 +807,7 @@ mod tests {
         let parse = |inputs: &str, extra: &str| {
             Manifest::parse(
                 format!(
-                    r#"{{"api":2,"id":"t.x","name":"X","inputs":{inputs}{extra},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}]}}"#
+                    r#"{{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":{inputs}{extra},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}]}}"#
                 )
                 .as_bytes(),
             )
@@ -831,7 +836,7 @@ mod tests {
 
     fn textures(api: u32, list: &str) -> Result<Manifest, Error> {
         Manifest::parse(
-            format!(r#"{{"api":{api},"id":"t.x","name":"X","textures":[{list}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#)
+            format!(r#"{{"api":{api},"id":"t.x","name":"X","used_for":["gpufx"],"textures":[{list}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#)
                 .as_bytes(),
         )
     }
@@ -865,7 +870,7 @@ mod tests {
         }
         assert!(manifest(r#"[{"name":"a","mipmaps":true}]"#, "").unwrap_err().to_string().contains(r#""api": 2"#));
         let var = |v: &str| {
-            Manifest::parse(format!(r#"{{"api":2,"id":"t.x","name":"X","params":[{{"name":"e","type":"expr","default":"1","vars":["{v}"]}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes())
+            Manifest::parse(format!(r#"{{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"params":[{{"name":"e","type":"expr","default":"1","vars":["{v}"]}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes())
         };
         var("u_2").unwrap();
         assert!(var("_u").is_err() && var("a__b").is_err() && var("2u").is_err());
@@ -873,7 +878,7 @@ mod tests {
         let param = |n: &str| {
             Manifest::parse(
                 format!(
-                    r#"{{"id":"t.x","name":"X","params":[{{"name":"{n}","type":"float","default":1}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#
+                    r#"{{"id":"t.x","name":"X","used_for":["gpufx"],"params":[{{"name":"{n}","type":"float","default":1}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#
                 )
                 .as_bytes(),
             )
@@ -885,7 +890,7 @@ mod tests {
     }
 
     fn grouped(groups: &str) -> Result<Manifest, Error> {
-        Manifest::parse(format!(r#"{{"id":"t.x","name":"Glow","groups":[{groups}]}}"#).as_bytes())
+        Manifest::parse(format!(r#"{{"id":"t.x","name":"Glow","used_for":["gpufx"],"groups":[{groups}]}}"#).as_bytes())
     }
 
     fn target(backend: wgpu::Backend, vendor: u32, name: &str, features: wgpu::Features) -> Target {
@@ -966,18 +971,19 @@ mod tests {
         // Every key "*" is fine, and a group need not be named.
         grouped(&format!(r#"{{"requires":{{"os":"*","backend":"*","vendor":"*","features":[]}},{p}}}"#)).unwrap();
         // Top-level `passes` is gone, `groups` is required and not empty; api 1 has groups.
-        let old = Manifest::parse(format!(r#"{{"id":"t.x","name":"X",{p}}}"#).as_bytes()).unwrap_err().to_string();
+        let old = Manifest::parse(format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],{p}}}"#).as_bytes()).unwrap_err().to_string();
         assert!(old.contains("unknown field `passes`") && old.contains("put the passes in `groups`"), "{old}");
-        let both = Manifest::parse(format!(r#"{{"id":"t.x","name":"X",{p},"groups":[{{{p}}}]}}"#).as_bytes()).unwrap_err();
+        let both =
+            Manifest::parse(format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],{p},"groups":[{{{p}}}]}}"#).as_bytes()).unwrap_err();
         assert!(both.to_string().contains("put the passes in `groups`"), "{both}");
-        let neither = Manifest::parse(br#"{"id":"t.x","name":"X"}"#).unwrap_err().to_string();
+        let neither = Manifest::parse(br#"{"id":"t.x","name":"X","used_for":["gpufx"]}"#).unwrap_err().to_string();
         assert!(neither.contains("missing field `groups`") && neither.contains("put the passes in `groups`"), "{neither}");
-        let empty = Manifest::parse(br#"{"id":"t.x","name":"X","groups":[]}"#).unwrap_err();
+        let empty = Manifest::parse(br#"{"id":"t.x","name":"X","used_for":["gpufx"],"groups":[]}"#).unwrap_err();
         assert!(empty.to_string().contains("at least one group"), "{empty}");
-        Manifest::parse(format!(r#"{{"api":1,"id":"t.x","name":"X","groups":[{{{p}}}]}}"#).as_bytes()).unwrap();
+        Manifest::parse(format!(r#"{{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"groups":[{{{p}}}]}}"#).as_bytes()).unwrap();
         // GLSL in any group rules out a repeated input.
         let glsl = Manifest::parse(
-            br#"{"api":2,"id":"t.x","name":"X","inputs":[{"name":"s","repeat":{"default":2}}],"groups":[{"passes":[{"shader":"a.wgsl"}]},{"passes":[{"shader":"a.glsl"}]}]}"#,
+            br#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{"name":"s","repeat":{"default":2}}],"groups":[{"passes":[{"shader":"a.wgsl"}]},{"passes":[{"shader":"a.glsl"}]}]}"#,
         );
         assert!(glsl.unwrap_err().to_string().contains("only for WGSL"));
     }
@@ -985,7 +991,7 @@ mod tests {
     #[test]
     fn repeated_inputs_expand_in_every_group() {
         let m = Manifest::parse(
-            br#"{"api":2,"id":"t.x","name":"X","inputs":[{"name":"a"},{"name":"s","repeat":{"default":2,"max":3}}],
+            br#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"s","repeat":{"default":2,"max":3}}],
                 "groups":[{"requires":{"backend":["vulkan"]},"passes":[{"shader":"a.wgsl","inputs":["s"]}]},{"passes":[{"shader":"b.wgsl","inputs":["a","s"]}]}]}"#,
         )
         .unwrap();
@@ -994,5 +1000,21 @@ mod tests {
         assert_eq!(e.groups[1].passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
         let r = e.resolve(&target(wgpu::Backend::Dx12, 0, "x", wgpu::Features::empty())).unwrap();
         assert_eq!(r[0].passes[0].shader, "b.wgsl");
+    }
+
+    #[test]
+    fn used_for_is_required_and_checked() {
+        let parse = |used_for: &str| {
+            Manifest::parse(format!(r#"{{"id":"t.x","name":"X"{used_for},"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes())
+                .map(|m| m.used_for)
+                .map_err(|e| e.to_string())
+        };
+        assert_eq!(parse(r#","used_for":["gpufx"]"#).unwrap(), ["gpufx"]);
+        let missing = parse("").unwrap_err();
+        assert!(missing.contains("missing field `used_for`") && missing.contains(r#""used_for": ["gpufx"]"#), "{missing}");
+        assert!(parse(r#","used_for":[]"#).unwrap_err().contains("`used_for` is empty"));
+        assert!(parse(r#","used_for":["gpufx_blur"]"#).unwrap_err().contains("unknown filter `gpufx_blur`"));
+        // Known names parse; the opener checks its own (see `Package::open`).
+        assert_eq!(parse(r#","used_for":["gpufx_ai_upscale"]"#).unwrap(), ["gpufx_ai_upscale"]);
     }
 }

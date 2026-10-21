@@ -14,6 +14,7 @@ struct RawModel {
     version: u32,
     #[serde(default)]
     name: String,
+    used_for: Vec<String>,
     inputs: Vec<RawInput>,
     outputs: Vec<String>,
     ops: Vec<RawOp>,
@@ -152,6 +153,8 @@ pub struct Op {
 #[derive(Debug, Clone)]
 pub struct Model {
     pub name: String,
+    /// The filters the model is for (see [`crate::used_for`]).
+    pub used_for: Vec<String>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub ops: Vec<Op>,
@@ -246,15 +249,49 @@ fn parse_op(raw: RawOp) -> Result<Op, Error> {
 
 impl Model {
     pub fn parse(json: &[u8]) -> Result<Self, Error> {
-        let raw: RawModel = serde_json::from_slice(json).map_err(|e| err(format!("model.json: {e}")))?;
+        let raw: RawModel = serde_json::from_slice(json).map_err(|e| {
+            let hint = if e.to_string().starts_with("missing field `used_for`") {
+                r#": list the filters the model is for, e.g. "used_for": ["gpufx_ai_upscale"]"#
+            } else {
+                ""
+            };
+            err(format!("model.json: {e}{hint}"))
+        })?;
         if raw.format != "gpufx-nn" || raw.version != 1 {
             return Err(err("model.json is not a gpufx-nn version 1 model"));
         }
+        crate::used_for::validate(&raw.used_for).map_err(|e| err(format!("model.json: {e}")))?;
         let mut ops = Vec::with_capacity(raw.ops.len());
         for o in raw.ops {
             let name = o.name.clone();
             ops.push(parse_op(o).map_err(|e| err(format!("model.json: op {name}: {e}")))?);
         }
-        Ok(Model { name: raw.name, inputs: raw.inputs.into_iter().map(|i| i.name).collect(), outputs: raw.outputs, ops })
+        Ok(Model {
+            name: raw.name,
+            used_for: raw.used_for,
+            inputs: raw.inputs.into_iter().map(|i| i.name).collect(),
+            outputs: raw.outputs,
+            ops,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(used_for: &str) -> Result<Model, String> {
+        let json =
+            format!(r#"{{"format":"gpufx-nn","version":1,"name":"m"{used_for},"inputs":[{{"name":"in0"}}],"outputs":["in0"],"ops":[]}}"#);
+        Model::parse(json.as_bytes()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn used_for_is_required_and_checked() {
+        assert_eq!(parse(r#","used_for":["gpufx_ai_upscale"]"#).unwrap().used_for, ["gpufx_ai_upscale"]);
+        let missing = parse("").err().unwrap();
+        assert!(missing.contains("missing field `used_for`") && missing.contains(r#""used_for": ["gpufx_ai_upscale"]"#), "{missing}");
+        assert!(parse(r#","used_for":[]"#).err().unwrap().contains("`used_for` is empty"));
+        assert!(parse(r#","used_for":["upscale"]"#).err().unwrap().contains("unknown filter `upscale`"));
     }
 }

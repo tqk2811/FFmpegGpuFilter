@@ -2,6 +2,7 @@
   "api": 1,
   "id": "io.github.tqk2811.gradient-map",
   "name": "Teal & Orange",
+  "used_for": ["gpufx"],
   "version": "1.0.0",
   "description": "Color grade through a gradient map shipped as a PNG in the package.",
   "inputs": [{ "name": "src" }],

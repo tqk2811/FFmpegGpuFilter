@@ -23,6 +23,7 @@ pub mod runtime;
 mod shader_cache;
 mod stage;
 mod texture;
+pub mod used_for;
 #[cfg(target_vendor = "apple")]
 pub mod videotoolbox;
 #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]

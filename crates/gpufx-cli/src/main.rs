@@ -51,6 +51,7 @@ fn info(path: &str) -> Result<(), String> {
     if !m.description.is_empty() {
         println!("  {}", m.description);
     }
+    println!("used for: {}", m.used_for.join(", "));
     println!("inputs:");
     for i in &m.inputs {
         println!("  {} {}", i.name, i.description);
