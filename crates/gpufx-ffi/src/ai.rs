@@ -722,7 +722,10 @@ mod tests {
         unsafe {
             assert_eq!(CStr::from_ptr(gpufx_ai_upscale_device(ai)).to_bytes(), b"");
             assert_eq!(gpufx_ai_upscale_process_vulkan(ai, std::ptr::null_mut(), std::ptr::null_mut()), -1);
-            assert!(last_error().contains("no device yet"), "{}", last_error());
+            // Builds without Vulkan frames (macOS) refuse before looking for a device.
+            let want =
+                if cfg!(any(windows, all(unix, not(target_vendor = "apple")))) { "no device yet" } else { "without Vulkan frame support" };
+            assert!(last_error().contains(want), "{}", last_error());
             gpufx_ai_upscale_free(ai);
             gpufx_ai_upscale_free(std::ptr::null_mut());
         }
