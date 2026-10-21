@@ -8,16 +8,22 @@ use std::path::{Path, PathBuf};
 
 use gpufx_core::{Effect, FrameInfo, GpuContext, Image, ImageMut, Package};
 
+/// Pushes every package directory (one with a `manifest.json`) below `dir`, at any depth.
+fn collect_packages(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.join("manifest.json").exists() {
+            out.push(p);
+        } else if p.is_dir() {
+            collect_packages(&p, out);
+        }
+    }
+}
+
 fn example() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects");
-    let mut all: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|g| g.unwrap().path())
-        .filter(|g| g.is_dir())
-        .flat_map(|g| std::fs::read_dir(g).unwrap())
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.join("manifest.json").exists())
-        .collect();
+    let mut all: Vec<PathBuf> = Vec::new();
+    collect_packages(&dir, &mut all);
     all.sort();
     all.into_iter().next().unwrap()
 }
@@ -153,14 +159,8 @@ fn run_all_d3d12(dir: Option<&Path>) -> Option<(Vec<Vec<u8>>, Option<gpufx_core:
     let start = std::time::Instant::now();
     let ctx = GpuContext::with_shader_cache(gpufx_core::Backend::Dx12, dir).map_err(|e| eprintln!("skipping: {e}")).ok()?;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects");
-    let mut all: Vec<_> = std::fs::read_dir(root)
-        .unwrap()
-        .map(|g| g.unwrap().path())
-        .filter(|g| g.is_dir())
-        .flat_map(|g| std::fs::read_dir(g).unwrap())
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.join("manifest.json").exists())
-        .collect();
+    let mut all: Vec<PathBuf> = Vec::new();
+    collect_packages(&root, &mut all);
     all.sort();
     let effects: Vec<Effect> = all.into_iter().map(|p| Effect::new(ctx.clone(), Package::open(p).unwrap()).unwrap()).collect();
     let opened = start.elapsed();

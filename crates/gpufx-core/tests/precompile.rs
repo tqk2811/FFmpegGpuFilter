@@ -3,9 +3,21 @@
 //! it sets that variable for the whole process. Skipped without D3D12 or dxcompiler.dll.
 #![cfg(windows)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpufx_core::{Backend, Effect, FrameInfo, GpuContext, Image, ImageMut, Package};
+
+/// Pushes every package directory (one with a `manifest.json`) below `dir`, at any depth.
+fn collect_packages(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.join("manifest.json").exists() {
+            out.push(p);
+        } else if p.is_dir() {
+            collect_packages(&p, out);
+        }
+    }
+}
 
 /// Every packed example on a new D3D12 device without cache directory: outputs and
 /// shader cache counters.
@@ -36,14 +48,8 @@ fn precompiled_shaders_are_used_only_when_trusted() {
         return;
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects");
-    let mut dirs: Vec<_> = std::fs::read_dir(root)
-        .unwrap()
-        .map(|g| g.unwrap().path())
-        .filter(|g| g.is_dir())
-        .flat_map(|g| std::fs::read_dir(g).unwrap())
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.join("manifest.json").exists())
-        .collect();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    collect_packages(&root, &mut dirs);
     dirs.sort();
     let out = std::env::temp_dir().join(format!("gpufx-precompile-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out);

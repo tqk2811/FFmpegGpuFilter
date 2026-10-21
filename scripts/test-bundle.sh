@@ -198,19 +198,19 @@ pt_tests() {
     [ "$4" = 1 ] || return 0
     BX="split[x][y];[y]$I[yi];[x][yi]gpufx=graph="
     pt_check "$l: bypass=auto after the enabled frames relabels the last input" \
-        "$(pt_md5 "$f" "$u,$BX'$FX/ffmpeg/crossfade.zip=progress=1':enable='eq(n\,1)':bypass=auto")" \
+        "$(pt_md5 "$f" "$u,$BX'$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=1':enable='eq(n\,1)':bypass=auto")" \
         "$(echo "$PT_SRC" | head -n 1; echo "$PT_ONCE" | tail -n +2)" relabelled
     pt_check "$l: bypass=0 passes input 0" \
-        "$(pt_md5 "$f" "$u,$BX'$FX/ffmpeg/crossfade.zip=progress=1':enable='eq(n\,1)':bypass=0")" \
+        "$(pt_md5 "$f" "$u,$BX'$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=1':enable='eq(n\,1)':bypass=0")" \
         "$(echo "$PT_SRC" | head -n 1; echo "$PT_ONCE" | sed -n 2p; echo "$PT_SRC" | sed -n 3p)" relabelled
     # Inline bypass=auto: the effect alone (every effect off: relabelled), and inside a chain
     # (copied into the input of the next effect). FFmpeg's option parser splits at ':', so
     # the keys are separated by '&' (or '\:') inside the quotes.
     pt_check "$l: inline bypass=auto of a single effect" \
-        "$(pt_md5 "$f" "$u,$BX'$FX/ffmpeg/crossfade.zip=progress=1&enable=eq(n\,1)&bypass=auto'")" \
+        "$(pt_md5 "$f" "$u,$BX'$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=1&enable=eq(n\,1)&bypass=auto'")" \
         "$(echo "$PT_SRC" | head -n 1; echo "$PT_ONCE" | tail -n +2)" relabelled
     pt_check "$l: inline bypass=auto inside a chain" \
-        "$(pt_md5 "$f" "$u,$BX'$FX/ffmpeg/crossfade.zip=progress=1\:enable=eq(n\,1)\:bypass=auto|$FX/ffmpeg/invert.zip'")" \
+        "$(pt_md5 "$f" "$u,$BX'$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=1\:enable=eq(n\,1)\:bypass=auto|$FX/ffmpeg/invert.zip'")" \
         "$(echo "$PT_ONCE" | head -n 1; echo "$PT_SRC" | tail -n +2)" true
 }
 # Main frame count, without gpufx (the late input tests compare against it).
@@ -317,7 +317,7 @@ ok "chroma-key: yuv420p in, rgba out" -i "$A" -vf "format=yuv420p,gpufx=graph=$F
 # shellcheck disable=SC2086
 rejects "chroma-key: gray input" "pixel format .gray. is not supported" -i "$A" -vf "format=gray,gpufx=graph=$FX/ffmpeg/chroma-key.zip" $NULL
 # shellcheck disable=SC2086
-rejects "crossfade: inputs of different sizes" "must equal the first input" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph=$FX/ffmpeg/crossfade.zip" -an $NULL
+rejects "crossfade: inputs of different sizes" "must equal the first input" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip" -an $NULL
 # Without graph reinit, frames of the new size reach gpufx: it must refuse them, not
 # overflow its buffers. chroma-key takes YUV as it is, so no scale sits in between.
 # shellcheck disable=SC2086
@@ -327,7 +327,7 @@ rejects "size change mid-stream" "changed from 320x180 yuvj420p to 300x180" -rei
 rejects "GPU output into a CPU filter" "Impossible to convert\|hwdownload" -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip,format=rgba" $NULL
 echo "warnings:"
 # shellcheck disable=SC2086
-warns "different sample aspect ratios" "has sample aspect ratio 2:1" -i "$A" -i "$E" -filter_complex "[0][1]gpufx=graph=$FX/ffmpeg/crossfade.zip" -an $NULL
+warns "different sample aspect ratios" "has sample aspect ratio 2:1" -i "$A" -i "$E" -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip" -an $NULL
 
 echo "pixels:"
 # The GPU must really change frames: invert once differs from the source, twice restores
@@ -395,14 +395,14 @@ rejects "enum name the package does not have" "unknown value .wipeup2." -i "$A" 
 # shellcheck disable=SC2086
 rejects "the params option is gone" "params" -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip:params='amount=0'" $NULL
 # shellcheck disable=SC2086
-rejects "only the first effect takes two inputs" "takes 2 inputs" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip|$FX/ffmpeg/crossfade.zip'" $NULL
+rejects "only the first effect takes two inputs" "takes 2 inputs" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip|$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip'" $NULL
 # shellcheck disable=SC2086
-ok "a transition first in a chain" -i "$A" -i "$B" -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/crossfade.zip|$FX/ffmpeg/invert.zip'" -an $NULL
+ok "a transition first in a chain" -i "$A" -i "$B" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip|$FX/ffmpeg/invert.zip'" -an $NULL
 
 echo "graphs in one filter:"
 # graph='...' runs a DAG on the GPU: same pixels as the filters it stands for.
-SPLIT_MD5=$(md5 "split[a][b];[a]gpufx=graph=$FX/ffmpeg/grayscale.zip[g];[g][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.3'")
-GRAPH_MD5=$(md5 "gpufx=graph='[0]split[a][b]; [a]$FX/ffmpeg/grayscale.zip[g]; [g][b]$FX/ffmpeg/crossfade.zip=progress=0.3[out]'")
+SPLIT_MD5=$(md5 "split[a][b];[a]gpufx=graph=$FX/ffmpeg/grayscale.zip[g];[g][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.3'")
+GRAPH_MD5=$(md5 "gpufx=graph='[0]split[a][b]; [a]$FX/ffmpeg/grayscale.zip[g]; [g][b]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.3[out]'")
 if [ -n "$SPLIT_MD5" ] && [ "$GRAPH_MD5" = "$SPLIT_MD5" ]; then pass "graph with split equals split + two filters"
 else fail "graph with split equals split + two filters"; cat "$CLIPS/last.log"; fi
 LINEAR_MD5=$(md5 "gpufx=graph='[0]$FX/ffmpeg/invert.zip|$FX/ffmpeg/invert.zip[out]'")
@@ -422,20 +422,20 @@ else fail "two output pads to two files"; cat "$CLIPS/last.log"; fi
 # Two inputs, two outputs, inline parameters, sendcmd by node label and the timeline.
 # shellcheck disable=SC2086
 ok "graph: 2 inputs, 2 outputs, sendcmd, enable" -i "$A" -i "$B" -filter_complex \
-    "[0:v][1:v]gpufx@g=graph='[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/ffmpeg/crossfade.zip=progress=0.5[x]; [x]split[x1][x2]; [x2][1]$FX/ffmpeg/wipe-transition.zip=progress=t[out]':enable='lt(t\,0.8)'[p][q];[q]sendcmd=c='0.5 gpufx@g params gb.strength=0.2',nullsink" \
+    "[0:v][1:v]gpufx@g=graph='[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5[x]; [x]split[x1][x2]; [x2][1]$FX/ffmpeg/wipe-transition.zip=progress=t[out]':enable='lt(t\,0.8)'[p][q];[q]sendcmd=c='0.5 gpufx@g params gb.strength=0.2',nullsink" \
     -map "[p]" -an $NULL
 # shellcheck disable=SC2086
 rejects "the effect option is gone" "Option not found" -i "$A" -an -vf "gpufx=effect=$FX/ffmpeg/invert.zip" $NULL
 # shellcheck disable=SC2086
-rejects "graph: cycle" "cycle through" -i "$A" -an -vf "gpufx=graph='[0][b]$FX/ffmpeg/crossfade.zip[a]; [a]split[b][out]'" $NULL
+rejects "graph: cycle" "cycle through" -i "$A" -an -vf "gpufx=graph='[0][b]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip[a]; [a]split[b][out]'" $NULL
 # shellcheck disable=SC2086
-rejects "graph: label never written" "is read but never written" -i "$A" -an -vf "gpufx=graph='[0][c]$FX/ffmpeg/crossfade.zip[out]'" $NULL
+rejects "graph: label never written" "is read but never written" -i "$A" -an -vf "gpufx=graph='[0][c]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip[out]'" $NULL
 # shellcheck disable=SC2086
-rejects "graph: label read twice" "is read twice" -i "$A" -an -vf "gpufx=graph='[0]$FX/ffmpeg/invert.zip[a]; [a][a]$FX/ffmpeg/crossfade.zip[out]'" $NULL
+rejects "graph: label read twice" "is read twice" -i "$A" -an -vf "gpufx=graph='[0]$FX/ffmpeg/invert.zip[a]; [a][a]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip[out]'" $NULL
 # shellcheck disable=SC2086
-rejects "graph: wrong number of labels" "takes 2 inputs, the node gives it 1" -i "$A" -an -vf "gpufx=graph='[0]$FX/ffmpeg/crossfade.zip[out]'" $NULL
+rejects "graph: wrong number of labels" "takes 2 inputs, the node gives it 1" -i "$A" -an -vf "gpufx=graph='[0]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip[out]'" $NULL
 # shellcheck disable=SC2086
-rejects "graph: same size rule inside the graph" "must equal the first input" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='[0]$FX/ffmpeg/invert.zip[i]; [i][1]$FX/ffmpeg/crossfade.zip[out]'" -an $NULL
+rejects "graph: same size rule inside the graph" "must equal the first input" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='[0]$FX/ffmpeg/invert.zip[i]; [i][1]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip[out]'" -an $NULL
 
 echo "effects switched by their inline enable=:"
 NE_IDX=$(md5 "gpufx=graph='$FX/ffmpeg/invert.zip=enable=0|$FX/ffmpeg/invert.zip'")
@@ -497,7 +497,7 @@ pts() {
                         {printf "%d/%d ", $3 * num * 1000 / den + 0.5, $4 * num * 1000 / den + 0.5}'
 }
 MAIN_PTS=$(pts -i "$A" -vf "format=rgba")
-MIXED_PTS=$(pts -i "$A" -i "$D" -filter_complex "[0][1]gpufx=graph=$FX/ffmpeg/crossfade.zip,hwdownload,format=yuv420p")
+MIXED_PTS=$(pts -i "$A" -i "$D" -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip,hwdownload,format=yuv420p")
 if [ -n "$MAIN_PTS" ] && [ "$MIXED_PTS" = "$MAIN_PTS" ]; then
     pass "25 fps + 60 fps input keeps the 25 fps timestamps and durations"
 else
@@ -539,7 +539,7 @@ echo "premultiplied alpha:"
 # shellcheck disable=SC2086
 ok "premultiplied input (EXR)" -i "$X" -vf "gpufx=graph=$FX/ffmpeg/invert.zip" $NULL
 # shellcheck disable=SC2086
-ok "premultiplied and straight inputs together" -i "$X" -i "$P" -filter_complex "[0][1]gpufx=graph=$FX/ffmpeg/crossfade.zip" $NULL
+ok "premultiplied and straight inputs together" -i "$X" -i "$P" -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip" $NULL
 ok "premultiplied output (EXR)" -i "$X" -vf "format=rgba,gpufx=graph=$FX/ffmpeg/chroma-key.zip,hwdownload,format=rgba" -c:v exr -f image2 -update 1 -y "$CLIPS/out.exr"
 
 echo "late second input:"
@@ -547,7 +547,7 @@ echo "late second input:"
 count() {
     gpu_ff "$@" -an -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | wc -l | tr -d ' '
 }
-LATE_N=$(count -i "$A" -itsoffset 0.5 -i "$B" -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.5',hwdownload,format=yuv420p")
+LATE_N=$(count -i "$A" -itsoffset 0.5 -i "$B" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=yuv420p")
 if [ "$MAIN_N" -gt 0 ] && [ "$LATE_N" = "$MAIN_N" ]; then
     pass "second input starting at 0.5 s keeps all $MAIN_N main frames"
 else
@@ -679,7 +679,7 @@ VKN=invert-twice
 same "invert twice on Vulkan frames restores the frame" \
     "$(vk_md5 rgba "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")" "$(sw_md5 rgba "$UP")"
 # A graph whose two inputs are one frame (split before gpufx): locked and waited once.
-G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/ffmpeg/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
+G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
 VKN=graph
 same "graph on Vulkan frames equals software frames" \
     "$(vk_md5 nv12 "split[p][q];[p][q]gpufx=graph='$G'")" \
@@ -693,7 +693,7 @@ ok "timeline enable on Vulkan frames" -i "$A" -an \
     -vf "format=nv12,$UP,gpufx=graph=$FX/ffmpeg/invert.zip:enable='gte(t\,0.5)',hwdownload,format=nv12" $NULL
 VKN=late-input
 LATE_VK=$(vk_ff -i "$A" -itsoffset 0.5 -i "$B" -an -filter_complex \
-    "[0]format=rgba,$UP[a];[1]format=rgba,$UP[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.5',hwdownload,format=rgba" \
+    "[0]format=rgba,$UP[a];[1]format=rgba,$UP[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=rgba" \
     -f framemd5 - 2> "$(vk_log)" | grep -v '^#' | wc -l | tr -d ' ')
 if [ "$LATE_VK" = "$MAIN_N" ]; then pass "late second input on Vulkan frames keeps all $MAIN_N frames"
 else fail "late second input on Vulkan frames (want $MAIN_N, got $LATE_VK)"; show_vk_log; fi
@@ -721,9 +721,9 @@ fi
 # Vulkan and software inputs together: gpufx uploads the software one on the same device.
 VKN=mixed
 same "Vulkan and software inputs mixed" \
-    "$(vk_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba,$UP[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
+    "$(vk_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba,$UP[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
         -f framemd5 - 2> "$(vk_log)" | grep -v '^#' | awk -F, '{print $NF}')" \
-    "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
+    "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
         -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
 # out_format=rgba between chained gpufx: the middle ones skip the YUV conversions, and the
 # chain gives the pixels of the same effects chained in one gpufx.
@@ -942,7 +942,7 @@ for api in d3d12va d3d11va; do
         "$(sw_md5 nv12 "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")"
     pt_tests "$API nv12" nv12 hwupload 0
     # One frame on two input pads (split before gpufx).
-    G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/ffmpeg/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
+    G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
     same "$API: graph equals software frames" \
         "$(dx_md5 nv12 "split[p][q];[p][q]gpufx=graph='$G'")" \
         "$(sw_md5 nv12 "split[p][q];[p][q]gpufx=graph='$G'")"
@@ -950,21 +950,21 @@ for api in d3d12va d3d11va; do
     ok "$API: timeline enable" -i "$A" -an \
         -vf "format=nv12,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip:enable='gte(t\,0.5)',hwdownload,format=nv12" $NULL
     LATE_DX=$(gpu_ff -i "$A" -itsoffset 0.5 -i "$B" -an -filter_complex \
-        "[0]format=nv12,hwupload[a];[1]format=nv12,hwupload[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.5',hwdownload,format=nv12" \
+        "[0]format=nv12,hwupload[a];[1]format=nv12,hwupload[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=nv12" \
         -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | wc -l | tr -d ' ')
     if [ "$LATE_DX" = "$MAIN_N" ]; then pass "$API: late second input keeps all $MAIN_N frames"
     else fail "$API: late second input (want $MAIN_N, got $LATE_DX)"; cat "$CLIPS/last.log"; fi
     # A late software input: its blank frame is made on the device too.
     LATE_SW=$(gpu_ff -i "$A" -itsoffset 0.5 -i "$B" -an -filter_complex \
-        "[0]format=nv12[a];[1]format=nv12[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.5',hwdownload,format=nv12" \
+        "[0]format=nv12[a];[1]format=nv12[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=nv12" \
         -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | wc -l | tr -d ' ')
     if [ "$LATE_SW" = "$MAIN_N" ]; then pass "$API: late second software input keeps all $MAIN_N frames"
     else fail "$API: late second software input (want $MAIN_N, got $LATE_SW)"; cat "$CLIPS/last.log"; fi
     # GPU and software inputs together: gpufx uploads the software one to the same device.
     same "$API and software inputs mixed" \
-        "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=nv12,hwupload[a];[1]format=nv12[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.4',hwdownload,format=nv12" \
+        "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=nv12,hwupload[a];[1]format=nv12[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=nv12" \
             -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')" \
-        "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=nv12,hwupload[a];[1]format=nv12,hwupload[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.4',hwdownload,format=nv12" \
+        "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=nv12,hwupload[a];[1]format=nv12,hwupload[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=nv12" \
             -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
     # DXGI formats of ffmpeg/patches: hwupload then hwdownload gives the frame back bit for
     # bit. A format the GPU has no texture for is left out by FFmpeg (no error to check).
@@ -1001,7 +1001,7 @@ for api in d3d12va d3d11va; do
                 $DEC -i "$M2" -frames:v 3 -vf "gpufx=graph=$FX/ffmpeg/invert.zip" $NULL
             # shellcheck disable=SC2086
             ok "$API: GPU and software inputs, GPU input of another device (its device wins)" \
-                $DEC -i "$M2" -i "$B" -frames:v 3 -filter_complex "[0][1]gpufx=graph=$FX/ffmpeg/crossfade.zip" $NULL
+                $DEC -i "$M2" -i "$B" -frames:v 3 -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip" $NULL
             if [ -n "$VK" ]; then
                 DEV=$GPU
                 # shellcheck disable=SC2086
@@ -1091,12 +1091,12 @@ vt_tests() {
     same "VideoToolbox: invert twice equals software frames" \
         "$(vt_md5 nv12 "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")" \
         "$(sw_md5 nv12 "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")"
-    G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/ffmpeg/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
+    G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
     same "VideoToolbox: graph equals software frames" \
         "$(vt_md5 nv12 "split[p][q];[p][q]gpufx=graph='$G'")" \
         "$(sw_md5 nv12 "split[p][q];[p][q]gpufx=graph='$G'")"
     LATE_VT=$(gpu_ff -i "$A" -itsoffset 0.5 -i "$B" -an -filter_complex \
-        "[0]format=nv12,hwupload[a];[1]format=nv12[b];[a][b]gpufx=graph='$FX/ffmpeg/crossfade.zip=progress=0.5',hwdownload,format=nv12" \
+        "[0]format=nv12,hwupload[a];[1]format=nv12[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=nv12" \
         -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | wc -l | tr -d ' ')
     if [ "$LATE_VT" = "$MAIN_N" ]; then pass "VideoToolbox: late second software input keeps all $MAIN_N frames"
     else fail "VideoToolbox: late second software input (want $MAIN_N, got $LATE_VT)"; cat "$CLIPS/last.log"; fi

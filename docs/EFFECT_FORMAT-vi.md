@@ -531,7 +531,7 @@ theo cùng quy tắc. `gpufx info` in các tên kèm số của chúng.
 
 ## Ví dụ có sẵn
 
-Các ví dụ nằm trong ba thư mục nhóm dưới `packages/effects/`: `ffmpeg/` (tương đương filter dựng sẵn và chuyển cảnh `xfade` của FFmpeg), `slideshow/` (viết lại từ [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)) và `standalone/` (hiệu ứng tự viết). Xem [packages/effects/README.md](../packages/effects/README.md). Nhóm chỉ là thư mục: gói vẫn được gọi bằng tên riêng của nó.
+Các ví dụ nằm trong các thư mục nhóm dưới `packages/effects/`: `ffmpeg/` (tương đương filter dựng sẵn và chuyển cảnh `xfade` của FFmpeg), `slideshow/` (viết lại từ [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (dựng lại chuyển cảnh CapCut), `standalone/` (hiệu ứng tự viết) và nhóm lồng `tqk2811/TqkLibrary.FFmpegTransition/` (port từ [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). Nhóm có thể nằm ở độ sâu bất kỳ: gói là mọi thư mục có `manifest.json`. Xem [packages/effects/README.md](../packages/effects/README.md). Nhóm chỉ là thư mục: gói vẫn được gọi bằng tên riêng của nó.
 
 | Gói | Minh hoạ |
 |-----|----------|
@@ -551,15 +551,15 @@ Các ví dụ nằm trong ba thư mục nhóm dưới `packages/effects/`: `ffmp
 | `packages/effects/ffmpeg/chroma-key` | Phông xanh → alpha; **quy tắc** `formats` input, output `rgba`/`yuva420p`/`yuva444p` |
 | `packages/effects/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
 | `packages/effects/ffmpeg/hstack`, `packages/effects/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `output.size` `hstack`/`vstack`, output lớn hơn input |
-| `packages/effects/ffmpeg/crossfade`, `packages/effects/ffmpeg/slide-transition`, `packages/effects/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
-| `packages/effects/ffmpeg/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/effects/ffmpeg/slide-transition`, `packages/effects/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
 | `packages/effects/ffmpeg/blend` | 2 input, tham số `int` `mode` chọn 1 trong 40 công thức |
 | `packages/effects/ffmpeg/masked-merge` | 3 input (nền, lớp phủ, mask) với **quy tắc** `same_size` |
 | `packages/effects/ffmpeg/selectivecolor` | Tham số `vec4` |
 | `packages/effects/ffmpeg/box-blur` | 6 pass; các vòng vượt `power` chép nguyên input sang output |
 | `packages/effects/ffmpeg/displace` | 3 input, 2 trong số đó làm bản đồ dịch chuyển |
-| `packages/effects/slideshow/collapse`, `packages/effects/slideshow/expand` | Clip đầu thu vào giữa / clip sau nở ra từ giữa: theo chiều ngang, chiều dọc, hộp, hình tròn (`mode`) |
-| `packages/effects/ffmpeg/dip-to-color` | Tối dần về một màu (mặc định đen) rồi hiện clip sau |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/collapse`, `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/expand` | Clip đầu thu vào giữa / clip sau nở ra từ giữa: theo chiều ngang, chiều dọc, hộp, hình tròn (`mode`) |
+| `packages/effects/tqk2811/TqkLibrary.FFmpegTransition/dip-to-color` | Tối dần về một màu (mặc định đen) rồi hiện clip sau |
 | `packages/effects/ffmpeg/dissolve` | Hạt ngẫu nhiên (hash số nguyên, giống nhau trên mọi GPU) |
 | `packages/effects/ffmpeg/pixelize-transition`, `packages/effects/ffmpeg/zoom-transition`, `packages/effects/ffmpeg/fade-grays`, `packages/effects/slideshow/blinds` | Chuyển cảnh kiểu `xfade`: vỡ điểm ảnh, zoom, qua ảnh xám, rèm |
 | `packages/effects/slideshow/checkerboard`, `packages/effects/slideshow/push-box`, `packages/effects/slideshow/push-film`, `packages/effects/slideshow/photo-collection` | Chuyển cảnh slideshow theo [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (viết lại bằng shader): ô vuông lớn dần, hộp thu nhỏ - đẩy - phóng to, cuộn phim có lỗ vẽ bằng shader, ảnh bay vào vừa xoay vừa đáp nghiêng lên clip đầu (nối chuỗi để xếp chồng ảnh) |

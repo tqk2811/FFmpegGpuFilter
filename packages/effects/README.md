@@ -1,22 +1,19 @@
 # Example effects
 
-Each folder is one effect package (see [EFFECT_FORMAT](../../docs/EFFECT_FORMAT.md)), grouped by origin. `scripts/pack-effects.sh` zips every one to `dist/effects/<group>/<name>.zip`, keeping this layout; the release bundles ship the same `effects/<group>/` folders.
+Each folder is one effect package (see [EFFECT_FORMAT](../../docs/EFFECT_FORMAT.md)), grouped by origin. `scripts/pack-effects.sh` zips every one to `dist/effects/<group>/<name>.zip`, keeping this layout (a group can be nested, as `tqk2811/TqkLibrary.FFmpegTransition`); the release bundles ship the same `effects/<group>/` folders.
 
 ## ffmpeg
 
 Equivalents of FFmpeg built-in filters and `xfade` transitions.
 
 - [fade](ffmpeg/fade/README.md)
-- [crossfade](ffmpeg/crossfade/README.md)
 - [dissolve](ffmpeg/dissolve/README.md)
-- [dip-to-color](ffmpeg/dip-to-color/README.md)
 - [fade-grays](ffmpeg/fade-grays/README.md)
 - [pixelize-transition](ffmpeg/pixelize-transition/README.md)
 - [zoom-transition](ffmpeg/zoom-transition/README.md)
 - [wipe-transition](ffmpeg/wipe-transition/README.md)
 - [slide-transition](ffmpeg/slide-transition/README.md)
 - [circle-reveal](ffmpeg/circle-reveal/README.md)
-- [clock-wipe](ffmpeg/clock-wipe/README.md)
 - [grayscale](ffmpeg/grayscale/README.md)
 - [sepia](ffmpeg/sepia/README.md)
 - [invert](ffmpeg/invert/README.md)
@@ -136,14 +133,22 @@ Transitions and helpers ported from [tanersener/ffmpeg-video-slideshow-scripts](
 - [blinds](slideshow/blinds/README.md)
 - [box-in](slideshow/box-in/README.md)
 - [checkerboard](slideshow/checkerboard/README.md)
-- [collapse](slideshow/collapse/README.md)
-- [expand](slideshow/expand/README.md)
 - [push-box](slideshow/push-box/README.md)
 - [push-film](slideshow/push-film/README.md)
 - [photo-collection](slideshow/photo-collection/README.md)
 - [fit](slideshow/fit/README.md)
 - [sliding-bars](slideshow/sliding-bars/README.md)
 - [spin-transition](slideshow/spin-transition/README.md)
+
+## tqk2811/TqkLibrary.FFmpegTransition
+
+GPU ports of the transitions of [tqk2811/TqkLibrary.FFmpegTransition](tqk2811/TqkLibrary.FFmpegTransition/README.md).
+
+- [clock-wipe](tqk2811/TqkLibrary.FFmpegTransition/clock-wipe/README.md)
+- [collapse](tqk2811/TqkLibrary.FFmpegTransition/collapse/README.md)
+- [expand](tqk2811/TqkLibrary.FFmpegTransition/expand/README.md)
+- [dip-to-color](tqk2811/TqkLibrary.FFmpegTransition/dip-to-color/README.md)
+- [crossfade](tqk2811/TqkLibrary.FFmpegTransition/crossfade/README.md)
 
 ## standalone
 

@@ -38,4 +38,4 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 
 ## Notes
 
-Port of FFmpeg's `xfade` transition `fadeblack` (default color) and `fadewhite` (`color=#ffffff`). It differs from [dip-to-color](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/packages/effects/ffmpeg/dip-to-color/README.md): the clips are dipped only around the ends of the fade and mixed with each other in the middle, so the color is never fully reached.
+Port of FFmpeg's `xfade` transition `fadeblack` (default color) and `fadewhite` (`color=#ffffff`). It differs from [dip-to-color](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/packages/effects/tqk2811/TqkLibrary.FFmpegTransition/dip-to-color/README.md): the clips are dipped only around the ends of the fade and mixed with each other in the middle, so the color is never fully reached.
