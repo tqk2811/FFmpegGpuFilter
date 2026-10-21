@@ -1,0 +1,58 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.tonemap",
+  "name": "Tonemap",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Compresses the brightness range with a tone-mapping operator (none, linear, gamma, clip, reinhard, hable, mobius).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "tonemap",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "description": "Algorithm: 0 none, 1 linear, 2 gamma, 3 clip, 4 reinhard, 5 hable, 6 mobius"
+    },
+    {
+      "name": "param",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "description": "Algorithm parameter; 0 = FFmpeg's default for the algorithm (gamma 1.8, mobius 0.3, others 1). Reinhard: the value p in (0,1] is turned into (1-p)/p"
+    },
+    {
+      "name": "desat",
+      "type": "float",
+      "default": 2,
+      "min": 0,
+      "max": 100,
+      "description": "Desaturation strength of values brighter than this luma; 0 turns it off"
+    },
+    {
+      "name": "peak",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "description": "Signal peak override; 0 = 1.0 (the SDR white)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/tonemap.wgsl"
+        }
+      ]
+    }
+  ]
+}

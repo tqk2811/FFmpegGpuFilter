@@ -1,0 +1,66 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.hsvhold",
+  "name": "HSV Hold",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Removes the color from every pixel except those close to a hue/saturation/value, which keep their color.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "hue",
+      "type": "float",
+      "default": 0,
+      "min": -360,
+      "max": 360,
+      "description": "Key hue in degrees; a negative value ignores the hue"
+    },
+    {
+      "name": "sat",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Key saturation; a negative value ignores the saturation"
+    },
+    {
+      "name": "val",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Key value (brightness); a negative value ignores the value"
+    },
+    {
+      "name": "similarity",
+      "type": "float",
+      "default": 0.01,
+      "min": 1e-05,
+      "max": 1,
+      "description": "Distance from the key that keeps its color"
+    },
+    {
+      "name": "blend",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Width of the soft edge above the similarity; 0 = hard cut"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/hsvhold.wgsl"
+        }
+      ]
+    }
+  ]
+}

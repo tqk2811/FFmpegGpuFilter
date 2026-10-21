@@ -1,0 +1,48 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colorhold",
+  "name": "Color Hold",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Removes all color except pixels close to a key color, which stay in color; the rest turns gray.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "Color to keep; alpha is ignored"
+    },
+    {
+      "name": "similarity",
+      "type": "float",
+      "default": 0.01,
+      "min": 1e-05,
+      "max": 1,
+      "description": "Distance from the key color that keeps its color; 0.01 matches only very close colors, 1 everything"
+    },
+    {
+      "name": "blend",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Width of the soft edge above the similarity; 0 = hard cut"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colorhold.wgsl"
+        }
+      ]
+    }
+  ]
+}

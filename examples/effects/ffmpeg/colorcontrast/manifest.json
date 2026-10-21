@@ -1,0 +1,82 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colorcontrast",
+  "name": "Color Contrast",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Raises or lowers the contrast between complementary colors (red-cyan, green-magenta, blue-yellow).",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "rc",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Red-cyan contrast"
+    },
+    {
+      "name": "gm",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Green-magenta contrast"
+    },
+    {
+      "name": "by",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Blue-yellow contrast"
+    },
+    {
+      "name": "rcw",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Weight of the red-cyan contrast"
+    },
+    {
+      "name": "gmw",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Weight of the green-magenta contrast"
+    },
+    {
+      "name": "byw",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Weight of the blue-yellow contrast"
+    },
+    {
+      "name": "pl",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Amount of lightness preserved"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colorcontrast.wgsl"
+        }
+      ]
+    }
+  ]
+}

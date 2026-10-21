@@ -1,0 +1,58 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.limiter",
+  "name": "Limiter",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Clamps the pixel values of the selected channels to a minimum and a maximum.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "min",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 65535,
+      "description": "Lower limit, in code values of `depth` bits (clamped to the depth maximum)"
+    },
+    {
+      "name": "max",
+      "type": "int",
+      "default": 65535,
+      "min": 0,
+      "max": 65535,
+      "description": "Upper limit, in code values of `depth` bits (clamped to the depth maximum, so the default is no limit)"
+    },
+    {
+      "name": "planes",
+      "type": "int",
+      "default": 15,
+      "min": 0,
+      "max": 15,
+      "description": "Bit mask of the channels to limit: 1 green, 2 blue, 4 red, 8 alpha (FFmpeg's GBRAP plane order)"
+    },
+    {
+      "name": "depth",
+      "type": "int",
+      "default": 8,
+      "min": 1,
+      "max": 16,
+      "description": "Bit depth the `min` and `max` values refer to; 8 for ordinary 8-bit video"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/limiter.wgsl"
+        }
+      ]
+    }
+  ]
+}

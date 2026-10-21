@@ -1,0 +1,66 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.colorcorrect",
+  "name": "Color Correct",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Shifts the chroma of the shadows and highlights toward blue/red and scales the saturation.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "rl",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Shadow red shift"
+    },
+    {
+      "name": "bl",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Shadow blue shift"
+    },
+    {
+      "name": "rh",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Highlight red shift"
+    },
+    {
+      "name": "bh",
+      "type": "float",
+      "default": 0,
+      "min": -1,
+      "max": 1,
+      "description": "Highlight blue shift"
+    },
+    {
+      "name": "saturation",
+      "type": "float",
+      "default": 1,
+      "min": -3,
+      "max": 3,
+      "description": "Saturation (chroma scale)"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/colorcorrect.wgsl"
+        }
+      ]
+    }
+  ]
+}
