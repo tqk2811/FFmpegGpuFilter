@@ -1,0 +1,21 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.kirsch",
+  "name": "Kirsch",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Kirsch compass edge detector: the strongest response of the eight rotated 3x3 kernels.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "scale", "type": "float", "default": 1, "min": 0, "max": 65535, "description": "Gain applied to the response" },
+    { "name": "delta", "type": "float", "default": 0, "min": -65535, "max": 65535, "description": "Value added to the result, in 8-bit levels" },
+    { "name": "luma", "type": "bool", "default": false, "description": "1 = edges of the luma only, written to all three channels" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/kirsch.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

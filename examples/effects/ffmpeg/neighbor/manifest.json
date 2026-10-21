@@ -1,0 +1,21 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.neighbor",
+  "name": "Neighbor",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Erosion, dilation, deflate and inflate over the 3x3 neighbourhood, limited by a threshold.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "mode", "type": "int", "default": 0, "min": 0, "max": 3, "description": "0 = erosion, 1 = dilation, 2 = deflate, 3 = inflate" },
+    { "name": "coordinates", "type": "int", "default": 255, "min": 0, "max": 255, "description": "Erosion and dilation only: bit mask of the neighbours used; bit 0 = top-left, 1 = top, 2 = top-right, 3 = left, 4 = right, 5 = bottom-left, 6 = bottom, 7 = bottom-right" },
+    { "name": "threshold", "type": "int", "default": 255, "min": 0, "max": 255, "description": "Largest change of a value, in 8-bit levels; 0 = unchanged (`threshold0`)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/neighbor.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

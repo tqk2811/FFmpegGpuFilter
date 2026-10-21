@@ -1,0 +1,19 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.cas",
+  "name": "Contrast Adaptive Sharpen",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "AMD FidelityFX contrast adaptive sharpening: sharpens more where the local contrast is low.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "strength", "type": "float", "default": 0, "min": 0, "max": 1, "description": "Sharpening strength" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/cas.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.yaepblur",
+  "name": "YAEP Blur",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Yet another edge preserving blur: flat areas are averaged, high-variance areas keep their value.",
+  "inputs": [{ "name": "src" }],
+  "params": [
+    { "name": "radius", "type": "int", "default": 3, "min": 0, "max": 16, "description": "Window radius in pixels; 0 = off (`r`)" },
+    { "name": "sigma", "type": "int", "default": 128, "min": 1, "max": 100000, "description": "Blur strength: a window variance well below it is averaged, well above it is kept (`s`)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/yaepblur.wgsl", "inputs": ["src"], "output": "out" }
+      ]
+    }
+  ]
+}

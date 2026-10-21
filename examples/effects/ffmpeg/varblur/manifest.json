@@ -1,0 +1,23 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.varblur",
+  "name": "Variable Blur",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Box blur whose radius varies per pixel and channel with the brightness of a radius map (second input).",
+  "inputs": [
+    { "name": "src", "description": "Picture to blur" },
+    { "name": "radius", "description": "Radius map (same size as the first input): black = min_r, white = max_r", "same_size": true }
+  ],
+  "params": [
+    { "name": "min_r", "type": "int", "default": 0, "min": 0, "max": 7, "description": "Minimum blur radius, used where the map is black" },
+    { "name": "max_r", "type": "int", "default": 8, "min": 1, "max": 8, "description": "Maximum blur radius, used where the map is white (raised to min_r + 1 when not above min_r)" }
+  ],
+  "groups": [
+    {
+      "passes": [
+        { "shader": "shaders/varblur.wgsl" }
+      ]
+    }
+  ]
+}
