@@ -25,7 +25,7 @@ Written inline after the package name: `NAME.zip=name=value`. Several options ar
 | `pitch` | float | `0` | -360 to 360 | Pitch rotation in degrees |
 | `roll` | float | `0` | -360 to 360 | Roll rotation in degrees |
 | `rorder` | int | `0` | 0 to 5 | Rotation order: 0 ypr, 1 yrp, 2 pyr, 3 pry, 4 ryp, 5 rpy |
-| `h_fov`, `v_fov` | float | `0` | 0 to 360 | Output field of view in degrees; 0 = the default of the projection (flat and cylindrical 90x45, equisolid, orthographic, stereographic, fisheye and dfisheye 180x180, others 360x180) |
+| `h_fov`, `v_fov` | float | `0` | 0 to 360 | Output field of view in degrees; 0 = the default of the projection (flat and cylindrical 90x45, equisolid, orthographic, stereographic, fisheye and dfisheye 180x180, others 360x180). For pannini `h_fov` (and `ih_fov`) is the `d` factor of the projection, not degrees; its default 360 is FFmpeg's |
 | `d_fov` | float | `0` | 0 to 360 | Output diagonal field of view; above 0 it replaces `h_fov` and `v_fov` using the frame size |
 | `ih_fov`, `iv_fov`, `id_fov` | float | `0` | 0 to 360 | The same for the input |
 | `h_flip`, `v_flip`, `d_flip` | bool | `false` | | Flip the output horizontally, vertically or in depth |

@@ -27,7 +27,7 @@
       "default": 0,
       "min": 0,
       "max": 100,
-      "description": "Algorithm parameter; 0 = FFmpeg's default for the algorithm (gamma 1.8, mobius 0.3, others 1). Reinhard: the value p in (0,1] is turned into (1-p)/p"
+      "description": "Algorithm parameter; 0 = FFmpeg's default for the algorithm (gamma 1.8, mobius 0.3, others 1). Reinhard: the value p, valid in (0,1] (larger values are treated as 1), is turned into (1-p)/p"
     },
     {
       "name": "desat",

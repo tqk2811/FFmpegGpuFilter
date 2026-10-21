@@ -22,7 +22,7 @@ Written inline after the package name: `waveform.zip=name=value`. Several option
 | `components` | int | `0` | 0 to 1 | 0 luma (BT.709) in white, 1 red, green and blue in their colors |
 | `display` | int | `0` | 0 to 1 | With `components`=1: 0 overlay, 1 parade (the three components side by side or stacked) |
 | `intensity` | float | `0.04` | 0.001 to 1 | Brightness added by one pixel on a 256-level scale (as FFmpeg), so ~25 equal pixels reach white |
-| `max_samples` | int | `540` | 16 to 4096 | Samples per input line; lines longer than this are sampled at even steps, which bounds the work of each output pixel |
+| `max_samples` | int | `256` | 16 to 1024 | Samples per input line; lines longer than this are sampled at even steps, which bounds the work of each output pixel |
 | `opacity` | float | `1` | 0 to 1 | Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged |
 
 A `color` is `#rrggbb`.
@@ -44,6 +44,6 @@ gpufx run 'waveform.zip=components=1:display=1' -i in.png -o out.png
 
 ## Notes
 
-Port of FFmpeg's `waveform` filter (vf_waveform.c), lowpass filter only. Every output pixel loops over the input column (or row) it shows, so the cost per pixel is at most `max_samples` loads. The scope has the size of the input (FFmpeg's own output size, scale and graticule options are not ported). Differences: only the lowpass filter (FFmpeg also has flat, aflat, chroma, color, acolor, xflat, yflat); no chroma components (U/V) or YUV-native analysis, since shaders see RGB; no graticule; the level axis has one row (or column) per output pixel, not 256 steps; hits are counted over at most `max_samples` evenly spread samples, scaled so the brightness stays the same.
+Port of FFmpeg's `waveform` filter (vf_waveform.c), lowpass filter only. Every output pixel loops over the input column (or row) it shows, so the cost per pixel is at most `max_samples` loads. The scope has the size of the input (FFmpeg's own output size, scale and graticule options are not ported). Differences: only the lowpass filter (FFmpeg also has flat, aflat, chroma, color, acolor, xflat, yflat); no chroma components (U/V) or YUV-native analysis, since shaders see RGB; no graticule; the level axis has one row (or column) per output pixel, not 256 steps; hits are counted over at most `max_samples` evenly spread samples, scaled so the brightness stays the same. Cost is about output pixels x `max_samples` loads per frame. The brightness factor depends on the output size (along_size / 256, as FFmpeg scales by the line length), so the same `intensity` looks brighter or dimmer at other sizes.
 
 It replaces the picture: with `opacity` 1 the input is not visible. Use the scope on a branch of a graph.

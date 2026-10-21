@@ -19,7 +19,7 @@ Written inline after the package name: `tonemap.zip=name=value`. Several options
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
 | `tonemap` | int | `0` | 0 to 6 | Algorithm: 0 none, 1 linear, 2 gamma, 3 clip, 4 reinhard, 5 hable, 6 mobius |
-| `param` | float | `0` | 0 to 100 | Algorithm parameter; 0 = FFmpeg's default for the algorithm (gamma 1.8, mobius 0.3, others 1). Reinhard: the value p in (0,1] is turned into (1-p)/p |
+| `param` | float | `0` | 0 to 100 | Algorithm parameter; 0 = FFmpeg's default for the algorithm (gamma 1.8, mobius 0.3, others 1). Reinhard: the value p, valid in (0,1] (larger values are treated as 1), is turned into (1-p)/p |
 | `desat` | float | `2` | 0 to 100 | Desaturation strength of values brighter than this luma; 0 turns it off |
 | `peak` | float | `0` | 0 to 100 | Signal peak override; 0 = 1.0 (the SDR white) |
 

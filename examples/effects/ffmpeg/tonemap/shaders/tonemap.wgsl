@@ -30,7 +30,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     if (mode == 2) {
         prm = select(1.8, prm, has);
     } else if (mode == 4) {
-        prm = select(1.0, (1.0 - prm) / prm, has);
+        // valid range is (0,1]; a larger value would make prm negative (division by zero), so clamp it
+        let rp = min(prm, 1.0);
+        prm = select(1.0, (1.0 - rp) / rp, has);
     } else if (mode == 6) {
         prm = select(0.3, prm, has);
     } else {

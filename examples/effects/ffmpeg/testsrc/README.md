@@ -18,7 +18,7 @@ Written inline after the package name: `testsrc.zip=name=value`. Several options
 
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
-| `decimals` | int | `0` | 0 to 6 | Decimals of the clock |
+| `decimals` | int | `0` | 0 to 6 | Decimals of the clock (max 6; at 6 decimals the clock wraps after about 4294 s because the value is held in a 32-bit integer) |
 | `opacity` | float | `1` | 0 to 1 | Blend over the input picture: 1 = only the generated picture, 0 = the input unchanged |
 
 A `color` is `#rrggbb`.
@@ -40,6 +40,6 @@ gpufx run 'testsrc.zip=decimals=2' -i in.png -o out.png
 
 ## Notes
 
-Port of FFmpeg's `testsrc` source (vsrc_testsrc.c). Differences: the clock shows the time `t` of the filter in seconds (FFmpeg: the frame count times the time base), up to 8 digits, and the gradient line slides by 256 steps per second of `t` as in FFmpeg. The pixel geometry follows FFmpeg's integer math.
+Port of FFmpeg's `testsrc` source (vsrc_testsrc.c). Differences: the clock shows the time `t` of the filter in seconds (FFmpeg: the frame count times the time base), up to 8 digits (with `decimals=6` the clock wraps after about 4294 s), and the gradient line slides by 256 steps per second of `t` as in FFmpeg. The pixel geometry follows FFmpeg's integer math.
 
 The effect has no source of its own: gpufx effects always have an input, so the input `src` only sets the size (and is blended in by `opacity`). Use any video of the wanted size, for example `-f lavfi -i color=black:s=1280x720:r=25`.

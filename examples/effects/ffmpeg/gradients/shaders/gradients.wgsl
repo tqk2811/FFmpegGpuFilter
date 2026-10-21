@@ -48,7 +48,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     var cols = array<vec4f, 8>(params.c0, params.c1, params.c2, params.c3, params.c4, params.c5, params.c6, params.c7);
     var g = cols[0];
     if (f >= 1.0) {
-        g = cols[nb - 1];
+        // wrapping kinds close the loop back to the first color, so no seam at f = 1
+        g = select(cols[nb - 1], cols[0], wrap);
     } else if (f > 0.0) {
         let scl = f * f32(nwrap - 1);
         var i = i32(floor(scl));

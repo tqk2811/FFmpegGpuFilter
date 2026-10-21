@@ -44,6 +44,7 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i a.mp4 -i b.mp4 -i c.mp
 
 Differences from FFmpeg:
 
+- **Scaling and `fit` are additions**: FFmpeg's xstack does no scaling (inputs are placed at their own size). Here inputs are scaled into the cells; downscaling uses a plain bilinear sample (no mip-mapping or filtering), so large inputs alias.
 - **Output size**: the first input's size, with the other inputs scaled into cells, see Output. FFmpeg's pixel-exact placement is not possible.
 - **Not ported**: the custom `layout` string (arbitrary positions such as `0_0|w0_0`; it needs per-input offsets in pixels and a larger frame), `shortest` and `inputs` (the count comes from the graph labels).
 - The cells of a grid have equal sizes (FFmpeg takes the size of each row's first input).

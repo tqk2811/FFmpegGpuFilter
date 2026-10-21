@@ -18,12 +18,12 @@
       "same_size": true
     },
     {
-      "name": "min",
+      "name": "min_in",
       "description": "Clip used where the input is at or below the threshold (same size)",
       "same_size": true
     },
     {
-      "name": "max",
+      "name": "max_in",
       "description": "Clip used where the input is above the threshold (same size)",
       "same_size": true
     }

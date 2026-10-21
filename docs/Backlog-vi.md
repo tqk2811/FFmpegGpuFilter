@@ -165,6 +165,24 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: phủ thêm filter gốc FFmpeg cho gói zip; vài mục cần tính năng mới của định dạng effect (input LUT, frame trước).
 - **Ngày ghi**: 2026-10-21
 
+### [Vừa] Scope và blur lớn chạy kiểu gather, tốn theo bình phương
+- **Vấn đề**: vectorscope (số ô × samples²), waveform (mỗi pixel lặp `max_samples`), histogram và varblur (cửa sổ (2r+1)² thay cho bảng tổng tích luỹ của FFmpeg) đọc texture rất nhiều; đã hạ mặc định/giới hạn (vectorscope `samples` 64, waveform 256, varblur `max_r` 4) nhưng vẫn nặng ở 4K. chromanr tối đa 33×33 lần đọc mỗi pixel.
+- **Vị trí**: `examples/effects/ffmpeg/{vectorscope,waveform,histogram}/shaders/*.wgsl`, [varblur.wgsl](../examples/effects/ffmpeg/varblur/shaders/varblur.wgsl)
+- **Vì sao**: cần storage buffer + `atomicAdd` (scatter) cho scope và pass prefix-sum float cho varblur; định dạng effect hiện chưa có hai thứ này.
+- **Ngày ghi**: 2026-10-21
+
+### [Thấp] Frame đổi kích thước giữa chừng: thiết kế để sau
+- **Vấn đề**: `check_frame` báo lỗi khi input đổi kích thước giữa luồng; effect không ra được output đổi kích thước theo thời gian. User tạm bỏ vì phức tạp; zoom to dần dùng canvas trong suốt cố định (input đầu) thay thế.
+- **Vị trí**: [vf_gpufx.c:1684](../ffmpeg/vf_gpufx.c#L1684) (`check_frame`), [vf_gpufx.c:2067](../ffmpeg/vf_gpufx.c#L2067) (biến `w`/`h` lấy từ outlink), [vf_gpufx.c:2127](../ffmpeg/vf_gpufx.c#L2127) (`ff_get_video_buffer` theo link), `vf_gpufx_transfer.c` (`transfer_setup`)
+- **Vì sao / cách làm**: core (`graph.rs` `prepare`) đã dựng lại slot khi đổi cỡ. Phần C cần cache frames context theo (sw_format, w, h) như `old_frames`/`config_out_frames` của `vf_gpufx_ai_upscale.c`, kích thước theo từng frame cho output, biến biểu thức, passthrough, pool upload; `gpufx_upload`/`download` cấu hình lại. Output động cần `output.size` dạng biểu thức (api 2) + API FFI `_at`. Giới hạn của FFmpeg: chỉ `scale`, `libplacebo`, `format`, `null`, buffersink... nhận frame khác cỡ link; encoder giữ cỡ frame đầu.
+- **Ngày ghi**: 2026-10-21
+
+### [Thấp] `xfade-custom`: thiếu `PLANE` và hàm đọc pixel `a0..a3`/`b0..b3`
+- **Vấn đề**: biểu thức chạy giống nhau cho R/G/B, không đọc được pixel ở vị trí khác như `xfade=custom` của FFmpeg; `geq` cũng thiếu `p(x,y)`.
+- **Vị trí**: [xfade_custom.wgsl](../examples/effects/ffmpeg/xfade-custom/shaders/xfade_custom.wgsl); bộ dịch `expr` của gpufx-core
+- **Vì sao**: `PLANE` thêm rẻ (chạy biểu thức 3 lần); đọc pixel cần mở rộng định dạng `expr` cho phép gọi hàm lấy mẫu texture.
+- **Ngày ghi**: 2026-10-21
+
 ### [Thấp] Effect port FFmpeg: các finding review để sau
 - **Vấn đề**: (1) blend/masked-merge/masked-minmax lấy alpha của input đầu, tính trên RGB thay vì plane YUV. (2) distance-transition đo khác màu trên YUV BT.601 quy đổi, bỏ alpha. (3) perspective dựng ma trận bằng f32 mỗi pixel (méo nhiều thì lệch ~1 px), tứ giác suy biến ra NaN. (4) displace dùng luma của map cho mọi kênh. (5) colorchannelmixer: ngưỡng `lout` 1/510 lệch 255 lần so với FFmpeg, case pwr dùng `pow(abs)` mất dấu thay `cbrt`. (6) huesaturation dựng ma trận 4x4 và curves giải spline mỗi pixel, nên tính sẵn khi đổi tham số. (7) chroma-shift/hsv-key/luma-key cố định BT.709 full-range.
 - **Vị trí**: các gói tương ứng trong `examples/effects/ffmpeg/`

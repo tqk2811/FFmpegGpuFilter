@@ -1,6 +1,7 @@
 // Swaps two rectangles of the same size. Positions and size come as fractions of the frame and
 // are turned into whole pixels like FFmpeg's swaprect does with its expressions.
-// Like FFmpeg, nothing is swapped when the rectangle does not fit in the frame at both places.
+// Like FFmpeg, the rectangle is shrunk so it fits in the frame at both places (w = min(w, W-x1, W-x2), same for h);
+// nothing is swapped only when the shrunk size is not positive.
 // The first rectangle wins where the two overlap.
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -13,7 +14,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let a = vec2i(clamp(i32(params.x1 * globals.size.x), 0, W - 1), clamp(i32(params.y1 * globals.size.y), 0, H - 1));
     let b = vec2i(clamp(i32(params.x2 * globals.size.x), 0, W - 1), clamp(i32(params.y2 * globals.size.y), 0, H - 1));
     let size = vec2i(min(want.x, min(W - a.x, W - b.x)), min(want.y, min(H - a.y, H - b.y)));
-    let fits = size.x == want.x && size.y == want.y && size.x > 0 && size.y > 0;
+    let fits = size.x > 0 && size.y > 0;
 
     var q = p;
     if (fits) {

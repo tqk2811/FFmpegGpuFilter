@@ -48,5 +48,5 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
 Differences from FFmpeg:
 
 - **Fractions instead of pixels**: the six values are fractions of the frame (a pixel expression such as `w/4` is `0.25` here, or `w=1/4`), turned into whole pixels by truncation like FFmpeg does. The result is the same as FFmpeg's for the same pixel values.
-- Like FFmpeg, nothing is swapped when the rectangle (after the position is clamped into the frame) does not fit at both places.
+- Like FFmpeg, the rectangle (after the position is clamped into the frame) is shrunk to `min(w, W - x1, W - x2)` x `min(h, H - y1, H - y2)` so it fits at both places, then swapped; nothing is swapped only when that size is not positive.
 - Overlapping rectangles: FFmpeg swaps them row by row in memory, which gives a smeared result. Here the first rectangle wins in the overlap.
