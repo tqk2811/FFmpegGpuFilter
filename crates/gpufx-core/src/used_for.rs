@@ -42,6 +42,14 @@ pub fn check(name: &str, used_for: &[String], filter: &str) -> Result<(), Error>
 /// The error for `files` missing `what` (the file the opener reads first): says what kind of package they are
 /// and which filter to use when they are a known kind.
 pub(crate) fn wrong_kind(files: &HashMap<String, Vec<u8>>, what: &str) -> Error {
+    match describe(files) {
+        Some(kind) => Error::Package(format!("missing {what}: {kind}")),
+        None => Error::Package(format!("missing {what}")),
+    }
+}
+
+/// What kind of package `files` are and which filter takes them ("it is a ..."), when a known kind.
+pub(crate) fn describe(files: &HashMap<String, Vec<u8>>) -> Option<String> {
     #[derive(serde::Deserialize)]
     struct UsedFor {
         #[serde(default)]
@@ -54,16 +62,15 @@ pub(crate) fn wrong_kind(files: &HashMap<String, Vec<u8>>, what: &str) -> Error 
         let v: serde_json::Value = serde_json::from_slice(files.get("package.json")?).ok()?;
         files.get(&format!("{}/model.json", v["variants"][0]["dir"].as_str()?))
     });
-    let kind = if let Some(m) = files.get("manifest.json") {
-        format!("it is a gpufx effect package{}", filters(used_for(m)))
+    if let Some(m) = files.get("manifest.json") {
+        Some(format!("it is a gpufx effect package{}", filters(used_for(m))))
     } else if let Some(m) = model {
-        format!("it is a gpufx-nn model package{}", filters(used_for(m)))
+        Some(format!("it is a gpufx-nn model package{}", filters(used_for(m))))
     } else if files.contains_key("package.json") {
-        "it is a gpufx-nn model bundle".to_string()
+        Some("it is a gpufx-nn model bundle".to_string())
     } else {
-        return Error::Package(format!("missing {what}"));
-    };
-    Error::Package(format!("missing {what}: {kind}"))
+        None
+    }
 }
 
 #[cfg(test)]

@@ -993,6 +993,7 @@ fn bundle_variant_is_picked_by_scale() {
     assert!(e.contains("available: 2, 4"), "{e}");
     let e = NnModel::load(ctx.clone(), &dir).err().unwrap().to_string();
     assert!(e.contains("choose a scale") && e.contains("2, 4"), "{e}");
+    assert!(e.contains("it is a gpufx-nn model package, use it with the gpufx_ai_upscale or gpufx_ai_framerate filter"), "{e}");
     std::fs::write(dir.join("package.json"), manifest("../x2")).unwrap();
     let e = NnModel::load_with(ctx, &dir, Some(2), Precision::F32).err().unwrap().to_string();
     assert!(e.contains("simple name"), "{e}");

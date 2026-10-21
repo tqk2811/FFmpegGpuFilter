@@ -252,7 +252,14 @@ impl NnModel {
     pub fn load_with(ctx: Arc<GpuContext>, path: impl AsRef<Path>, scale: Option<u32>, precision: Precision) -> Result<Self, Error> {
         let files = crate::package::read_files(path.as_ref())?;
         let dir = match files.get("package.json") {
-            Some(b) => format!("{}/", bundle_variant(b, scale)?),
+            // a bundle given to a filter that takes no scale says which filter takes it
+            Some(b) => format!(
+                "{}/",
+                bundle_variant(b, scale).map_err(|e| match (e, scale, crate::used_for::describe(&files)) {
+                    (Error::Package(m), None, Some(kind)) => Error::Package(format!("{m}; {kind}")),
+                    (e, ..) => e,
+                })?
+            ),
             None => String::new(),
         };
         let get = |n: &str| files.get(&format!("{dir}{n}")).map(Vec::as_slice);
