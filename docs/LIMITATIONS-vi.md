@@ -59,7 +59,7 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 
 - **Chưa test:** đường VideoToolbox (macOS) của `gpufx_ai_framerate` (`gpufx_ai_interp_*_videotoolbox`); chưa từng
   chạy trên máy Mac.
-- **Chưa test:** `gpufx_ai_framerate` và `models/rife-v4.6.zip` trong bundle linux64; mới chỉ chạy filter trên Windows.
+- **Chưa test:** `gpufx_ai_framerate` và `packages/gpufx_ai_framerate/rife-v4.6.zip` trong bundle linux64; mới chỉ chạy filter trên Windows.
 - **Hạn chế:** D3D12 và D3D11 chậm hơn Vulkan khoảng 1,7 lần trên cùng GPU (RTX 4060 Laptop, 1080p: Vulkan khoảng
   45 ms mỗi frame, 4K khoảng 174 ms); nên dùng Vulkan.
 
@@ -184,7 +184,7 @@ D3D11 và D3D12 (giữ alpha, giống kết quả Vulkan); `-init_hw_device list
 - **FFmpeg không có bản vá: frame D3D không có alpha.** `hwdownload` chỉ ra `nv12`/`p010le`
   (D3D12) hoặc không có `rgba` (D3D11), nên output có alpha mất alpha ở đây, và `out_format=rgba`, `yuva420p` hay
   `yuva444p` báo lỗi (`Unsupported pixel format: rgba`). Vulkan giữ alpha với `out_format=rgba`. Trên D3D, tách kết
-  quả làm hai và cho một bản đi qua [alpha-extract](../packages/effects/ffmpeg/alpha-extract/README.md) để lấy alpha
+  quả làm hai và cho một bản đi qua [alpha-extract](../packages/gpufx/ffmpeg/alpha-extract/README.md) để lấy alpha
   thành ảnh xám, rồi ghép hai bản trên CPU bằng `alphamerge`.
 - **libavutil của bundle prebuilt là bản build lại.** `scripts/build-avutil.sh` build lại libavutil trong image
   của BtbN với đúng dòng configure lưu trong bản dựng sẵn, rồi kiểm export, thư viện nạp lúc chạy và các loại thiết

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generates the shaders and the manifest of packages/effects/capcut/stack-rotate.
+"""Generates the shaders and the manifest of packages/gpufx/capcut/stack-rotate.
 
 The effect is ten passes that share a camera model, a blur and fifteen keyframe tables (each table
 holds 121 rows sampled every 1/60 s of a 2 s scene clock), so its WGSL and manifest.json are written
 by this script instead of by hand. Edit this file, then run it (no dependencies):
     python3 scripts/make-stack-rotate.py
-It rewrites packages/effects/capcut/stack-rotate/shaders/*.wgsl and manifest.json.
+It rewrites packages/gpufx/capcut/stack-rotate/shaders/*.wgsl and manifest.json.
 """
 import json
 import re

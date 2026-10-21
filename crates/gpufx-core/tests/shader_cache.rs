@@ -21,7 +21,7 @@ fn collect_packages(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn example() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx");
     let mut all: Vec<PathBuf> = Vec::new();
     collect_packages(&dir, &mut all);
     all.sort();
@@ -158,7 +158,7 @@ fn conversion_pipelines_go_through_the_cache() {
 fn run_all_d3d12(dir: Option<&Path>) -> Option<(Vec<Vec<u8>>, Option<gpufx_core::ShaderCacheStats>, std::time::Duration)> {
     let start = std::time::Instant::now();
     let ctx = GpuContext::with_shader_cache(gpufx_core::Backend::Dx12, dir).map_err(|e| eprintln!("skipping: {e}")).ok()?;
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx");
     let mut all: Vec<PathBuf> = Vec::new();
     collect_packages(&root, &mut all);
     all.sort();

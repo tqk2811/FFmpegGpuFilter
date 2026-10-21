@@ -41,9 +41,9 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 Still pictures with the CLI:
 
 ```sh
-./target/release/gpufx run 'packages/effects/ffmpeg/slide-transition=progress=0.5:mode=3' -i a.png -i b.png -o out.png
+./target/release/gpufx run 'packages/gpufx/ffmpeg/slide-transition=progress=0.5:mode=3' -i a.png -i b.png -o out.png
 ```
 
 ## Notes
 
-The motion is eased (`smoothstep` of `progress`). Modes 0 to 2 follow the push, cover/wipe-in and wipe-out scripts of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts). Mode 3 (push through color) moves full frames: the first clip is out of the frame exactly at `progress` 0.5, so the frame there is the background color only. For the look of the `box_in_*` scripts (zoom out into a box, slide, zoom in) use [box-in](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/packages/effects/slideshow/box-in/README.md). The default (`mode=0`) is the original push behaviour.
+The motion is eased (`smoothstep` of `progress`). Modes 0 to 2 follow the push, cover/wipe-in and wipe-out scripts of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts). Mode 3 (push through color) moves full frames: the first clip is out of the frame exactly at `progress` 0.5, so the frame there is the background color only. For the look of the `box_in_*` scripts (zoom out into a box, slide, zoom in) use [box-in](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/packages/gpufx/slideshow/box-in/README.md). The default (`mode=0`) is the original push behaviour.

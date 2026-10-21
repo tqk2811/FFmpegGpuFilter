@@ -19,7 +19,7 @@ gpufx_ai_upscale=model=<path>[:scale=<n>][:tile=<px>][:precision=auto|f32]
 
 | Option | Kiểu | Mặc định | Khoảng/giá trị | Ý nghĩa |
 |--------|------|----------|----------------|---------|
-| `model` | string | (bắt buộc) | path | Đường dẫn gói hoặc bundle gpufx-nn có `io.json` kind `super_resolution`: `models/realesr-animevideov3.zip` (anime, scale 2, 3, 4) hoặc `models/realesr-general-x4v3.zip` (nội dung thường, scale 4). Thiếu thì filter không khởi động được. Định dạng: [NN_MODEL_FORMAT-vi.md](../../NN_MODEL_FORMAT-vi.md) |
+| `model` | string | (bắt buộc) | path | Đường dẫn gói hoặc bundle gpufx-nn có `io.json` kind `super_resolution`: `packages/gpufx_ai_upscale/realesr-animevideov3.zip` (anime, scale 2, 3, 4) hoặc `packages/gpufx_ai_upscale/realesr-general-x4v3.zip` (nội dung thường, scale 4). Thiếu thì filter không khởi động được. Định dạng: [NN_MODEL_FORMAT-vi.md](../../NN_MODEL_FORMAT-vi.md) |
 | `scale` | int | `2` | 1..16 | Kích thước output / input trên mỗi trục. Gói phải có scale đó; lỗi sẽ liệt kê các scale gói có. Frame upscale xong quá lớn bị từ chối |
 | `tile` | int | `0` | 0..16384 | Cạnh tile lớn nhất tính theo pixel input. `0` chọn số tile ít nhất vừa giới hạn buffer của GPU. Các tile chồng lấn đúng bằng context của model nên kết quả không phụ thuộc cách chia tile (không có đường nối) |
 | `precision` | int (hằng) | `auto` | `auto`, `f32` | Kiểu số học của các convolution. `auto`: f16 nếu GPU có (khoảng 57 dB so với bản f32 chuẩn), không thì f32. `f32`: f32 ở mọi nơi (chậm hơn) |
@@ -47,19 +47,19 @@ Không hỗ trợ timeline, không có command lúc chạy.
 ```sh
 # Anime 1080p -> 4K trên Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
 
 # Live action x4 trên D3D12 (Windows)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
 
 # Tile nhỏ hơn và f32, cho GPU ít bộ nhớ hoặc để kiểm output f16
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2:tile=256:precision=f32,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2:tile=256:precision=f32,gpufx_download,format=nv12" out.mp4
 ```
 
-Model không nằm trong git: bundle win64/linux64 có sẵn trong `models/` (kèm license), hoặc tải và convert bằng
-`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/models/`).
+Model không nằm trong git: file release `gpufx-packages.zip` có sẵn trong `gpufx_ai_upscale/` (kèm license; bundle ffmpeg không kèm), hoặc tải và convert bằng
+`scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/packages/<filter>/`).
 
 ## Giới hạn
 

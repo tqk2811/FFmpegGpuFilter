@@ -117,15 +117,15 @@ gpufx-nn package) run on the GPU by libgpufx, on the same GPU frames and devices
 ```sh
 # 12 fps -> 24 fps on Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
 # D3D12 (Windows; needs dxcompiler.dll, shipped in bin/)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `model` | (required) | path of a `frame_interp` package, e.g. `models/rife-v4.6.zip` |
+| `model` | (required) | path of a `frame_interp` package, e.g. `packages/gpufx_ai_framerate/rife-v4.6.zip` |
 | `fps` | twice the input's | output frame rate, a number or fraction (`30`, `24000/1001`; named rates such as `ntsc` are not accepted); any rate, not only multiples |
 | `scene` | 0.2 | scene change threshold (0-1): the SSIM of the pair at 32x32, as the official RIFE `inference_video.py` checks it; a pair below it is a cut and is not interpolated (the nearer frame is repeated); 0 never detects a cut (every pair is interpolated). On anime 0.2 still blends some cuts between shots of similar layout; 0.4 caught 89% of the cuts of three 90 s OP/ED clips, at the cost of repeating a frame on some very fast zooms and flashes |
 | `max_gap` | 2 | a pair further apart than this many input frame durations (a gap in a VFR stream) is not interpolated |
@@ -137,8 +137,9 @@ the input frames (Vulkan storage images, D3D12, shared D3D11 textures) the outpu
 the source frames pass as they are; otherwise (e.g. D3D11 `hwupload`) the output has a frames context of its own and
 the source frames are copied into it on the GPU (through 8-bit RGBA, so slightly lossy).
 
-The model is not in git: the win64/linux64 bundles ship it in `models/` (with its license), or fetch and convert it
-with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (pinned URLs and sha256, written to `build/models/`).
+The model is not in git: the release asset `gpufx-packages.zip` ships it in `gpufx_ai_framerate/` (with its license; the ffmpeg bundles do not), or fetch and convert it
+with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (pinned URLs and sha256, written to `build/packages/<filter>/`).
+The examples here expect the packages in `packages/` where ffmpeg runs: unzip `gpufx-packages.zip` there (or point `model=` at `build/packages/...`).
 On D3D12 the model's shaders need DXC (`dxcompiler.dll`); the first run compiles them (set `GPUFX_SHADER_CACHE` to
 keep them).
 
@@ -155,15 +156,15 @@ input on each axis, in the input's pixel format:
 ```sh
 # Anime 1080p -> 4K on Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
 # Live action x4 on D3D12 (Windows; needs dxcompiler.dll, shipped in bin/)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `model` | (required) | path of a `super_resolution` package or bundle: `models/realesr-animevideov3.zip` (anime, scales 2, 3, 4) or `models/realesr-general-x4v3.zip` (general content, scale 4) |
+| `model` | (required) | path of a `super_resolution` package or bundle: `packages/gpufx_ai_upscale/realesr-animevideov3.zip` (anime, scales 2, 3, 4) or `packages/gpufx_ai_upscale/realesr-general-x4v3.zip` (general content, scale 4) |
 | `scale` | 2 | output size / input size on each axis; the package must have it (the error lists the scales it has) |
 | `tile` | 0 | largest tile side in input pixels; 0 picks the fewest tiles that fit the GPU's buffer limits. Tiles overlap by the model's context, so the result does not depend on the tiling (no seams) |
 | `precision` | `auto` | `auto`: f16 convolutions where the GPU has them (about 57 dB against the f32 reference), else f32; `f32`: f32 everywhere (slower) |
@@ -173,8 +174,8 @@ goes through 8-bit RGBA (the model's input and output), and alpha is not kept. T
 of their own, scale times larger. A size change in the middle of a stream (`-reinit_filter 0`) gives output frames of
 the new size.
 
-The models are not in git: the win64/linux64 bundles ship them in `models/` (with their licenses), or fetch and convert
-them with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/models/`). On D3D12 the shaders need
+The models are not in git: the release asset `gpufx-packages.zip` ships them in `gpufx_ai_upscale/` (with their licenses; the ffmpeg bundles do not), or fetch and convert
+them with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/packages/<filter>/`). On D3D12 the shaders need
 DXC, as for `gpufx_ai_framerate`.
 
 **Not real time:** on an RTX 4060 Laptop a 1080p frame at x2 (realesr-animevideov3) takes about 480-510 ms on D3D11/D3D12
@@ -199,12 +200,12 @@ You need Rust (stable) and a GPU driver (on Linux without a GPU you can use `mes
 ```sh
 cargo build --release
 cargo test --release                       # run the sample effects on the available GPU
-./target/release/gpufx run 'packages/effects/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
-scripts/pack-effects.sh                    # only package the effects: packages/effects -> dist/effects/<group>/<name>.zip
+./target/release/gpufx run 'packages/gpufx/ffmpeg/vignette=strength=0.9' -i in.png -o out.png
+scripts/pack-packages.sh                    # only package the effects: packages/gpufx -> dist/packages/gpufx/<group>/<name>.zip
 ```
 
-Adding or editing effects **does not require rebuilding FFmpeg**: run `scripts/pack-effects.sh`
-(Windows: `scripts\pack-effects.ps1`) and use the new `.zip` file.
+Adding or editing effects **does not require rebuilding FFmpeg**: run `scripts/pack-packages.sh`
+(Windows: `scripts\pack-packages.ps1`) and use the new `.zip` file.
 
 ### Tests
 
@@ -240,6 +241,7 @@ the remaining libraries (`avcodec`, `avformat`...) stay as they are in the prebu
 ```sh
 scripts/build-prebuilt.sh            # linux64 -> dist/linux64
 scripts/build-prebuilt.sh win64      # cross-compile with mingw-w64 -> dist/win64
+scripts/pack-packages.sh --models     # effects + models -> dist/packages (the bundles carry neither)
 scripts/test-bundle.sh dist/linux64  # run every effect through ffmpeg, including the error-reporting rules
 ```
 
@@ -295,9 +297,13 @@ The result is in `dist/<target>/`:
 
 ```
 bin/      ffmpeg, ffprobe, libgpufx.so | gpufx.dll, gpufx-cli
-effects/  the sample effects packaged as .zip (ffmpeg/, slideshow/, standalone/ as in packages/effects)
+LICENSE-gpufx.txt, THIRD-PARTY-LICENSES-gpufx.txt, FFMPEG-LICENSE.txt, README.md
 include/  gpufx.h
 ```
+
+The effect and model packages are not in the bundle: pack them with `scripts/pack-packages.sh`
+The examples in this README expect them in `packages/` where ffmpeg runs (unzip `gpufx-packages.zip` into it).
+(add `--models` for the AI models) or take the release asset `gpufx-packages.zip`.
 
 This build enables **every FFmpeg filter** by default (`FFMPEG_FILTERS=all`), so `overlay`, `xfade`, `gblur`...
 are there next to the `gpufx` effects. `FFMPEG_FILTERS=keep` restores the short list in
@@ -326,8 +332,8 @@ make -j"$(nproc)"
 | `ffmpeg/` | The `vf_gpufx.c` filter and the integration script |
 | `external/FFmpeg` | FFmpeg source submodule |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx with one command in Docker |
-| `packages/effects/` | 38 sample effects in `ffmpeg/`, `slideshow/` and `standalone/` groups |
-| `scripts/` | `build-prebuilt.sh` (fast build on a prebuilt FFmpeg), `test-bundle.sh`, `install-libgpufx.sh`, `pack-effects.sh`/`.ps1` (zip packaging) |
+| `packages/gpufx/` | 38 sample effects in `ffmpeg/`, `slideshow/` and `standalone/` groups |
+| `scripts/` | `build-prebuilt.sh` (fast build on a prebuilt FFmpeg), `test-bundle.sh`, `install-libgpufx.sh`, `pack-packages.sh`/`.ps1` (zip packaging) |
 
 ## License
 

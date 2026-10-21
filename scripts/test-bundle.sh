@@ -5,6 +5,10 @@
 # Test clips come from another ffmpeg with lavfi sources ($REF_FFMPEG, default `ffmpeg`),
 # since the bundle has no video source filters; pass clips-dir to reuse existing ones.
 # Clips and logs default to build/test-<bundle name>, outside the bundle.
+# Effect and model packages come from $GPUFX_PACKAGES (default dist/packages), laid out like the
+# release asset gpufx-packages.zip: gpufx/<group>/<name>.zip (scripts/pack-packages.sh -o
+# dist/packages/gpufx), gpufx_ai_upscale/<name>.zip and gpufx_ai_framerate/<name>.zip (copied from
+# build/packages/ after scripts/fetch-models.sh). REQUIRE_MODELS=1 fails when a model is missing.
 # TEST_CLIPS_ONLY=1 only writes the clips (for a runner that has no reference ffmpeg).
 # REQUIRE_D3D=1 fails when the D3D11 frame tests are skipped, or the D3D12 ones are skipped
 # although the FFmpeg has a d3d12va hwdevice (FFmpeg's D3D frames are D3D11).
@@ -24,10 +28,10 @@ mkdir -p "$CLIPS"
 CLIPS=$(cd "$CLIPS" && pwd)
 FF=$DIST/bin/ffmpeg
 [ -f "$FF" ] || FF=$DIST/bin/ffmpeg.exe
-# Effects are passed relative to the bundle: a Windows path (C:/...) would break the
+# Effects and models are passed relative to $PACKAGES: a Windows path (C:/...) would break the
 # filter graph, where ':' separates options.
-FX=effects
-# Package of an effect by name: effects/<group>/<name>.zip, as in packages/effects.
+FX=gpufx
+# Package of an effect by name: gpufx/<group>/<name>.zip, as in packages/gpufx.
 fx() { set -- "$FX"/*/"$1".zip; echo "$1"; }
 
 if [ ! -f "$CLIPS/straight.png" ]; then
@@ -71,7 +75,9 @@ if command -v cygpath >/dev/null; then   # Git Bash on Windows: give ffmpeg.exe 
     E=$(cygpath -m "$E") R=$(cygpath -m "$R") X=$(cygpath -m "$X") P=$(cygpath -m "$P")
     AI=$(cygpath -m "$AI") AICUT=$(cygpath -m "$AICUT")
 fi
-cd "$DIST"
+PACKAGES=$(cd "${GPUFX_PACKAGES:-$ROOT/dist/packages}" && pwd)
+[ -d "$PACKAGES/gpufx" ] || { echo "$PACKAGES has no gpufx/ (scripts/pack-packages.sh -o $PACKAGES/gpufx)" >&2; exit 1; }
+cd "$PACKAGES"
 
 fails=0
 pass() { printf '  ok    %s\n' "$1"; }
@@ -575,8 +581,8 @@ rejects "falling-maple: bad path expression" "unknown variable .q." -i "$A" \
 
 echo "frame interpolation (gpufx_ai_framerate):"
 # Frame flow only, not quality: the output is a constant rate grid whatever the input
-# timestamps do. The model is the one the bundle ships.
-AIF="gpufx_upload,gpufx_ai_framerate=model=models/rife-v4.6.zip:fps=24000/1001,hwdownload,format=nv12"
+# timestamps do. The model comes from the packages dir ($PACKAGES).
+AIF="gpufx_upload,gpufx_ai_framerate=model=gpufx_ai_framerate/rife-v4.6.zip:fps=24000/1001,hwdownload,format=nv12"
 # ai_flow NAME FRAMES END_MS ARGS...: FRAMES output frames, pts strictly increasing, every
 # duration > 0, the last frame ending at END_MS (+-10 ms; empty: not checked).
 ai_flow() {
@@ -590,8 +596,9 @@ ai_flow() {
 }
 if ! grep -qw gpufx_ai_framerate "$CLIPS/filters.txt"; then
     echo "  skip  this bundle has no gpufx_ai_framerate"
-elif [ ! -f models/rife-v4.6.zip ]; then
-    echo "  skip  this bundle has no models/rife-v4.6.zip"
+elif [ ! -f gpufx_ai_framerate/rife-v4.6.zip ]; then
+    [ "${REQUIRE_MODELS:-0}" = 1 ] && { echo "REQUIRE_MODELS=1: $PACKAGES has no gpufx_ai_framerate/rife-v4.6.zip" >&2; exit 1; }
+    echo "  skip  $PACKAGES has no gpufx_ai_framerate/rife-v4.6.zip"
 else
     # 12 frames over 1 s: 24 grid points of 1001/24000 s below 1 s, the last ending at 1.001 s.
     ai_flow "12 -> 24000/1001 fps" 24 1001 -i "$AI" -vf "format=nv12,$AIF"
@@ -624,12 +631,13 @@ else
 fi
 
 echo "super resolution (gpufx_ai_upscale):"
-# The anime model x2 (the bundle's models/realesr-animevideov3.zip, scales 2, 3, 4) on a 320x180 clip.
-AIU="gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip"
+# The anime model x2 (the packages dir's gpufx_ai_upscale/realesr-animevideov3.zip, scales 2, 3, 4) on a 320x180 clip.
+AIU="gpufx_upload,gpufx_ai_upscale=model=gpufx_ai_upscale/realesr-animevideov3.zip"
 if ! grep -qw gpufx_ai_upscale "$CLIPS/filters.txt"; then
     echo "  skip  this bundle has no gpufx_ai_upscale"
-elif [ ! -f models/realesr-animevideov3.zip ] || [ ! -f models/realesr-general-x4v3.zip ]; then
-    echo "  skip  this bundle has no models/realesr-animevideov3.zip and realesr-general-x4v3.zip"
+elif [ ! -f gpufx_ai_upscale/realesr-animevideov3.zip ] || [ ! -f gpufx_ai_upscale/realesr-general-x4v3.zip ]; then
+    [ "${REQUIRE_MODELS:-0}" = 1 ] && { echo "REQUIRE_MODELS=1: $PACKAGES has no gpufx_ai_upscale/realesr-animevideov3.zip and realesr-general-x4v3.zip" >&2; exit 1; }
+    echo "  skip  $PACKAGES has no gpufx_ai_upscale/realesr-animevideov3.zip and realesr-general-x4v3.zip"
 else
     # Output size: one 320x180 frame x2 as rgb24 is 640x360x3 bytes; x3 is 960x540x3.
     for s in 2 3; do
@@ -651,7 +659,7 @@ else
     # 320x180 then 300x180 (-reinit_filter 0): the filter makes output frames of the new size itself.
     ai_flow "size change mid-stream" 20 800 -reinit_filter 0 -f concat -safe 0 -i "$R" -vf "format=nv12,$AIU,hwdownload,format=nv12"
     rejects "a scale the package does not have" "available: 4" -i "$A" -frames:v 1 \
-        -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=2,hwdownload,format=nv12" -f null -
+        -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=gpufx_ai_upscale/realesr-general-x4v3.zip:scale=2,hwdownload,format=nv12" -f null -
     NODEV=1 rejects "model is required" "model is required" -i "$A" -frames:v 1 -vf "gpufx_ai_upscale" -f null -
 fi
 

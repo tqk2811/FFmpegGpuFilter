@@ -8,7 +8,7 @@ RIFE v4.6 frame interpolation model as a gpufx-nn package (`io.json` kind `frame
 The weights are the ncnn model `models/rife-v4.6` of
 [nihui/rife-ncnn-vulkan](https://github.com/nihui/rife-ncnn-vulkan) (RIFE: Real-Time Intermediate Flow Estimation
 for Video Frame Interpolation, Huang et al.), converted by `gpufx-nnconv`. The pinned URLs and sha256 are in
-`models/rife-v4.6/source.json` of the gpufx repository.
+`packages/gpufx_ai_framerate/rife-v4.6/source.json` of the gpufx repository.
 
 ## Use
 

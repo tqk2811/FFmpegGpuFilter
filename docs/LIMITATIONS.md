@@ -60,7 +60,7 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 
 - **Untested:** the VideoToolbox (macOS) path of `gpufx_ai_framerate` (`gpufx_ai_interp_*_videotoolbox`); it has
   never run on a Mac.
-- **Untested:** the linux64 bundle's `gpufx_ai_framerate` and `models/rife-v4.6.zip`; only Windows has run the filter.
+- **Untested:** the linux64 bundle's `gpufx_ai_framerate` and `packages/gpufx_ai_framerate/rife-v4.6.zip`; only Windows has run the filter.
 - **Limitation:** D3D12 and D3D11 are about 1.7x slower than Vulkan on the same GPU (RTX 4060 Laptop, 1080p: Vulkan
   about 45 ms per frame, 4K about 174 ms); prefer Vulkan.
 
@@ -192,7 +192,7 @@ run); `-init_hw_device list` still has all 9 device types.
 - **FFmpeg without the patches: no alpha with D3D frames.** `hwdownload` gives `nv12`/`p010le`
   only (D3D12) or no `rgba` (D3D11), so an output with alpha loses it there, and `out_format=rgba`, `yuva420p` or
   `yuva444p` fails (`Unsupported pixel format: rgba`). Vulkan keeps alpha with `out_format=rgba`. On D3D, split
-  the result and send one copy through [alpha-extract](../packages/effects/ffmpeg/alpha-extract/README.md) to get
+  the result and send one copy through [alpha-extract](../packages/gpufx/ffmpeg/alpha-extract/README.md) to get
   the alpha as a gray picture, then join both on the CPU with `alphamerge`.
 - **The prebuilt bundle's libavutil is a rebuild.** `scripts/build-avutil.sh` rebuilds libavutil in BtbN's image
   with the configure line stored in the prebuilt library, then checks that the exports, the libraries loaded at

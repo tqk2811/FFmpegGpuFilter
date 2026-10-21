@@ -9,7 +9,7 @@ use std::sync::Arc;
 use gpufx_core::{parse_effect_item, Effect, EffectGraph, Error, FrameInfo, GpuContext, Image, ImageMut, Package, Source, StreamInfo};
 
 fn examples() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx")
 }
 
 /// Pushes every package directory (one with a `manifest.json`) below `dir`, at any depth.

@@ -19,7 +19,7 @@ gpufx_ai_upscale=model=<path>[:scale=<n>][:tile=<px>][:precision=auto|f32]
 
 | Option | Type | Default | Range/values | Meaning |
 |--------|------|---------|--------------|---------|
-| `model` | string | (required) | path | Path of a gpufx-nn package or bundle with `io.json` kind `super_resolution`: `models/realesr-animevideov3.zip` (anime, scales 2, 3, 4) or `models/realesr-general-x4v3.zip` (general content, scale 4). The filter fails to start without it. Format: [NN_MODEL_FORMAT.md](../../NN_MODEL_FORMAT.md) |
+| `model` | string | (required) | path | Path of a gpufx-nn package or bundle with `io.json` kind `super_resolution`: `packages/gpufx_ai_upscale/realesr-animevideov3.zip` (anime, scales 2, 3, 4) or `packages/gpufx_ai_upscale/realesr-general-x4v3.zip` (general content, scale 4). The filter fails to start without it. Format: [NN_MODEL_FORMAT.md](../../NN_MODEL_FORMAT.md) |
 | `scale` | int | `2` | 1..16 | Output size / input size on each axis. The package must have it; the error lists the scales it has. A frame whose upscaled size is too large is rejected |
 | `tile` | int | `0` | 0..16384 | Largest tile side in input pixels. `0` picks the fewest tiles that fit the GPU's buffer limits. Tiles overlap by the model's context, so the result does not depend on the tiling (no seams) |
 | `precision` | int (constants) | `auto` | `auto`, `f32` | Arithmetic of the convolutions. `auto`: f16 where the GPU has it (about 57 dB against the f32 reference), else f32. `f32`: f32 everywhere (slower) |
@@ -48,19 +48,19 @@ No timeline support and no runtime commands.
 ```sh
 # Anime 1080p -> 4K on Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
 
 # Live action x4 on D3D12 (Windows)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
-  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=models/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
 
 # Smaller tiles and f32, for a GPU with little memory or to check f16 output
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
-  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=models/realesr-animevideov3.zip:scale=2:tile=256:precision=f32,gpufx_download,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2:tile=256:precision=f32,gpufx_download,format=nv12" out.mp4
 ```
 
-The models are not in git: the win64/linux64 bundles ship them in `models/` (with their licenses), or fetch and
-convert them with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/models/`).
+The models are not in git: the release asset `gpufx-packages.zip` ships them in `gpufx_ai_upscale/` (with their licenses; the ffmpeg bundles do not), or fetch and
+convert them with `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/packages/<filter>/`).
 
 ## Limitations
 

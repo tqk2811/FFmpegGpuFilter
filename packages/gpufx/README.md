@@ -1,6 +1,6 @@
 # Example effects
 
-Each folder is one effect package (see [EFFECT_FORMAT](../../docs/EFFECT_FORMAT.md)), grouped by origin. `scripts/pack-effects.sh` zips every one to `dist/effects/<group>/<name>.zip`, keeping this layout (a group can be nested, as `tqk2811/TqkLibrary.FFmpegTransition`); the release bundles ship the same `effects/<group>/` folders.
+Each folder is one effect package (see [EFFECT_FORMAT](../../docs/EFFECT_FORMAT.md)), grouped by origin. `scripts/pack-packages.sh` zips every one to `dist/packages/gpufx/<group>/<name>.zip`, keeping this layout (a group can be nested, as `tqk2811/TqkLibrary.FFmpegTransition`); the release asset `gpufx-packages.zip` ships the same `gpufx/<group>/` folders.
 
 ## ffmpeg
 

@@ -89,5 +89,5 @@ def atlas(cells, out: Path):
 
 
 if __name__ == "__main__":
-    atlas(maple_cells(), ROOT / "packages/effects/standalone/falling-maple/textures/leaves.png")
-    atlas(ginkgo_cells(), ROOT / "packages/effects/standalone/falling-ginkgo/textures/leaves.png")
+    atlas(maple_cells(), ROOT / "packages/gpufx/standalone/falling-maple/textures/leaves.png")
+    atlas(ginkgo_cells(), ROOT / "packages/gpufx/standalone/falling-ginkgo/textures/leaves.png")

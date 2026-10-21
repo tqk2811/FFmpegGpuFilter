@@ -28,7 +28,7 @@
 #   REQUIRE_D3D      win64: 1 makes building without D3D12/D3D11 frames an error (CI).
 #   REQUIRE_LICENSES 1 makes a missing cargo-about an error (CI); without it the bundle
 #                    has no THIRD-PARTY-LICENSES-gpufx.txt (the Rust crate licenses).
-# Output: dist/<target>/ (bin, lib on Linux, effects/<group>/<name>.zip, include/gpufx.h)
+# Output: dist/<target>/ (bin, lib on Linux, include/gpufx.h, licenses; effects/models ship in gpufx-packages.zip)
 # Needs: cargo (cargo-about for the crate licenses), a C compiler, make, pkg-config, curl, patchelf (linux64), nasm (optional,
 # for SIMD); win64 also mingw-w64, binutils (strings), the x86_64-pc-windows-gnu Rust target and unzip;
 # docker for libavutil (see AVUTIL_IMAGE).
@@ -298,25 +298,4 @@ mkdir -p "$OUT/include"
 cp "$ROOT/crates/gpufx-ffi/include/gpufx.h" "$OUT/include/"
 cp "$ROOT/LICENSE" "$OUT/LICENSE-gpufx.txt"
 "$ROOT/scripts/third-party-licenses.sh" "$OUT/THIRD-PARTY-LICENSES-gpufx.txt" "$RUST_TARGET"
-"$ROOT/scripts/pack-effects.sh" -o "$OUT/effects" > /dev/null
-# Neural network models (gpufx_ai_framerate=model=models/rife-v4.6.zip, gpufx_ai_upscale=model=
-# models/realesr-animevideov3.zip): downloaded from their pinned
-# URLs and converted, not in git. BUNDLE_MODELS=0 leaves them out; a failed download only warns
-# unless REQUIRE_MODELS=1.
-if [ "${BUNDLE_MODELS:-1}" != 0 ]; then
-    echo "==> models"
-    if "$ROOT/scripts/fetch-models.sh"; then
-        mkdir -p "$OUT/models"
-        for d in "$ROOT"/models/*/; do
-            name=$(basename "$d")
-            [ -f "$ROOT/build/models/$name.zip" ] || continue
-            cp "$ROOT/build/models/$name.zip" "$OUT/models/"
-            [ -f "$ROOT/build/models/$name/LICENSE" ] && cp "$ROOT/build/models/$name/LICENSE" "$OUT/models/$name.LICENSE.txt"
-        done
-    elif [ "${REQUIRE_MODELS:-0}" = 1 ]; then
-        echo "fetching the models failed" >&2; exit 1
-    else
-        echo "    warning: fetching the models failed; the bundle has no models/" >&2
-    fi
-fi
 echo "==> done: $OUT ($(grep -c '^#define CONFIG_[A-Z0-9_]*_FILTER 1' "$WORK/ffmpeg/config.h") filters)"

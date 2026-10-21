@@ -1005,10 +1005,10 @@ fn repo_path(rel: &str) -> std::path::PathBuf {
 }
 
 /// The Real-ESRGAN packages on the GPU against the CPU reference on a real image (`GPUFX_SR_IMAGE`, default
-/// `build/sr-test.png`; packages from `scripts/fetch-models.ps1` in `build/models`), whole and in small tiles,
+/// `build/sr-test.png`; packages from `scripts/fetch-models.ps1` in `build/packages/gpufx_ai_upscale`), whole and in small tiles,
 /// plus the time per 1080p frame (`GPUFX_SR_BENCH=0` skips it). Run in release: the CPU reference is slow in debug.
 #[test]
-#[ignore = "needs build/models/realesr-*.zip and build/sr-test.png"]
+#[ignore = "needs build/packages/gpufx_ai_upscale/realesr-*.zip and build/sr-test.png"]
 fn realesrgan_matches_the_cpu_reference() {
     let Some(ctx) = gpu() else { return };
     let img_path = std::env::var("GPUFX_SR_IMAGE").map(std::path::PathBuf::from).unwrap_or_else(|_| repo_path("build/sr-test.png"));
@@ -1016,7 +1016,7 @@ fn realesrgan_matches_the_cpu_reference() {
     let (wd, ht) = img.dimensions();
     let rgba = rgba_of(img.as_raw());
     for (pkg, scale) in [("realesr-animevideov3", 2u32), ("realesr-animevideov3", 4), ("realesr-general-x4v3", 4)] {
-        let path = repo_path(&format!("build/models/{pkg}.zip"));
+        let path = repo_path(&format!("build/packages/gpufx_ai_upscale/{pkg}.zip"));
         let cpu = Reference::load_variant(&path, Some(scale as u64)).unwrap();
         let frame = gpufx_nnconv::frames::Rgb8 { w: wd as usize, h: ht as usize, data: img.as_raw().clone() };
         let want = gpufx_nnconv::frames::upscale(&cpu, &frame).unwrap();
@@ -1047,7 +1047,7 @@ fn realesrgan_matches_the_cpu_reference() {
     let big = image::imageops::resize(&img, 1920, 1080, image::imageops::FilterType::Triangle);
     let rgba = rgba_of(big.as_raw());
     for (pkg, scale) in [("realesr-animevideov3", 2u32), ("realesr-general-x4v3", 4)] {
-        let path = repo_path(&format!("build/models/{pkg}.zip"));
+        let path = repo_path(&format!("build/packages/gpufx_ai_upscale/{pkg}.zip"));
         for precision in [Precision::F32, Precision::Auto] {
             let mut up = FrameUpscale::open(ctx.clone(), &path, scale, UpscaleOptions { precision, ..Default::default() }).unwrap();
             up.upscale(&view(&rgba, 1920, 1080)).unwrap();
@@ -1192,14 +1192,14 @@ fn upscale_frames_equal_frame_upscale() {
 /// Real-ESRGAN through the frame stage against the CPU reference (as `realesrgan_matches_the_cpu_reference`, the
 /// same image): the RGBA conversions in and out of the stage keep the pixels.
 #[test]
-#[ignore = "needs build/models/realesr-animevideov3.zip and build/sr-test.png"]
+#[ignore = "needs build/packages/gpufx_ai_upscale/realesr-animevideov3.zip and build/sr-test.png"]
 fn realesrgan_frames_match_the_cpu_reference() {
     let Some(ctx) = gpu() else { return };
     let img_path = std::env::var("GPUFX_SR_IMAGE").map(std::path::PathBuf::from).unwrap_or_else(|_| repo_path("build/sr-test.png"));
     let img = image::open(&img_path).unwrap_or_else(|e| panic!("{}: {e}", img_path.display())).to_rgb8();
     let (wd, ht) = img.dimensions();
     let rgba = rgba_of(img.as_raw());
-    let path = repo_path("build/models/realesr-animevideov3.zip");
+    let path = repo_path("build/packages/gpufx_ai_upscale/realesr-animevideov3.zip");
     let cpu = Reference::load_variant(&path, Some(2)).unwrap();
     let frame = gpufx_nnconv::frames::Rgb8 { w: wd as usize, h: ht as usize, data: img.as_raw().clone() };
     let want = gpufx_nnconv::frames::upscale(&cpu, &frame).unwrap();

@@ -46,7 +46,7 @@ jobs:
       - name: Check every example shader
         if: runner.os == 'Linux'
         shell: bash
-        run: scripts/pack-effects.sh --check
+        run: scripts/pack-packages.sh --check
 
   # Licenses of every crate the bundles link (deny.toml): no GPL or unknown license.
   licenses:
@@ -83,8 +83,17 @@ jobs:
       - name: Logs of the failed build
         if: failure()
         run: tail -n 100 build/prebuilt-linux64/*.log || true
+      # Effects and models, laid out like the release asset gpufx-packages.zip (the ffmpeg bundles
+      # carry neither). Fetched once here; a failed model download fails the job.
+      - name: Packages (effects + models)
+        run: scripts/pack-packages.sh --models -o dist/packages/gpufx > /dev/null
       - name: Run effects in ffmpeg
-        run: scripts/test-bundle.sh dist/linux64
+        run: REQUIRE_MODELS=1 GPUFX_PACKAGES=dist/packages scripts/test-bundle.sh dist/linux64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpufx-packages
+          path: dist/packages
+          retention-days: 14
       # tar keeps the exec bits and the .so symlinks that a plain artifact would lose.
       - run: tar -C dist -cJf ffmpeg-gpufx-linux64.tar.xz linux64
       - uses: actions/upload-artifact@v4
@@ -133,7 +142,7 @@ jobs:
 
   ffmpeg-windows:
     name: FFmpeg 9.0 prebuilt + gpufx (win64, run on Windows)
-    needs: ffmpeg-win64
+    needs: [ffmpeg-win64, ffmpeg-linux64]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,6 +150,10 @@ jobs:
         with:
           name: ffmpeg-gpufx-win64
           path: dist/win64
+      - uses: actions/download-artifact@v4
+        with:
+          name: gpufx-packages
+          path: dist/packages
       - uses: actions/download-artifact@v4
         with:
           name: test-clips
@@ -153,7 +166,7 @@ jobs:
         # when a device exists but gpufx rejects or skips it. gpufx outputs GPU frames only, so the
         # effect tests need FFmpeg's Vulkan device: without one (hosted runners) they are skipped
         # with a warning too, and only the device-free checks run here.
-        run: REQUIRE_D3D=1 scripts/test-bundle.sh dist/win64 build/test-clips
+        run: REQUIRE_D3D=1 REQUIRE_MODELS=1 GPUFX_PACKAGES=dist/packages scripts/test-bundle.sh dist/win64 build/test-clips
 
   # FFmpeg 9.0 from the external/FFmpeg submodule with gpufx and VideoToolbox (no prebuilt
   # macOS FFmpeg to swap libavfilter into). Test only: nothing is released.
@@ -191,12 +204,12 @@ jobs:
           make -j"$(sysctl -n hw.ncpu)" > "$W/make.log" 2>&1 || { tail -40 "$W/make.log"; exit 1; }
           cp ffmpeg "$W/prefix/lib/libgpufx.dylib" "$OUT/bin/"
           cd - > /dev/null
-          scripts/pack-effects.sh -o "$OUT/effects" > /dev/null
+          scripts/pack-packages.sh -o "$PWD/dist/packages/gpufx" > /dev/null
       - name: Run effects in ffmpeg
         # gpufx outputs GPU frames: here VideoToolbox frames on Metal (no Vulkan in this
         # build, so those tests are skipped). REQUIRE_VT=1 fails when the VideoToolbox tests
         # are skipped for another reason than a missing device or Metal adapter.
-        run: REQUIRE_VT=1 scripts/test-bundle.sh dist/macos
+        run: REQUIRE_VT=1 GPUFX_PACKAGES=dist/packages scripts/test-bundle.sh dist/macos
 
   release:
     # Temporary pre-release of every green build, tagged with the commit id (7 chars).
@@ -228,12 +241,17 @@ jobs:
         with:
           name: ffmpeg-gpufx-win64
           path: win64
+      - uses: actions/download-artifact@v4
+        with:
+          name: gpufx-packages
+          path: packages
       - name: Package
         run: |
           # Same layout as the linux64 tar.xz: one top folder named after the target.
           zip -qr assets/ffmpeg-gpufx-win64.zip win64
-          # All effect packages in one archive.
-          (cd win64/effects && zip -qr ../../assets/gpufx-effects.zip .)
+          # Every effect and model package in one archive: gpufx/<group>/<name>.zip,
+          # gpufx_ai_upscale/<name>.zip, gpufx_ai_framerate/<name>.zip (+ .LICENSE.txt).
+          (cd packages && zip -qr ../assets/gpufx-packages.zip .)
           ls -l assets
       - name: Create or update the release
         run: |
@@ -279,7 +297,8 @@ jobs:
         if: matrix.target == 'linux64'
         run: |
           sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers ffmpeg
-          scripts/test-bundle.sh dist/linux64
+          scripts/pack-packages.sh -o dist/packages/gpufx > /dev/null
+          GPUFX_PACKAGES=dist/packages scripts/test-bundle.sh dist/linux64
       - uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-gpufx-full-${{ matrix.target }}

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use gpufx_core::{Effect, Error, FrameInfo, GpuContext, Image, ImageMut, Package, StreamInfo};
 
 fn examples() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/effects")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx")
 }
 
 /// Pushes every package directory (one with a `manifest.json`) below `dir`, at any depth.

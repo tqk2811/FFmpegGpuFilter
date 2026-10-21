@@ -85,7 +85,7 @@ static av_cold int init(AVFilterContext *ctx)
 
     if (!s->model || !*s->model) {
         av_log(ctx, AV_LOG_ERROR, "model is required: the path of a super_resolution package "
-               "(e.g. models/realesr-animevideov3.zip, see scripts/fetch-models).\n");
+               "(e.g. packages/gpufx_ai_upscale/realesr-animevideov3.zip, see scripts/fetch-models).\n");
         return AVERROR(EINVAL);
     }
     if (gpufx_version() < GPUFX_API_VERSION) {
@@ -597,7 +597,7 @@ fail:
 #define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
 static const AVOption gpufx_ai_upscale_options[] = {
-    { "model",     "super resolution package or bundle (gpufx-nn, io.json kind super_resolution), e.g. models/realesr-animevideov3.zip", OFFSET(model), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
+    { "model",     "super resolution package or bundle (gpufx-nn, io.json kind super_resolution), e.g. packages/gpufx_ai_upscale/realesr-animevideov3.zip", OFFSET(model), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
     { "scale",     "output size / input size on each axis; the package must have it", OFFSET(scale), AV_OPT_TYPE_INT, { .i64 = 2 }, 1, 16, FLAGS },
     { "tile",      "largest tile side in input pixels; 0: the fewest tiles that fit the GPU", OFFSET(tile), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 16384, FLAGS },
     { "precision", "arithmetic of the convolutions", OFFSET(precision), AV_OPT_TYPE_INT, { .i64 = GPUFX_AI_PRECISION_AUTO }, 0, 1, FLAGS, .unit = "precision" },

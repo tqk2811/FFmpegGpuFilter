@@ -641,11 +641,11 @@ crates/gpufx-cli    lệnh `gpufx`: info, check, pack, run (test hiệu ứng kh
 ffmpeg/             vf_gpufx.c và integrate.sh (thêm filter vào cây nguồn FFmpeg)
 external/FFmpeg     submodule FFmpeg, ghim n9.0-2-g03d9533176 (release/9.0) = commit của bản build sẵn
 docker/, build.sh   build FFmpeg + gpufx một lệnh trong Docker (linux64, win64)
-packages/effects    38 hiệu ứng (nhóm ffmpeg, slideshow, standalone): chỉnh màu, blur, sharpen, chroma key, overlay, chuyển cảnh, hstack/vstack (số input thay đổi, output lớn hơn input)...
+packages/gpufx    38 hiệu ứng (nhóm ffmpeg, slideshow, standalone): chỉnh màu, blur, sharpen, chroma key, overlay, chuyển cảnh, hstack/vstack (số input thay đổi, output lớn hơn input)...
 scripts/            build-prebuilt.sh (chỉ build libavfilter, thay vào FFmpeg build sẵn),
                     test-bundle.sh (chạy hiệu ứng qua ffmpeg của gói),
                     install-libgpufx.sh (build + cài .pc cho pkg-config),
-                    pack-effects.sh/.ps1 (chỉ đóng gói hiệu ứng thành zip)
+                    pack-packages.sh/.ps1 (chỉ đóng gói hiệu ứng thành zip)
 ```
 
 ## 9. Bản build phân phối

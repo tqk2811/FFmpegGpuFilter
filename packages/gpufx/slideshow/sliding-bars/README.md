@@ -42,7 +42,7 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 Still pictures with the CLI:
 
 ```sh
-./target/release/gpufx run 'packages/effects/slideshow/sliding-bars=progress=0.5:count=6:direction=1' -i a.png -i b.png -o out.png
+./target/release/gpufx run 'packages/gpufx/slideshow/sliding-bars=progress=0.5:count=6:direction=1' -i a.png -i b.png -o out.png
 ```
 
 ## Notes

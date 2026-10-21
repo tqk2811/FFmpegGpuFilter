@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generates the shaders and the pass list of packages/effects/capcut/golden-sand.
+"""Generates the shaders and the pass list of packages/gpufx/capcut/golden-sand.
 
 The glow of that effect is seven blur rounds per band, each round with its own constants, so its
 WGSL and the manifest's pass list is written by this script instead of by hand. Edit this file,
 then run it (no dependencies):  python3 scripts/make-golden-sand.py
-It rewrites packages/effects/capcut/golden-sand/shaders/*.wgsl and the pass list (its one group) of its manifest.json.
+It rewrites packages/gpufx/capcut/golden-sand/shaders/*.wgsl and the pass list (its one group) of its manifest.json.
 """
 import json
 import math
