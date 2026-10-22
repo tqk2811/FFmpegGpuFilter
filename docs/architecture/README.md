@@ -103,7 +103,7 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
     `with_output_count` and `with_input_count` expand it again with the other count kept (stored in the package as `input_copies` and
     `output_copies`, not derived from the outputs left over), so a graph node that also
     names its repeated inputs keeps its `outputs=N`.
-  - **The option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1562) takes `outputs=N` out of the inline options when the
+  - **The option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1645) takes `outputs=N` out of the inline options when the
     node's package opens and rebuilds the effect for N (the option never reaches the caller as a parameter). A runtime command `node.outputs` fails in
     [`find_param`](../../crates/gpufx-core/src/graph.rs#L1): the pads are fixed. The graph's
     output pads, and so the `gpufx` filter's `nb_outputs`, follow from the expanded effect as for any effect.
@@ -135,7 +135,7 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   - **The helper**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1) adds `gpufx_output_enabled(i)` (an
     `i != k` test per output that is off, `true` when none) only to a pass writing an optional output, mirroring the
     `repeat` helpers: other passes keep their source and shader cache key.
-  - **The option** is taken out of the inline options in [graph.rs](../../crates/gpufx-core/src/graph.rs#L1572) together
+  - **The option** is taken out of the inline options in [graph.rs](../../crates/gpufx-core/src/graph.rs#L1655) together
     with `outputs=N` (one rebuild of the effect for both); a runtime command naming the output fails in `find_param`.
 - Output size: by default the size of the first input; a shader can set it with the optional function
   `gpufx_output_size(out_index)` of the pass that writes the output (it reads only `params`, `gpufx_input_count()` and
@@ -224,24 +224,45 @@ initialize the graph instead of running incorrectly.
   textures are not filterable, so their sampled layout entry says `filterable: false` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1576)).
 - **Validation** ([`validate_layouts`](../../crates/gpufx-core/src/manifest.rs#L1)): the 4 storage textures per pass are counted after expansion, planes
   are WGSL only and not for `mipmaps`/`repeat`.
-- **Layout converts (step B1)**: [`plan`](../../crates/gpufx-core/src/graph.rs#L473) gives an effect input whose source has another
-  `pixel_layout` (an input pad is always `rgba`, an effect output has its manifest layout) a
-  [`LayoutConvert`](../../crates/gpufx-core/src/convert.rs#L1023) run right before the effect, alive through its passes and shared by
+- **Layout converts (step B1)**: [`plan`](../../crates/gpufx-core/src/graph.rs#L528) gives an effect input whose source has another
+  `pixel_layout` (an input pad the layout it is read in, an effect output its manifest layout) a
+  [`LayoutConvert`](../../crates/gpufx-core/src/convert.rs#L1376) run right before the effect, alive through its passes and shared by
   the readers of the same source in the same layout; sources of the same layout are bound as they are (no pass). A
-  graph output with planes reads a convert to `rgba` after every effect, so frames still go in and out through the
-  RGBA conversions. The shader is generated per (from, to, deep, 16-bit planes) ([`layout_source`](../../crates/gpufx-core/src/convert.rs#L918)):
+  graph output with planes not written straight into its frame (B2) reads a convert to `rgba` after every effect. The shader is generated per (from, to, deep, 16-bit planes) ([`layout_source`](../../crates/gpufx-core/src/convert.rs#L1271)):
   planes hold the stored Y'CbCr codes (0..1) in the matrix and range of the first input frame, chroma is the mean of
   a UV texel's pixels going down and the nearest texel going up, and plane to plane converts skip RGBA.
-- **Pool keys of planes**: a pooled texture is (size, mips, plane) ([`Slot`](../../crates/gpufx-core/src/graph.rs#L321)), its format
+- **Pool keys of planes**: a pooled texture is (size, mips, plane) ([`Slot`](../../crates/gpufx-core/src/graph.rs#L324)), its format
   `plane_format`; a pass output takes one per plane under its plane key, sized by `plane_size`, while its liveness
-  stays that of its name. [`effect_inputs`](../../crates/gpufx-core/src/graph.rs#L366) binds an effect in `input_keys` order from the
+  stays that of its name. [`effect_inputs`](../../crates/gpufx-core/src/graph.rs#L419) binds an effect in `input_keys` order from the
   source planes ([`Effect::output_planes`](../../crates/gpufx-core/src/runtime.rs#L1133)) or the convert's textures.
 - **Limits**: an effect switched off with an input or output with planes passes through a layout convert instead of
-  a copy ([`bind_copies`](../../crates/gpufx-core/src/graph.rs#L214)); an input pad an effect reads with planes is not read in place
-  ([`converted_pads`](../../crates/gpufx-core/src/graph.rs#L342)); an output with planes is not written into the frame in place nor
-  read by a `mipmaps` input ([`check_plane_mips`](../../crates/gpufx-core/src/graph.rs#L325)). An output switched off keeps its layout
-  (`off_layouts`) so its 1x1 stand-in has the plane format ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1050)). Loading and
-  writing frame planes directly (no RGBA in between) is step B2.
+  a copy ([`bind_copies`](../../crates/gpufx-core/src/graph.rs#L216)); an input pad an effect reads in another layout than the pad's is not read in
+  place ([`converted_pads`](../../crates/gpufx-core/src/graph.rs#L346)); an output with planes is not written into the frame by its pass (the
+  plane formats are no frame formats, so `direct_outputs` skips it) nor read by a `mipmaps` input
+  ([`check_plane_mips`](../../crates/gpufx-core/src/graph.rs#L328)). An output switched off keeps its layout (`off_layouts`) so its 1x1 stand-in has
+  the plane format ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1050)).
+- **Frame planes in (step B2)**: [`pad_layouts`](../../crates/gpufx-core/src/graph.rs#L365) gives an input pad the layout of its frame format
+  ([`PixelFormat::pixel_layout`](../../crates/gpufx-core/src/frame.rs#L149)) when every effect input reading it has planes, the pad is not read
+  as `rgba`, by `mipmaps`, by a graph output, premultiplied or in a bypass call (bypass then rebuilds the plan once).
+  The layout is part of [`InputKey`](../../crates/gpufx-core/src/convert.rs#L619), so a change rebuilds the slots. The slot then loads the frame
+  planes straight into the layout's plane textures with [`planes_in_source`](../../crates/gpufx-core/src/convert.rs#L175): one thread per luma pixel,
+  the first pixel of a UV texel writes it, codes over 255 * 2^(depth - 8) (point (11) of the plan), alpha over
+  2^depth - 1, P010 shifted down by the shared `load*` functions. 8-bit NV12 and gray GPU frames hold `code / 255` in
+  their unorm planes already: with `allow_direct_gpu` the effects bind the frame planes in place
+  ([`InputSlot::read_in_place`](../../crates/gpufx-core/src/convert.rs#L768)), unless a reader needs a convert (its bind group would be made
+  for the stand-ins).
+- **Frame planes out (step B2)**: [`planar_outputs`](../../crates/gpufx-core/src/graph.rs#L393) marks a graph output whose source has planes and
+  whose frame format is of that layout (straight alpha); [`plan`](../../crates/gpufx-core/src/graph.rs#L528) then makes no convert to `rgba` for it.
+  [`planes_out_source`](../../crates/gpufx-core/src/convert.rs#L217) defines the `sample`/`encode`/`channel` functions of convert_out.wgsl from the
+  plane textures (a chroma plane is told by its first channel, as 4:4:4 chroma has the size of Y) and reuses
+  convert_out_buffer.wgsl (CPU readback, [`OutputSlot::bind_planes`](../../crates/gpufx-core/src/convert.rs#L1168)) or convert_out_image.wgsl (GPU
+  frames, [`GpuOutputSlot::bind_planes`](../../crates/gpufx-core/src/convert.rs#L934), one pass per plane). Codes are written in the matrix and
+  range of the first input; the caller tags the output frames with them. `gray` (PlaneKind 3) also goes through the
+  RGBA conversions: neutral chroma in [`load_uv`](../../crates/gpufx-core/src/convert_in.wgsl#L27), one per-plane pass out on the GPU.
+- **Output format**: [`EffectGraph::output_default_format`](../../crates/gpufx-core/src/graph.rs#L2669) (C: `gpufx_effect_output_default_format`)
+  picks `out_format`, else the first input's format when of the output's layout, else
+  [`PixelFormat::default_of`](../../crates/gpufx-core/src/frame.rs#L164). Tests count frame conversions with `rgba_conversions` and
+  `layout_converts`.
 
 ## 5. The `gpufx` FFmpeg filter
 
@@ -338,8 +359,8 @@ the CPU or from CUDA.
 ### Built-in format conversion (frame format ↔ RGBA)
 
 Effects never see the frame format. gpufx-core wraps every graph with two built-in compute stages, recorded in the same
-GPU submission as the effect passes (`run` for CPU frames, [graph.rs](../../crates/gpufx-core/src/graph.rs#L888), and `run_gpu` for GPU frames,
-[graph.rs](../../crates/gpufx-core/src/graph.rs#L1066)):
+GPU submission as the effect passes (`run` for CPU frames, [graph.rs](../../crates/gpufx-core/src/graph.rs#L957), and `run_gpu` for GPU frames,
+[graph.rs](../../crates/gpufx-core/src/graph.rs#L1143)):
 
 ```mermaid
 flowchart TD
@@ -349,7 +370,7 @@ flowchart TD
     D --> E["frame planes of the output"]
 ```
 
-1. **Convert in**: `InputSlot::encode` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L610)) records one dispatch per
+1. **Convert in**: `InputSlot::encode` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L862)) records one dispatch per
    input that turns the planes into the RGBA texture the first effect pass samples.
 2. **Effects**: the pass textures are `rgba8unorm`, or `rgba16float` when the graph is "deep" (rule below). A
    shader author sees the same colour texture whatever the frame was.
@@ -357,9 +378,9 @@ flowchart TD
    planes (fused YUV path) writes the planes of the output format from the RGBA result.
 
 A stage is skipped when it would only be a copy. A straight `rgba` CPU input is uploaded as `rgba8unorm` and read in
-place (`InputKey::direct`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L433), set at
-[graph.rs](../../crates/gpufx-core/src/graph.rs#L729)). A straight `rgba` Vulkan input is read in place when the graph is not
-deep and no mip chain of it is read ([graph.rs](../../crates/gpufx-core/src/graph.rs#L742)), and a straight `rgba` GPU output may
+place (`InputKey::direct`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L628), set at
+[graph.rs](../../crates/gpufx-core/src/graph.rs#L786)). A straight `rgba` Vulkan input is read in place when the graph is not
+deep and no mip chain of it is read ([graph.rs](../../crates/gpufx-core/src/graph.rs#L799)), and a straight `rgba` GPU output may
 be written by the last effect pass itself (`direct_out`, described under "Vulkan frames").
 
 What the conversion does **not** do: no transfer function (gamma/PQ/HLG) and no primaries change. Nothing in
@@ -373,7 +394,7 @@ swscale conversion so that swscale never maps them either (`set_rgba_props`,
 
 | File | Role |
 |------|------|
-| [convert.rs](../../crates/gpufx-core/src/convert.rs) | Rust side: `Converter` (pipelines per device, [L52](../../crates/gpufx-core/src/convert.rs#L54)), `InputSlot` (input stage, [L440](../../crates/gpufx-core/src/convert.rs#L446)), `GpuOutputSlot` (output of GPU frames, [L617](../../crates/gpufx-core/src/convert.rs#L623)), `OutputSlot` and `read_outputs` (output to a CPU readback, [L748](../../crates/gpufx-core/src/convert.rs#L754), [L875](../../crates/gpufx-core/src/convert.rs#L881)), `uniform` ([L370](../../crates/gpufx-core/src/convert.rs#L376)) |
+| [convert.rs](../../crates/gpufx-core/src/convert.rs) | Rust side: `Converter` (pipelines per device, [L52](../../crates/gpufx-core/src/convert.rs#L54)), `InputSlot` (input stage, [L440](../../crates/gpufx-core/src/convert.rs#L646)), `GpuOutputSlot` (output of GPU frames, [L617](../../crates/gpufx-core/src/convert.rs#L883)), `OutputSlot` and `read_outputs` (output to a CPU readback, [L748](../../crates/gpufx-core/src/convert.rs#L1069), [L875](../../crates/gpufx-core/src/convert.rs#L1234)), `uniform` ([L370](../../crates/gpufx-core/src/convert.rs#L571)) |
 | [convert.wgsl](../../crates/gpufx-core/src/convert.wgsl) | Prepended to every conversion shader: the `Conv` uniform struct ([L5](../../crates/gpufx-core/src/convert.wgsl#L5)) and the helpers `code_max`, `code_scale`, `kg` |
 | [convert_in.wgsl](../../crates/gpufx-core/src/convert_in.wgsl) | `pixel(id)`: planes to straight RGBA of one pixel (range, chroma upsampling, matrix, alpha). No entry point |
 | [convert_in_plain.wgsl](../../crates/gpufx-core/src/convert_in_plain.wgsl) | Entry point, 8x8 workgroup, chroma read straight from the planes (CPU uploads) |
@@ -382,42 +403,42 @@ swscale conversion so that swscale never maps them either (`set_rgba_props`,
 | [convert_out_buffer.wgsl](../../crates/gpufx-core/src/convert_out_buffer.wgsl) | Entry point: one plane packed into `u32` words of a storage buffer (CPU readback) |
 | [convert_out_image.wgsl](../../crates/gpufx-core/src/convert_out_image.wgsl) | Entry point: one plane into a unorm storage texture (GPU frames, RGBA formats) |
 | [convert_out_fused.wgsl](../../crates/gpufx-core/src/convert_out_fused.wgsl) | Entry point: every plane of a YUV GPU frame in one dispatch |
-| [frame.rs](../../crates/gpufx-core/src/frame.rs) | `PixelFormat` and `Layout` ([L11](../../crates/gpufx-core/src/frame.rs#L11), [L110](../../crates/gpufx-core/src/frame.rs#L110)): plane kind, depth, shift, subsampling, alpha; `Matrix`, `Range`, `ChromaLocation`, `ColorInfo` |
+| [frame.rs](../../crates/gpufx-core/src/frame.rs) | `PixelFormat` and `Layout` ([L11](../../crates/gpufx-core/src/frame.rs#L11), [L110](../../crates/gpufx-core/src/frame.rs#L115)): plane kind, depth, shift, subsampling, alpha; `Matrix`, `Range`, `ChromaLocation`, `ColorInfo` |
 
 #### How the pipelines are built
 
 All shader text is assembled in Rust and compiled per device by `Converter` (created with the context in
 [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L229)):
 
-- `pipeline()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L97)) concatenates `convert.wgsl` and a body (`include_str!`),
+- `pipeline()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L105)) concatenates `convert.wgsl` and a body (`include_str!`),
   parses it with naga and calls `ShaderCache::compute_pipeline`. The full source text is part of the cache key
   (`&["convert", "main", &source]`), so the on-disk cache (see "On-disk shader cache") needs no extra invalidation when
   a `.wgsl` file changes. These pipelines are built with no package (`pkg = None`), so `gpufx pack --precompile`
   neither warms nor stores them: they are compiled (or read from the on-disk cache) when the context creates them, or
   on first use for the lazy ones.
-- Input ([convert.rs](../../crates/gpufx-core/src/convert.rs#L125)): `convert_in_source(deep, unorm)` generates the four plane
+- Input ([convert.rs](../../crates/gpufx-core/src/convert.rs#L133)): `convert_in_source(deep, unorm)` generates the four plane
   bindings `plane0..3` (bindings 2..5) and the functions `load0..3`, then appends `convert_in.wgsl`, then the plain or the
   tiled entry point. `unorm` picks the plane texture type: `texture_2d<u32>` for CPU uploads (the load returns the stored
   code) or `texture_2d<f32>` for GPU frames (`round(texel * 255 or 65535)` gives the code back). `deep` does a text
   replace of `rgba16float` by `rgba8unorm` in `convert_in.wgsl`, so that file may contain the word `rgba16float` only in its
   `dst` declaration. Four pipelines in total (CPU or GPU, 8-bit or deep). The CPU pair is built in `Converter::new`; the
   GPU pair on the first GPU frame (`OnceLock`).
-- Output to a buffer ([convert.rs](../../crates/gpufx-core/src/convert.rs#L185)): `convert_out.wgsl` and
+- Output to a buffer ([convert.rs](../../crates/gpufx-core/src/convert.rs#L312)): `convert_out.wgsl` and
   `convert_out_buffer.wgsl`, one pipeline for all formats and planes; the per-plane differences are all in the uniform.
   It reads the RGBA with `textureLoad` on a non-filterable float texture, so `rgba8unorm` and `rgba16float` sources share it.
-- Output to plane images ([convert.rs](../../crates/gpufx-core/src/convert.rs#L242)): `convert_out_image.wgsl` with the text
-  `STORAGE_FORMAT` replaced by the WGSL storage format from `PLANE_FORMATS` ([L72](../../crates/gpufx-core/src/convert.rs#L77):
+- Output to plane images ([convert.rs](../../crates/gpufx-core/src/convert.rs#L371)): `convert_out_image.wgsl` with the text
+  `STORAGE_FORMAT` replaced by the WGSL storage format from `PLANE_FORMATS` ([L72](../../crates/gpufx-core/src/convert.rs#L85):
   `r8unorm`, `rg8unorm`, `rgba8unorm` and the three 16-bit ones). One lazy pipeline per plane texture format.
-- Fused YUV output ([convert.rs](../../crates/gpufx-core/src/convert.rs#L275); `fused_source`,
-  [L283](../../crates/gpufx-core/src/convert.rs#L289)): one lazy pipeline per `PixelFormat` (array sized by `PIXEL_FORMATS`,
-  [L315](../../crates/gpufx-core/src/convert.rs#L321)). Rust generates the `dst0..` storage bindings of the format's planes and
+- Fused YUV output ([convert.rs](../../crates/gpufx-core/src/convert.rs#L404); `fused_source`,
+  [L283](../../crates/gpufx-core/src/convert.rs#L484)): one lazy pipeline per `PixelFormat` (array sized by `PIXEL_FORMATS`,
+  [L315](../../crates/gpufx-core/src/convert.rs#L516)). Rust generates the `dst0..` storage bindings of the format's planes and
   two functions the shader calls: `store_luma` (plane 0, plus plane 3 for the alpha of `yuva*`) and `store_chroma`
   (planes 1 and 2, or the two-channel plane 1 of semi-planar). Channels a plane texture has but the format does not
   use are written as 0, alpha 1.
 - Bind groups are cached: an `InputSlot` keeps an LRU of the bind groups of the plane textures of recent GPU frames, and
   a `GpuOutputSlot` one of recent (source, planes) pairs, so a pool of frames coming back in turn is bound once.
 
-The `Conv` uniform ([convert.rs](../../crates/gpufx-core/src/convert.rs#L376), 112 bytes) carries frame size, chroma size and
+The `Conv` uniform ([convert.rs](../../crates/gpufx-core/src/convert.rs#L571), 112 bytes) carries frame size, chroma size and
 subsampling, plane kind, alpha flag, depth, shift, range, premultiplied flag, `kr`/`kb`, chroma siting and, for
 outputs, the plane geometry and which channel (Y/R, U/G, V/B, A) each interleaved sample holds. The WGSL struct
 ([convert.wgsl](../../crates/gpufx-core/src/convert.wgsl#L5)) and the Rust word list must stay in the same order; a size change
@@ -425,19 +446,19 @@ also changes `UNIFORM_SIZE`.
 
 #### Input path
 
-Per pixel, `pixel()` in [convert_in.wgsl](../../crates/gpufx-core/src/convert_in.wgsl#L45):
+Per pixel, `pixel()` in [convert_in.wgsl](../../crates/gpufx-core/src/convert_in.wgsl#L49):
 
 1. Read the stored code(s). `value()` undoes the P010 shift (`raw >> shift`).
 2. **RGBA formats** (`kind` 0): divide by `code_max()` (`rgba64le` is 16 bit).
 3. **YUV formats**: luma is normalised by range (`luma`, [L12](../../crates/gpufx-core/src/convert_in.wgsl#L12): limited
    `(c - 16s) / 219s` with `s` = `code_scale()`, full `c / max`); chroma likewise (`chroma`,
    [L19](../../crates/gpufx-core/src/convert_in.wgsl#L19): `(c - 128s) / 224s`, or `(c - mid) / max`). Chroma is upsampled
-   **bilinearly**: `chroma_pos` ([L37](../../crates/gpufx-core/src/convert_in.wgsl#L37)) gives the fractional chroma coordinate
-   under the pixel centre from the siting (`ChromaLocation::siting`, [frame.rs](../../crates/gpufx-core/src/frame.rs#L209)), the
+   **bilinearly**: `chroma_pos` ([L37](../../crates/gpufx-core/src/convert_in.wgsl#L41)) gives the fractional chroma coordinate
+   under the pixel centre from the siting (`ChromaLocation::siting`, [frame.rs](../../crates/gpufx-core/src/frame.rs#L246)), the
    four neighbours are mixed, and coordinates are clamped to the plane (`load_uv`,
    [L27](../../crates/gpufx-core/src/convert_in.wgsl#L27); semi-planar reads one `rg` texel, planar two textures). Then
    `R = Y + 2(1-kr)V`, `B = Y + 2(1-kb)U`, `G = (Y - kr R - kb B) / kg`, with `kr`/`kb` from the frame's `Matrix`
-   (`kr_kb`, [frame.rs](../../crates/gpufx-core/src/frame.rs#L173)).
+   (`kr_kb`, [frame.rs](../../crates/gpufx-core/src/frame.rs#L210)).
 4. Alpha: `yuva*` read plane 3 (full size, divided by `code_max`); other formats give 1.
 5. The colour is clamped to 0..1 (super-white, super-black and out-of-gamut values are lost here). If the frame is
    `premultiplied`, RGB is then divided by alpha (0 where alpha is 0), so effects always see straight alpha.
@@ -448,15 +469,15 @@ once into `uv_tile` (at most 18x18 entries; `uv_width = 15 / sub_x + 3`), waits 
 `pixel()`; the values are identical. `in_group()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L42)) sets the dispatch
 size and must match the `workgroup_size` of the entry point in use.
 
-CPU frames: `InputSlot::pool_keys` ([L461](../../crates/gpufx-core/src/convert.rs#L467)) lists the upload textures (one per
-plane, integer format from `plane_format`, [L356](../../crates/gpufx-core/src/convert.rs#L362)) and the RGBA target; `upload`
-([L568](../../crates/gpufx-core/src/convert.rs#L574)) writes the planes and the uniform. GPU frames: `use_gpu_frame`
-([L586](../../crates/gpufx-core/src/convert.rs#L592)) binds the frame's own plane textures and uploads only the uniform.
+CPU frames: `InputSlot::pool_keys` ([L461](../../crates/gpufx-core/src/convert.rs#L672)) lists the upload textures (one per
+plane, integer format from `plane_format`, [L356](../../crates/gpufx-core/src/convert.rs#L557)) and the RGBA target; `upload`
+([L568](../../crates/gpufx-core/src/convert.rs#L826)) writes the planes and the uniform. GPU frames: `use_gpu_frame`
+([L586](../../crates/gpufx-core/src/convert.rs#L844)) binds the frame's own plane textures and uploads only the uniform.
 Planes the format does not have are bound to a 1x1 dummy texture (`Converter::dummy`).
 
 **Deep or not** (`work_format`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L24)): a format with `depth > 8` wants
 `rgba16float`. A graph is deep when any input or output frame wants it
-([graph.rs](../../crates/gpufx-core/src/graph.rs#L737)); the pass textures of the whole graph and the conversion pipelines
+([graph.rs](../../crates/gpufx-core/src/graph.rs#L794)); the pass textures of the whole graph and the conversion pipelines
 follow. `rgba16float` keeps about 11 bits, so `rgba64le` in and out does not round-trip all 16 bits.
 
 #### Output paths
@@ -487,7 +508,7 @@ of a plane, and `encode()` ([L51](../../crates/gpufx-core/src/convert_out.wgsl#L
 - **Depth**: `encode()` rounds to nearest and clamps. 10-bit planar formats store the code in the low bits, P010 shifts it
   to the high bits (`shift` = 6). Samples are 1 or 2 bytes (`bytes`); the buffer path packs them little-endian.
 - **Size limit**: `OutputSlot::new` fails if a plane needs more than `max_storage_buffer_binding_size`
-  ([convert.rs](../../crates/gpufx-core/src/convert.rs#L765)); the image paths write textures and have no such limit.
+  ([convert.rs](../../crates/gpufx-core/src/convert.rs#L1083)); the image paths write textures and have no such limit.
 
 #### How the output format is chosen
 
@@ -546,8 +567,8 @@ The C layer lets only formats the GPU can read through, and uses swscale for the
 #### Adding a pixel format
 
 1. [frame.rs](../../crates/gpufx-core/src/frame.rs): add the `PixelFormat` variant, its `NAMES` entry, raise both literal
-   `12`s (`NAMES`, `ALL`) and add a `layout()` row (kind, depth, shift, subsampling, alpha). Put the variant **last**
-   and change `PIXEL_FORMATS` in [convert.rs](../../crates/gpufx-core/src/convert.rs#L321) (`Yuva444p as usize + 1`) to the new
+   `13`s (`NAMES`, `ALL`) and add a `layout()` row and a `pixel_layout()` arm (kind, depth, shift, subsampling, alpha). Put the variant **last**
+   and change `PIXEL_FORMATS` in [convert.rs](../../crates/gpufx-core/src/convert.rs#L516) (`Gray as usize + 1`) to the new
    last variant. If the format is a combination of what exists (planar or semi-planar YUV or RGBA, depth up to 16,
    subsampling 1 or 2, an optional alpha plane), `plane_dims`, `plane_texture_format`, `plane_format`, `uniform` and the
    shaders need no change; `from_name` and `gpufx_format_supported` follow `NAMES`.

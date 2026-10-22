@@ -277,6 +277,16 @@ int gpufx_effect_output_size(const GpufxEffect *fx, uint32_t output, const Gpufx
 /* gpufx_effect_output_format*() for any output pad. */
 uint32_t gpufx_effect_output_pad_format_count(const GpufxEffect *fx, uint32_t output);
 const char *gpufx_effect_output_pad_format(const GpufxEffect *fx, uint32_t output, uint32_t index);
+/*
+ * The pixel format output `output` is written in when the caller picks none: out_format
+ * when not NULL (the caller's choice), else first_input (the format of the first input)
+ * when it is of the pixel_layout of the output, else that layout's default (nv12 for
+ * yuv420, yuv422p, yuv444p, yuva420p, yuva444p, gray for y, rgba for rgba). An output
+ * with planes in a format of its layout is written straight from its planes. A static
+ * string, or NULL (see gpufx_last_error()) for an unknown format.
+ */
+const char *gpufx_effect_output_default_format(const GpufxEffect *fx, uint32_t output, const char *out_format,
+                                               const char *first_input);
 
 /*
  * Checks one stream per input against the manifest rules (pixel format, size limits,

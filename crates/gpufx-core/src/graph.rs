@@ -135,7 +135,7 @@ pub(crate) struct FrameIo {
     /// Vulkan frames may be read in place (see `prepare`).
     pub(crate) direct_gpu: bool,
     /// The input textures of the GPU frame being recorded, for the slots made for it.
-    frame_ins: Vec<Option<wgpu::Texture>>,
+    frame_ins: Vec<Vec<wgpu::Texture>>,
     /// The output textures of that frame, for the effects writing them in place.
     frame_outs: Vec<Option<wgpu::Texture>>,
     /// Bind groups made for the textures of GPU frames (input and output passes, effects
@@ -183,6 +183,8 @@ struct Layout {
     node_mips: Vec<Vec<bool>>,
     /// For each output of each effect, the output frame its pass writes in place, if any.
     direct_out: Vec<Vec<Option<usize>>>,
+    /// By graph output: written straight from the planes of its source (see [`planar_outputs`]).
+    planar_out: Vec<bool>,
 }
 
 impl FrameIo {
@@ -225,6 +227,7 @@ impl FrameIo {
             return Ok(());
         }
         self.copies.resize_with(effects.len(), Default::default);
+        let pads: Vec<PixelLayout> = self.inputs.iter().map(|s| s.key.layout).collect();
         for k in 0..effects.len() {
             if self.enabled(k) {
                 continue;
@@ -238,7 +241,7 @@ impl FrameIo {
                 }
                 let i = self.bypass(effects, k, o);
                 let source = topo.node_inputs[k][i];
-                let (from, to) = (source_layout(effects, source), effects[k].package().manifest.outputs[o].pixel_layout);
+                let (from, to) = (source_layout(effects, &pads, source), effects[k].package().manifest.outputs[o].pixel_layout);
                 let planes = from != PixelLayout::Rgba || to != PixelLayout::Rgba;
                 let (src, dst) = if planes {
                     (source_planes(effects, &self.inputs, source), effects[k].output_planes(o))
@@ -338,24 +341,74 @@ fn check_plane_mips(effects: &[Effect], node_mips: &[Vec<bool>]) -> Result<(), E
     Ok(())
 }
 
-/// Which input pads an effect reads in a layout with planes, through a layout convert.
-fn converted_pads(effects: &[Effect], topo: &Topology) -> Vec<bool> {
+/// Which input pads an effect reads in another layout than the pad's (`layouts`), through
+/// a layout convert.
+fn converted_pads(effects: &[Effect], topo: &Topology, layouts: &[PixelLayout]) -> Vec<bool> {
     let mut pads = vec![false; topo.nb_inputs];
     for (k, sources) in topo.node_inputs.iter().enumerate() {
         for (def, src) in effects[k].package().manifest.inputs.iter().zip(sources) {
-            if let (Source::Input(i), true) = (*src, def.pixel_layout != PixelLayout::Rgba) {
-                pads[i] = true;
+            if let Source::Input(i) = *src {
+                pads[i] |= def.pixel_layout != layouts.get(i).copied().unwrap_or_default();
             }
         }
     }
     pads
 }
 
+/// The layout each input pad is read in: the planes of its frame format's own
+/// [`PixelFormat::pixel_layout`], loaded straight from the frame, when every effect input
+/// reading the pad wants planes (those wanting another layout of planes read a plane to
+/// plane layout convert); else `rgba` (the conversion to RGBA, then a layout convert for
+/// each reader wanting planes). A pad no effect reads, read by a graph output
+/// itself or through a `mipmaps` input, with premultiplied alpha, or in a bypass call
+/// (its outputs read the pads as RGBA) stays `rgba`.
+fn pad_layouts(effects: &[Effect], topo: &Topology, inputs: &[Desc], pad_mips: &[bool], bypass: bool) -> Vec<PixelLayout> {
+    (0..topo.nb_inputs)
+        .map(|i| {
+            let Some(f) = inputs.get(i) else { return PixelLayout::Rgba };
+            let own = f.format.pixel_layout();
+            if bypass || own == PixelLayout::Rgba || f.premultiplied || pad_mips[i] || topo.outputs.contains(&Source::Input(i)) {
+                return PixelLayout::Rgba;
+            }
+            let wants: Vec<PixelLayout> = topo
+                .node_inputs
+                .iter()
+                .enumerate()
+                .flat_map(|(k, sources)| sources.iter().zip(&effects[k].package().manifest.inputs))
+                .filter(|(s, _)| **s == Source::Input(i))
+                .map(|(_, d)| d.pixel_layout)
+                .collect();
+            if !wants.is_empty() && wants.iter().all(|&l| l != PixelLayout::Rgba) {
+                own
+            } else {
+                PixelLayout::Rgba
+            }
+        })
+        .collect()
+}
+
+/// Which graph outputs are written straight from the planes of their source: an effect
+/// output with planes, into a frame format of the same layout (see
+/// [`PixelFormat::pixel_layout`]) with straight alpha.
+fn planar_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc]) -> Vec<bool> {
+    topo.outputs
+        .iter()
+        .zip(outs)
+        .map(|(src, o)| {
+            let layout = match *src {
+                Source::Node(j, k) => effects[j].package().manifest.outputs[k].pixel_layout,
+                Source::Input(_) => PixelLayout::Rgba,
+            };
+            layout != PixelLayout::Rgba && o.format.pixel_layout() == layout && !o.premultiplied
+        })
+        .collect()
+}
+
 /// The textures of `src`, one per plane of its layout: an input pad's slot (`rgba`), or
 /// the planes of an effect output.
 fn source_planes(effects: &[Effect], inputs: &[InputSlot], src: Source) -> Vec<wgpu::Texture> {
     match src {
-        Source::Input(i) => vec![inputs[i].texture.clone()],
+        Source::Input(i) => inputs[i].read_planes(),
         Source::Node(j, o) => effects[j].output_planes(o),
     }
 }
@@ -425,11 +478,11 @@ impl Plan {
     }
 }
 
-/// The `pixel_layout` of a source: an input pad comes as `rgba` (the frame conversions),
-/// an effect output in the layout its manifest gives.
-fn source_layout(effects: &[Effect], src: Source) -> PixelLayout {
+/// The `pixel_layout` of a source: an input pad in the layout it is read in (`pads`, see
+/// [`pad_layouts`]), an effect output in the layout its manifest gives.
+fn source_layout(effects: &[Effect], pads: &[PixelLayout], src: Source) -> PixelLayout {
     match src {
-        Source::Input(_) => PixelLayout::Rgba,
+        Source::Input(i) => pads[i],
         Source::Node(j, o) => effects[j].package().manifest.outputs[o].pixel_layout,
     }
 }
@@ -442,7 +495,8 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
     let mut direct: Vec<Vec<Option<usize>>> = effects.iter().map(|fx| vec![None; fx.output_count()]).collect();
     for (j, (src, out)) in topo.outputs.iter().zip(outs).enumerate() {
         let Source::Node(k, o) = *src else { continue };
-        if out.format != PixelFormat::Rgba || out.premultiplied || node_mips[k][o] || source_layout(effects, *src) != PixelLayout::Rgba {
+        if out.format != PixelFormat::Rgba || out.premultiplied || node_mips[k][o] || source_layout(effects, &[], *src) != PixelLayout::Rgba
+        {
             continue;
         }
         if topo.outputs.iter().filter(|s| **s == *src).count() != 1 || topo.node_inputs.iter().flatten().any(|s| s == src) {
@@ -468,7 +522,8 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
 /// planes takes one pooled texture per plane, while its liveness stays that of its name.
 /// An effect input reading a source of another `pixel_layout` reads a layout convert run
 /// before the effect, alive through its passes; the convert is shared by the readers of
-/// the same source in the same layout, and a graph output with planes reads one to `rgba`.
+/// the same source in the same layout, and a graph output with planes reads one to `rgba`
+/// unless it is written straight from its planes (`planar_out`).
 #[allow(clippy::too_many_arguments)]
 fn plan(
     effects: &[Effect],
@@ -477,6 +532,8 @@ fn plan(
     sizes: &[Vec<(u32, u32)>],
     mips: &[Vec<bool>],
     direct_out: &[Vec<Option<usize>>],
+    pad_layouts: &[PixelLayout],
+    planar_out: &[bool],
     deep: bool,
 ) -> Result<Plan, Error> {
     let finals: Vec<Vec<&str>> =
@@ -493,7 +550,7 @@ fn plan(
             converts[c].end = converts[c].end.max(end);
             return c;
         }
-        let from = source_layout(effects, src);
+        let from = source_layout(effects, pad_layouts, src);
         converts.push(ConvertPlan { src, from, to, size: source_size(src, pads, sizes), slots: Vec::new(), before, end });
         converts.len() - 1
     };
@@ -510,7 +567,7 @@ fn plan(
                 bump(&mut last, (j, finals[j][o]), g + runs.max(1) - 1);
             }
             let to = m.inputs[i].pixel_layout;
-            if source_layout(effects, src) != to {
+            if source_layout(effects, pad_layouts, src) != to {
                 input_convert[k][i] = Some(convert_of(&mut converts, src, to, Some(k), g + runs.max(1) - 1));
             }
         }
@@ -540,7 +597,7 @@ fn plan(
         if let Source::Node(j, o) = *src {
             // Read by the output conversion, after every effect.
             last.insert((j, finals[j][o]), usize::MAX);
-            if source_layout(effects, *src) != PixelLayout::Rgba {
+            if source_layout(effects, pad_layouts, *src) != PixelLayout::Rgba && !planar_out[n] {
                 output_convert[n] = Some(convert_of(&mut converts, *src, PixelLayout::Rgba, None, usize::MAX));
             }
         }
@@ -775,26 +832,37 @@ fn prepare(
             height: f.height,
             direct: !gpu && f.format == PixelFormat::Rgba && !f.premultiplied,
             gpu,
+            layout: PixelLayout::Rgba,
         })
         .collect();
+    let (pad_mips, node_mips) = mip_sources(effects, topo);
+    for (k, layout) in keys.iter_mut().zip(pad_layouts(effects, topo, inputs, &pad_mips, bypass)) {
+        k.layout = layout;
+    }
     let planned: &[InputKey] = io.layout.as_ref().map_or(&[], |l| &l.keys);
     // A bypass call may bring only the first inputs: keep the slots of the others, and
     // their depth, so toggling the filter on and off does not rebuild anything.
     let others = if bypass { planned.get(inputs.len()..).unwrap_or_default() } else { &[][..] };
     let deep = keys.iter().chain(others).any(|k| work_format(k.format) != wgpu::TextureFormat::Rgba8Unorm)
         || outs.iter().any(|o| work_format(o.format) != wgpu::TextureFormat::Rgba8Unorm);
-    let (pad_mips, node_mips) = mip_sources(effects, topo);
     check_plane_mips(effects, &node_mips)?;
-    // Input pads some effect reads in another layout: read through a convert, so not in place.
-    let converted = converted_pads(effects, topo);
+    let layouts: Vec<PixelLayout> = keys.iter().map(|k| k.layout).collect();
+    // Input pads read as RGBA some effect reads in another layout: read through a convert,
+    // so not in place.
+    let converted = converted_pads(effects, topo, &layouts);
     // Vulkan frames in straight RGBA8, in a graph that is not deep: effects read the
-    // frame itself, with no pooled texture and no conversion pass.
+    // frame itself, with no pooled texture and no conversion pass. So are 8-bit NV12 and
+    // gray frames read in their layout's planes: their unorm planes hold the codes / 255.
     let in_place = gpu && io.direct_gpu && !deep;
     if in_place {
         for (i, k) in keys.iter_mut().enumerate() {
-            k.direct = k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i] && !converted[i];
+            k.direct = match k.layout {
+                PixelLayout::Rgba => k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i] && !converted[i],
+                _ => matches!(k.format, PixelFormat::Nv12 | PixelFormat::Gray) && !converted[i],
+            };
         }
     }
+    let planar_out = planar_outputs(effects, topo, outs);
     // And the pass writing an effect output writes a straight RGBA8 output frame in place.
     let direct_out = if in_place {
         direct_outputs(effects, topo, outs, &node_mips)
@@ -802,7 +870,7 @@ fn prepare(
         effects.iter().map(|fx| vec![None; fx.output_count()]).collect()
     };
     let stale = io.deep != deep
-        || io.layout.as_ref().is_some_and(|l| l.direct_out != direct_out)
+        || io.layout.as_ref().is_some_and(|l| l.direct_out != direct_out || l.planar_out != planar_out)
         || if bypass { planned.len() < keys.len() } else { planned.len() != keys.len() }
         || planned.iter().zip(&keys).any(|(p, k)| p != k);
     if stale {
@@ -816,7 +884,8 @@ fn prepare(
         check_nodes(effects, topo, None, &streams)?;
         let pads: Vec<(u32, u32)> = keys.iter().map(|k| (k.width, k.height)).collect();
         let sizes = node_sizes(effects, topo, &pads)?;
-        let plan = plan(effects, topo, &pads, &sizes, &node_mips, &direct_out, deep)?;
+        let layouts: Vec<PixelLayout> = keys.iter().map(|k| k.layout).collect();
+        let plan = plan(effects, topo, &pads, &sizes, &node_mips, &direct_out, &layouts, &planar_out, deep)?;
         // Drop the bindings of the old textures; they go back to the pool's trimming.
         io.input_mips.clear();
         io.node_mips.clear();
@@ -836,7 +905,7 @@ fn prepare(
         io.deep = deep;
         io.memory =
             MemoryStats { pass_textures: plan.slots.len(), pass_texture_bytes: plan.bytes(deep, ctx.plane_f16), ..Default::default() };
-        io.layout = Some(Layout { keys, plan, sizes, pad_mips, node_mips, direct_out });
+        io.layout = Some(Layout { keys, plan, sizes, pad_mips, node_mips, direct_out, planar_out });
     }
     acquire(effects, topo, io, &ctx)
 }
@@ -859,7 +928,7 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
     let mut keys = Vec::new();
     let mut counts = Vec::new();
     for (i, &k) in layout.keys.iter().enumerate() {
-        let slot = InputSlot::pool_keys(k, deep, layout.pad_mips[i]);
+        let slot = InputSlot::pool_keys(k, deep, layout.pad_mips[i], f16);
         counts.push(slot.len());
         keys.extend(slot);
     }
@@ -893,8 +962,8 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
         .zip(&counts)
         .enumerate()
         .map(|(i, (&k, &n))| {
-            let frame = io.frame_ins.get(i).and_then(Option::as_ref);
-            InputSlot::new(device, conv, k, deep, textures.by_ref().take(n).collect(), frame)
+            let frame = io.frame_ins.get(i).map_or(&[][..], Vec::as_slice);
+            InputSlot::new(device, conv, k, deep, f16, textures.by_ref().take(n).collect(), frame)
         })
         .collect();
     let pool: Vec<wgpu::Texture> = textures.collect();
@@ -1028,7 +1097,15 @@ pub(crate) fn run(
         if bypass {
             check_bypass_pad(&ins, out_desc, pad)?;
         }
-        if !io.outputs[k].is_bound(bypass) || (bypass && io.bypass_bound[k] != pad) {
+        let planar = !bypass && io.layout.as_ref().is_some_and(|l| l.planar_out[k]);
+        if planar && (!io.outputs[k].is_bound(false) || !io.outputs[k].is_planar()) {
+            // Packed straight from the planes of the effect output.
+            let src = source_planes(effects, &io.inputs, topo.outputs[k]);
+            io.outputs[k].bind_planes(device, conv, &src)?;
+            bound = true;
+        } else if !planar
+            && (!io.outputs[k].is_bound(bypass) || (bypass && io.bypass_bound[k] != pad) || (!bypass && io.outputs[k].is_planar()))
+        {
             let tex = if bypass {
                 source_texture(effects, &io.inputs, Source::Input(pad))
             } else {
@@ -1171,7 +1248,7 @@ pub(crate) fn run_gpu(
     let ins: Vec<Desc> = inputs.iter().map(desc).collect();
     let out_descs: Vec<Desc> = outs.iter().map(desc).collect();
     let t0 = std::time::Instant::now();
-    io.frame_ins = inputs.iter().map(|f| f.planes.first().cloned()).collect();
+    io.frame_ins = inputs.iter().map(|f| f.planes.clone()).collect();
     io.frame_outs = outs.iter().map(|f| f.planes.first().cloned()).collect();
     let prepared = prepare(effects, topo, io, &ins, &out_descs, bypass, true);
     if let Some(f) = inputs.first() {
@@ -1219,7 +1296,7 @@ fn record_gpu(
     for (i, (slot, f)) in io.inputs.iter_mut().zip(inputs).enumerate() {
         if slot.key.direct {
             // Read in place: the effects reading it are bound to this frame below.
-            slot.texture = f.planes[0].clone();
+            slot.read_in_place(&f.planes);
             direct[i] = true;
         } else {
             io.frame_binds += slot.use_gpu_frame(device, queue, conv, &f.planes, &f.color) as usize;
@@ -1254,6 +1331,12 @@ fn record_gpu(
         } else {
             topo.outputs[k]
         };
+        if !bypass && io.layout.as_ref().is_some_and(|l| l.planar_out[k]) {
+            // Written straight from the planes of the effect output.
+            let sources = source_planes(effects, &io.inputs, src);
+            io.frame_binds += io.gpu_outputs[k].bind_planes(device, queue, conv, &sources, &out.planes, &out.color)? as usize;
+            continue;
+        }
         let tex = if bypass { source_texture(effects, &io.inputs, src) } else { output_texture(effects, io, k, src) };
         io.frame_binds += io.gpu_outputs[k].bind(device, queue, conv, &tex, &out.planes, &out.color)? as usize;
     }
@@ -2443,7 +2526,17 @@ impl EffectGraph {
         }
         let (_, mips) = mip_sources(&self.effects, &self.topo);
         let none: Vec<Vec<Option<usize>>> = self.effects.iter().map(|fx| vec![None; fx.output_count()]).collect();
-        let plan = plan(&self.effects, &self.topo, sizes, &node_sizes(&self.effects, &self.topo, sizes)?, &mips, &none, deep)?;
+        let plan = plan(
+            &self.effects,
+            &self.topo,
+            sizes,
+            &node_sizes(&self.effects, &self.topo, sizes)?,
+            &mips,
+            &none,
+            &vec![PixelLayout::Rgba; self.topo.nb_inputs],
+            &vec![false; self.topo.outputs.len()],
+            deep,
+        )?;
         Ok((plan.slots.len(), plan.bytes(deep, self.effects[0].program.ctx.plane_f16)))
     }
 
@@ -2554,6 +2647,45 @@ impl EffectGraph {
     #[doc(hidden)]
     pub fn layout_converts(&self) -> usize {
         self.io.converts.len()
+    }
+
+    /// How many frame conversions to or from RGBA the current frames run: input slots
+    /// converting to RGBA and outputs converting from it, not the inputs and outputs loaded
+    /// or written straight from planes, nor those read or written in place. For tests.
+    #[doc(hidden)]
+    pub fn rgba_conversions(&self) -> usize {
+        let io = &self.io;
+        io.inputs.iter().filter(|s| s.converts_to_rgba()).count()
+            + io.outputs.iter().filter(|s| !s.is_planar()).count()
+            + io.gpu_outputs.iter().filter(|s| s.is_bound() && !s.is_planar()).count()
+    }
+
+    /// The pixel format output `k` is written in: `out_format` when given (the caller's
+    /// choice, e.g. FFmpeg's `out_format` option), else `first_input` (the format of the
+    /// first input frame) when it is of the `pixel_layout` of the output, else that layout's
+    /// default ([`PixelFormat::default_of`]: `nv12` for `yuv420`, `gray` for `y`, `rgba`
+    /// for `rgba`, ...). An output with planes in a format of its layout is written straight
+    /// from its planes; any other format goes through RGBA.
+    pub fn output_default_format(&self, k: usize, out_format: Option<&str>, first_input: Option<&str>) -> Result<PixelFormat, Error> {
+        if k >= self.topo.outputs.len() {
+            return Err(Error::Unsupported(format!("the {} has no output {k}", self.what)));
+        }
+        let parse = |name: &str| {
+            PixelFormat::from_name(name).ok_or_else(|| Error::Unsupported(format!("pixel format `{name}` is not converted on the GPU")))
+        };
+        if let Some(name) = out_format {
+            return parse(name);
+        }
+        let layout = match self.topo.outputs[k] {
+            Source::Node(j, o) => self.effects[j].package().manifest.outputs[o].pixel_layout,
+            Source::Input(_) => PixelLayout::Rgba,
+        };
+        if let Some(f) = first_input.and_then(PixelFormat::from_name) {
+            if f.pixel_layout() == layout {
+                return Ok(f);
+            }
+        }
+        Ok(PixelFormat::default_of(layout))
     }
 }
 

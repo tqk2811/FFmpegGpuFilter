@@ -27,11 +27,13 @@ pub enum PixelFormat {
     /// `yuv420p` with a full size alpha plane.
     Yuva420p,
     Yuva444p,
+    /// An 8-bit Y plane alone (`gray`): read with neutral chroma.
+    Gray,
 }
 
 /// Every format with its FFmpeg name. `yuvj*` names are accepted as aliases (the range
 /// comes with the colour info).
-const NAMES: [(PixelFormat, &str); 12] = [
+const NAMES: [(PixelFormat, &str); 13] = [
     (PixelFormat::Rgba, "rgba"),
     (PixelFormat::Rgba64, "rgba64le"),
     (PixelFormat::Nv12, "nv12"),
@@ -44,6 +46,7 @@ const NAMES: [(PixelFormat, &str); 12] = [
     (PixelFormat::Yuv444p10, "yuv444p10le"),
     (PixelFormat::Yuva420p, "yuva420p"),
     (PixelFormat::Yuva444p, "yuva444p"),
+    (PixelFormat::Gray, "gray"),
 ];
 
 /// How the samples of a format are stored, as the conversion shader reads them.
@@ -70,11 +73,13 @@ pub(crate) enum PlaneKind {
     SemiPlanar = 1,
     /// Y, U, V planes (and alpha).
     Planar = 2,
+    /// A Y plane alone.
+    Gray = 3,
 }
 
 impl PixelFormat {
-    pub const ALL: [PixelFormat; 12] = {
-        let mut all = [PixelFormat::Rgba; 12];
+    pub const ALL: [PixelFormat; 13] = {
+        let mut all = [PixelFormat::Rgba; 13];
         let mut i = 0;
         while i < NAMES.len() {
             all[i] = NAMES[i].0;
@@ -122,6 +127,7 @@ impl PixelFormat {
             Yuv444p10 => (PlaneKind::Planar, 10, 0, (1, 1), false),
             Yuva420p => (PlaneKind::Planar, 8, 0, (2, 2), true),
             Yuva444p => (PlaneKind::Planar, 8, 0, (1, 1), true),
+            Gray => (PlaneKind::Gray, 8, 0, (1, 1), false),
         };
         let bytes = if depth + shift > 8 { 2 } else { 1 };
         // The RGBA plane carries its alpha itself, not in a fourth plane.
@@ -134,6 +140,37 @@ impl PixelFormat {
             PlaneKind::Rgba => 1,
             PlaneKind::SemiPlanar => 2,
             PlaneKind::Planar => 3 + l.alpha as usize,
+            PlaneKind::Gray => 1,
+        }
+    }
+
+    /// The `pixel_layout` whose planes hold this format's samples as they are: the same
+    /// subsampling and alpha, only the packing of the planes and the bit depth differ.
+    pub fn pixel_layout(self) -> crate::manifest::PixelLayout {
+        use crate::manifest::PixelLayout as L;
+        use PixelFormat::*;
+        match self {
+            Rgba | Rgba64 => L::Rgba,
+            Nv12 | P010 | Yuv420p | Yuv420p10 => L::Yuv420,
+            Yuv422p | Yuv422p10 => L::Yuv422,
+            Yuv444p | Yuv444p10 => L::Yuv444,
+            Yuva420p => L::Yuva420,
+            Yuva444p => L::Yuva444,
+            Gray => L::Y,
+        }
+    }
+
+    /// The format a graph output of `layout` is written in when nothing else picks one.
+    pub fn default_of(layout: crate::manifest::PixelLayout) -> Self {
+        use crate::manifest::PixelLayout as L;
+        match layout {
+            L::Rgba => PixelFormat::Rgba,
+            L::Yuv420 => PixelFormat::Nv12,
+            L::Yuv422 => PixelFormat::Yuv422p,
+            L::Yuv444 => PixelFormat::Yuv444p,
+            L::Yuva420 => PixelFormat::Yuva420p,
+            L::Yuva444 => PixelFormat::Yuva444p,
+            L::Y => PixelFormat::Gray,
         }
     }
 
