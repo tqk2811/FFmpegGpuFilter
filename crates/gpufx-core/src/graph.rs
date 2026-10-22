@@ -1955,6 +1955,14 @@ impl EffectGraph {
         if let Some(i) = self.param_names.iter().position(|n| n == name) {
             return Ok(i);
         }
+        // `outputs=N` sets the pads of the graph: it cannot change once it is built (no param
+        // takes the name, see `NODE_OPTIONS`).
+        if name == "outputs" || name.rsplit_once('.').is_some_and(|(_, p)| p == "outputs") {
+            return Err(Error::Param(format!(
+                "`{name}`: outputs=N is fixed when the {} is built (it sets the output pads); give it inline, e.g. `effect.zip=outputs=3`",
+                self.what
+            )));
+        }
         let find = |k: usize, param: &str| self.params.iter().position(|&(e, p)| e == k && self.effects[e].params.defs()[p].name == param);
         if let Some((prefix, param)) = name.split_once('.') {
             let effects = self.node_effects(prefix, param)?;

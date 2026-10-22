@@ -134,7 +134,7 @@ impl Packages {
         // each pad).
         pkgs.add(
             "halves",
-            r#"{"id":"t.halves","name":"Halves","api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"half","repeat":{"default":1,"max":4}}],
+            r#"{"id":"t.halves","name":"Halves","api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"half","repeat":{"default":1}}],
                 "groups":[{"passes":[{"shader":"c.wgsl","inputs":["src"],"outputs":["color"]},{"shader":"h.wgsl","inputs":["src"],"outputs":["half"]}]}]}"#,
             &[
                 ("c.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});"))),
@@ -158,6 +158,19 @@ impl Packages {
                     "{}fn gpufx_output_size(o: u32) -> vec2u {{ return vec2u(gpufx_input_size(0u).x - o, gpufx_input_size(0u).y); }}\n",
                     wgsl(&PARTS_LOOP.replace("BASE", "0u"))
                 ),
+            )],
+        );
+        // A fixed output written by the same pass before the copies: copy j is
+        // (src.r, j, 0, 1) through gpufx_write_copy, whatever comes before it.
+        pkgs.add(
+            "maskparts",
+            r#"{"id":"t.maskparts","name":"MaskParts","api":1,"used_for":["gpufx"],"outputs":[{"name":"mask"},{"name":"part","repeat":{"default":2}}],
+                "groups":[{"passes":[{"shader":"p.wgsl","inputs":["src"],"outputs":["mask","part"]}]}]}"#,
+            &[(
+                "p.wgsl",
+                wgsl(&format!(
+                    "gpufx_write(id, {MATTE});\n    let r = textureLoad(src, vec2i(id.xy), 0).r;\n    for (var j = 0u; j < gpufx_copy_count(); j++) {{ gpufx_write_copy(j, id, vec4f(r, f32(j) / 255.0, 0.0, 1.0)); }}"
+                )),
             )],
         );
         // Sized by params: the top-left `w`x`h` of the input (0 when a param is 0).
@@ -693,7 +706,7 @@ fn a_repeated_output_takes_its_count_from_the_outputs_option() {
         ("parts.zip=outputs=4", "writes 1 to 3 copies of its output `part`, got outputs=4"),
         ("parts.zip=outputs=0", "got outputs=0"),
         ("parts.zip=outputs=two", "outputs=two, outputs is the number of copies"),
-        ("halves.zip=outputs=4", "1 other outputs and outputs=4 make 5 outputs, more than 4"),
+        ("halves.zip=outputs=4", "writes 1 to 3 copies of its output `half`, got outputs=4"),
         ("invert.zip=outputs=2", "fixed number of outputs"),
         ("[0]parts.zip[part=x]", "`parts` has no output `part` (outputs: part0, part1)"),
         ("[0]parts.zip[part5=x]", "has no output `part5`"),
@@ -718,4 +731,40 @@ fn every_copy_of_a_repeated_output_is_sized_by_its_index() {
     // Copies one pass writes have one size.
     let e = pkgs.graph(&ctx, "uneven.zip").unwrap().output_size(0, &[(W, H)]).unwrap_err().to_string();
     assert!(e.contains("the outputs of one pass have one size"), "{e}");
+}
+
+#[test]
+fn copy_helpers_index_only_the_copies_of_a_pass_writing_fixed_outputs_first() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(6);
+    for n in 1..=3u8 {
+        let mut g = pkgs.graph(&ctx, &format!("maskparts.zip=outputs={n}")).unwrap();
+        let mut want = vec![matte(&src)];
+        want.extend((0..n).map(|j| part(&src, j)));
+        assert!(run_graph(&mut g, &[&src]) == want, "outputs={n}");
+    }
+}
+
+#[test]
+fn a_single_copy_takes_its_own_name_as_a_label() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(6);
+    // outputs=1 and no other output: the pad is `default` unlabelled, `part0` by name.
+    let mut g = pkgs.graph(&ctx, "[0]parts.zip=outputs=1[part0=x]").unwrap();
+    assert_eq!(g.output_names(), ["x"]);
+    assert!(run_graph(&mut g, &[&src]) == [part(&src, 0)]);
+}
+
+#[test]
+fn outputs_cannot_be_set_by_a_command_after_the_graph_is_built() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let mut g = pkgs.graph(&ctx, "parts.zip=outputs=2").unwrap();
+    for name in ["parts.outputs", "0.outputs", "outputs"] {
+        let e = g.set_param_str(name, "3").unwrap_err().to_string();
+        assert!(e.contains("outputs=N is fixed when the"), "{name}: {e}");
+    }
+    assert_eq!(g.output_names(), ["part0", "part1"]);
 }

@@ -145,12 +145,34 @@ pub struct OutputDef {
     pub bypass: Option<String>,
     /// The last output stands for a variable number of pads, named `<name>0`, `<name>1`...;
     /// a graph node sets the number with its `outputs=N` option. See [`Manifest::with_output_count`].
-    #[serde(default)]
+    /// `max` defaults to what fits in [`MAX_OUTPUTS`] beside the other outputs.
+    #[serde(default, deserialize_with = "output_repeat")]
     pub repeat: Option<RepeatRule>,
 }
 
 /// Most outputs an effect may have.
 pub const MAX_OUTPUTS: usize = 4;
+
+/// Max left at 0 by [`output_repeat`] when the manifest omits it; [`Manifest::parse`] sets it
+/// to what fits in [`MAX_OUTPUTS`] beside the other outputs.
+const OUTPUT_REPEAT_MAX_UNSET: u32 = 0;
+
+fn output_repeat<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<RepeatRule>, D::Error> {
+    use serde::de::Error as _;
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Rule {
+        default: u32,
+        #[serde(default = "default_repeat_min")]
+        min: u32,
+        max: Option<u32>,
+    }
+    let Some(r) = Option::<Rule>::deserialize(d)? else { return Ok(None) };
+    if r.max == Some(OUTPUT_REPEAT_MAX_UNSET) {
+        return Err(D::Error::custom("repeat max must be at least 1"));
+    }
+    Ok(Some(RepeatRule { default: r.default, min: r.min, max: r.max.unwrap_or(OUTPUT_REPEAT_MAX_UNSET) }))
+}
 
 /// `outputs` as an array, with a clear message for the object form of earlier versions.
 fn outputs_array<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<OutputDef>, D::Error> {
@@ -468,6 +490,12 @@ impl Manifest {
             let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
             m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None, repeat: None });
         }
+        let fixed = m.outputs.len().saturating_sub(1) as u32;
+        if let Some(r) = m.outputs.last_mut().and_then(|o| o.repeat.as_mut()) {
+            if r.max == OUTPUT_REPEAT_MAX_UNSET {
+                r.max = (MAX_OUTPUTS as u32).saturating_sub(fixed).max(1);
+            }
+        }
         m.validate()?;
         Ok(m)
     }
@@ -562,14 +590,27 @@ impl Manifest {
                         r.min, r.default, r.max
                     ));
                 }
-                if fixed + r.default > MAX_OUTPUTS as u32 {
+                if fixed + r.max > MAX_OUTPUTS as u32 {
                     return bad(format!(
-                        "output `{n}`: {fixed} other outputs and {} copies by default are more than {MAX_OUTPUTS} outputs",
-                        r.default
+                        "output `{n}`: repeat max {} is more than the {} copies that fit beside {fixed} other outputs ({MAX_OUTPUTS} outputs at most)",
+                        r.max,
+                        MAX_OUTPUTS as u32 - fixed.min(MAX_OUTPUTS as u32)
                     ));
                 }
                 if self.pass_lists().iter().flat_map(|(_, l)| l.iter()).any(|p| p.language() == ShaderLanguage::Glsl) {
                     return bad(format!("output `{n}`: repeat is only for WGSL shaders"));
+                }
+                // The copies are named `<name>0`, `<name>1`...: no other name may look like one.
+                let is_copy = |s: &str| s.strip_prefix(n.as_str()).is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()));
+                let others = self
+                    .inputs
+                    .iter()
+                    .map(|i| i.name.as_str())
+                    .chain(self.textures.iter().map(|t| t.name.as_str()))
+                    .chain(self.outputs.iter().map(|o| o.name.as_str()))
+                    .chain(self.pass_lists().into_iter().flat_map(|(_, l)| l.iter().flat_map(|p| p.outputs.iter().map(String::as_str))));
+                if let Some(c) = others.into_iter().find(|s| is_copy(s)) {
+                    return bad(format!("name `{c}` collides with a copy of the repeated output `{n}` (named {n}0, {n}1...)"));
                 }
             }
             if let Some(b) = &o.bypass {
@@ -848,7 +889,7 @@ impl Manifest {
                 "effect `{}` writes {} to {} copies of its output `{}`, got outputs={n}",
                 self.name,
                 rule.min,
-                rule.max.min((MAX_OUTPUTS + 1 - self.outputs.len()) as u32),
+                rule.max,
                 self.outputs.last().expect("repeat").name
             )));
         }
@@ -1052,9 +1093,11 @@ mod tests {
         let err = |m: &Manifest, n: u32| m.with_output_count(Some(n)).unwrap_err().to_string();
         assert!(err(&m, 0).contains("writes 1 to 3 copies of its output `part`, got outputs=0"));
         assert!(err(&m, 4).contains("got outputs=4"));
-        let wide = parse(r#"[{"name":"color"},{"name":"part","repeat":{"default":2,"max":4}}]"#, one, "").unwrap();
+        // Without `max`, as many copies as fit beside the other outputs.
+        let wide = parse(r#"[{"name":"color"},{"name":"part","repeat":{"default":2}}]"#, one, "").unwrap();
+        assert_eq!(wide.output_repeat().map(|r| r.max), Some(3));
         wide.with_output_count(Some(3)).unwrap();
-        assert!(err(&wide, 4).contains("1 other outputs and outputs=4 make 5 outputs, more than 4"));
+        assert!(err(&wide, 4).contains("writes 1 to 3 copies of its output `part`, got outputs=4"));
         let fixed = parse(r#"[{"name":"color"}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#, "").unwrap();
         assert!(err(&fixed, 2).contains("fixed number of outputs"));
         // Rules on the rules.
@@ -1065,7 +1108,22 @@ mod tests {
             r#"[{"name":"a"},{"name":"b"},{"name":"part","repeat":{"default":3}}]"#,
             r#"{"shader":"a.wgsl","outputs":["a","b","part"]}"#
         )
-        .contains("2 other outputs and 3 copies by default are more than 4"));
+        .contains("1 <= min <= default <= max (got min 1, default 3, max 2)"));
+        // A `max` that cannot fit fails at load, not at outputs=N.
+        let e = bad(r#"[{"name":"color"},{"name":"part","repeat":{"default":2,"max":4}}]"#, one);
+        assert!(e.contains("output `part`: repeat max 4 is more than the 3 copies that fit beside 1 other outputs"), "{e}");
+        assert!(bad(r#"[{"name":"part","repeat":{"default":1,"max":0}}]"#, r#"{"shader":"a.wgsl","outputs":["part"]}"#)
+            .contains("max must be at least 1"));
+        // No other name looks like a copy (`part0`, `part1`...).
+        let one_part = r#"[{"name":"part","repeat":{"default":2}}]"#;
+        let e = bad(one_part, r#"{"shader":"a.wgsl","outputs":["part1"]},{"shader":"b.wgsl","inputs":["part1"],"outputs":["part"]}"#);
+        assert!(e.contains("name `part1` collides with a copy of the repeated output `part`"), "{e}");
+        let e =
+            parse(one_part, r#"{"shader":"a.wgsl","outputs":["part"]}"#, r#","textures":[{"name":"part0","path":"t.png"}]"#).unwrap_err();
+        assert!(e.contains("name `part0` collides"), "{e}");
+        // A name only starting like it is fine.
+        parse(one_part, r#"{"shader":"a.wgsl","outputs":["partx"]},{"shader":"b.wgsl","inputs":["partx"],"outputs":["part"]}"#, "")
+            .unwrap();
         assert!(bad(r#"[{"name":"part","repeat":{"default":2}}]"#, r#"{"shader":"a.glsl","outputs":["part"]}"#).contains("only for WGSL"));
         assert!(bad(r#"[{"name":"outputs"}]"#, r#"{"shader":"a.wgsl","outputs":["outputs"]}"#).contains("reserved"));
         // `outputs=N` is a node option: no param takes the name.
