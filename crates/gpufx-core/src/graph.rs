@@ -282,9 +282,8 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
         }
         // The compiled passes: their inputs are resolved (a pass without any reads the one before).
         let Ok(passes) = effects[k].passes(false) else { continue };
-        let Some(last) = passes.last() else { continue };
-        let elsewhere = passes.iter().any(|p| p.inputs.contains(&last.outputs[0]))
-            || passes[..passes.len() - 1].iter().any(|p| p.outputs.contains(&last.outputs[0]));
+        let name = &effects[k].package().manifest.outputs[0].name;
+        let elsewhere = passes.iter().any(|p| p.inputs.contains(name)) || passes.iter().filter(|p| p.outputs.contains(name)).count() != 1;
         if !elsewhere {
             direct[k] = Some(j);
         }
@@ -304,7 +303,7 @@ fn plan(
     direct_out: &[Option<usize>],
     deep: bool,
 ) -> Result<Plan, Error> {
-    let finals: Vec<&str> = effects.iter().map(|fx| fx.program.package.manifest.passes.last().expect("validated").output()).collect();
+    let finals: Vec<&str> = effects.iter().map(|fx| fx.program.package.manifest.outputs[0].name.as_str()).collect();
     let mut last: HashMap<(usize, &str), usize> = HashMap::new();
     fn bump<'a>(last: &mut HashMap<(usize, &'a str), usize>, key: (usize, &'a str), g: usize) {
         let end = last.entry(key).or_insert(g);
@@ -410,7 +409,7 @@ fn check_nodes<'a>(
 /// the `max` texture side of the device.
 fn node_size(fx: &Effect, ins: &[(u32, u32)], max: u32) -> Result<(u32, u32), Error> {
     let m = &fx.package().manifest;
-    let Some((w, h)) = m.output_size(ins) else {
+    let Some((w, h)) = m.output_size(0, ins) else {
         let streams: Vec<StreamInfo> = ins.iter().map(|&(width, height)| StreamInfo { format: None, width, height }).collect();
         m.check_inputs(&streams)?;
         return Err(Error::Unsupported(format!("output of `{}`: the size overflows", m.name)));
@@ -491,7 +490,7 @@ fn prepare(
         return Err(Error::Frame(format!("effect writes {} outputs, got {}", topo.outputs.len(), outs.len())));
     }
     // Effects that stack their inputs write a size no input pad has.
-    let stacked = if effects.iter().any(|fx| fx.package().manifest.output.size != OutputSize::First) {
+    let stacked = if effects.iter().any(|fx| fx.package().manifest.outputs[0].size != OutputSize::First) {
         let planned: &[InputKey] = io.layout.as_ref().map_or(&[], |l| &l.keys);
         let pads: Vec<(u32, u32)> = (0..topo.nb_inputs)
             .map(|i| match (inputs.get(i), planned.get(i)) {
@@ -645,7 +644,7 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
             layout.plan.assign[k].iter().map(|(name, &slot)| (name.clone(), pool[slot].clone())).collect();
         if let Some(j) = layout.direct_out[k] {
             // Written in place: the frame being recorded, bound again for each frame.
-            let last = effects[k].package().manifest.passes.last().expect("validated").output().to_string();
+            let last = effects[k].package().manifest.outputs[0].name.clone();
             let frame = io.frame_outs.get(j).cloned().flatten();
             outputs.insert(last, frame.unwrap_or_else(|| crate::convert::stand_in(device, wgpu::TextureUsages::STORAGE_BINDING)));
         }
@@ -1516,15 +1515,16 @@ impl EffectGraph {
                 match *src {
                     Source::Node(j) => {
                         let prev = &effects[j].package().manifest;
-                        let link = prev.output.formats.iter().find(|f| accepted.is_empty() || accepted.contains(f)).ok_or_else(|| {
-                            Error::Unsupported(format!(
-                                "`{}` outputs {} but `{}` accepts {}",
-                                labels[j],
-                                prev.output.formats.join(", "),
-                                labels[k],
-                                accepted.join(", ")
-                            ))
-                        })?;
+                        let link =
+                            prev.outputs[0].formats.iter().find(|f| accepted.is_empty() || accepted.contains(f)).ok_or_else(|| {
+                                Error::Unsupported(format!(
+                                    "`{}` outputs {} but `{}` accepts {}",
+                                    labels[j],
+                                    prev.outputs[0].formats.join(", "),
+                                    labels[k],
+                                    accepted.join(", ")
+                                ))
+                            })?;
                         row.push(Some(link.clone()));
                     }
                     Source::Input(p) => {
@@ -1558,7 +1558,7 @@ impl EffectGraph {
             .outputs
             .iter()
             .map(|s| match *s {
-                Source::Node(j) => effects[j].package().manifest.output.formats.clone(),
+                Source::Node(j) => effects[j].package().manifest.outputs[0].formats.clone(),
                 Source::Input(_) => crate::manifest::default_output_formats(),
             })
             .collect();
@@ -1662,7 +1662,7 @@ impl EffectGraph {
     }
 
     /// Size of output `k` for these input pad sizes: the size of [`Self::output_pad`],
-    /// unless an effect on the way stacks its inputs (manifest `output.size`). Fails when
+    /// unless an effect on the way stacks its inputs (the `size` of a manifest output). Fails when
     /// the sizes break a size rule or the output is larger than the GPU allows.
     pub fn output_size(&self, k: usize, pads: &[(u32, u32)]) -> Result<(u32, u32), Error> {
         if k >= self.topo.outputs.len() {

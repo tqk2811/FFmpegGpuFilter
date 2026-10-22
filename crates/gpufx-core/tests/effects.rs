@@ -73,7 +73,7 @@ fn every_example_compiles_and_runs() {
         let mut fx = Effect::new(ctx.clone(), Package::open(&dir).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
         let inputs = vec![Image { data: &src, width: w, height: h, stride: w * 4 }; fx.input_count()];
         // Stacking effects write a larger frame than their inputs.
-        let (ow, oh) = fx.package().manifest.output_size(&vec![(w, h); fx.input_count()]).unwrap();
+        let (ow, oh) = fx.package().manifest.output_size(0, &vec![(w, h); fx.input_count()]).unwrap();
         let mut out = vec![0u8; (ow * oh * 4) as usize];
         fx.process(&inputs, target(&mut out, ow, oh, ow * 4), &FrameInfo::new(0.5, 3)).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
         assert!(out.chunks(4).any(|p| p != [0, 0, 0, 0]), "{} produced an empty frame", dir.display());

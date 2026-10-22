@@ -21,13 +21,16 @@
       ]
     }
   ],
-  "output": {
-    "formats": [
-      "rgba",
-      "yuva420p",
-      "yuva444p"
-    ]
-  },
+  "output": [
+    {
+      "name": "out",
+      "formats": [
+        "rgba",
+        "yuva420p",
+        "yuva444p"
+      ]
+    }
+  ],
   "params": [
     {
       "name": "threshold",

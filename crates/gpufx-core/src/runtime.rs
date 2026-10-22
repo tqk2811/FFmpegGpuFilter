@@ -449,6 +449,12 @@ impl Program {
     /// [`Program::new`] for a package resolved to one group.
     fn compile(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
         debug_assert!(package.manifest.groups.is_empty(), "only a package resolved to one group is compiled (see Program::new)");
+        if package.manifest.outputs.len() > 1 {
+            return Err(Error::Unsupported(format!(
+                "effect `{}`: effects with several outputs are not supported yet",
+                package.manifest.name
+            )));
+        }
         // Only the layout of the block matters for compiling; values live in each Effect.
         let params = ParamBlock::new(&package.manifest.params)?;
         let device = &ctx.device;
@@ -669,7 +675,7 @@ impl Effect {
 
     /// Runs every pass on `inputs` (one per manifest input) and writes the RGBA result
     /// into `out`, which must have the output size (the size of `inputs[0]`
-    /// unless the manifest `output.size` stacks the inputs).
+    /// unless the manifest output `size` stacks the inputs).
     /// Fails with [`Error::Unsupported`] when the input sizes break the manifest rules.
     pub fn process(&mut self, inputs: &[Image], out: ImageMut, info: &FrameInfo) -> Result<(), Error> {
         let frames: Vec<Frame> = inputs.iter().map(|&i| i.into()).collect();
@@ -766,7 +772,7 @@ impl Effect {
         let bound = self.bound.as_ref().ok_or_else(|| Error::Gpu("the effect is not bound".into()))?;
         let mut outputs = bound.outputs.clone();
         if let Some(t) = output {
-            outputs.insert(self.program.package.manifest.passes.last().expect("validated").output().to_string(), t.clone());
+            outputs.insert(self.program.package.manifest.outputs[0].name.clone(), t.clone());
         }
         let (size, deep) = (bound.size, bound.deep);
         let key = (inputs.iter().map(|&t| t.clone()).collect(), output.cloned());
@@ -781,7 +787,7 @@ impl Effect {
 
     pub(crate) fn output(&self) -> &wgpu::Texture {
         let bound = self.bound.as_ref().expect("bound before use");
-        &bound.outputs[self.program.package.manifest.passes.last().expect("validated").output()]
+        &bound.outputs[&self.program.package.manifest.outputs[0].name]
     }
 
     pub(crate) fn encode(&self, cpass: &mut wgpu::ComputePass, info: &FrameInfo) {
