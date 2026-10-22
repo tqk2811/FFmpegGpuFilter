@@ -40,7 +40,7 @@ scripts/pack-packages.sh --check -o out my-fx    # compile the shaders on the GP
 | `used_for` | array | yes | The FFmpeg filters the package is for: `["gpufx"]` for an effect. An empty list or an unknown name (known: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) fails to load; the `gpufx` filter refuses a package whose list lacks `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | string | no | |
 | `inputs` | array | no (`[{"name":"src"}]`) | The video inputs, in the filter's pad order, with their rules (see below) |
-| `output` | `{formats, size}` | no (`rgba` and every format converted on the GPU; the size of the first input) | Allowed output pixel formats and the output size |
+| `output` | array | no (one output named after the main output of the last pass, every GPU format, the size of the first input) | The outputs of the effect, in the filter's pad order, with their rules (see below and [Several outputs](#several-outputs)) |
 | `params` | array | no | Parameters, see below |
 | `textures` | array | no | Bundled PNG images (LUT, mask, sprites), see [Textures](#textures) |
 | `groups` | array | yes | Pass groups, each with its compute passes and the devices it needs; the first group matching the device is used, see [Pass groups and device requirements](#pass-groups-and-device-requirements) |
@@ -67,16 +67,25 @@ Each element of `inputs`:
 | `mipmaps` | `false` | The input texture gets a full mip chain, made on the GPU every frame, for shaders that shrink it a lot (`textureSampleLevel(src, smp, uv, lod)`); see [Mipmaps](#mipmaps) |
 | `repeat` | none | (last input only, WGSL only) `{ "default": 2, "min": 2, "max": 16 }`: the input stands for a variable number of pads, see [Variable number of inputs](#variable-number-of-inputs) |
 
-`output.formats`: the allowed output pixel formats, in order of preference. Without `output` the list is
+Each element of `output` (an array; the object form of earlier versions is an error: `` `output` is an array: [{"name": "out", ...}] ``):
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `name` | (required) | The texture a pass writes (see [Several outputs](#several-outputs)), also the output pad name of an effect with several outputs |
+| `formats` | every GPU format (below) | Allowed pixel formats of this output, in order of preference |
+| `size` | `first` | Size of this output: `first`, `hstack` or `vstack` (below) |
+| `bypass` | the first input | The input this output passes when the effect is switched off (`<effect>.enable`) |
+
+`formats`: the allowed output pixel formats, in order of preference. Without it the list is
 `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`, `yuv444p`, `yuv420p10le`, `yuv422p10le`,
 `yuv444p10le`, `yuva420p`, `yuva444p`: the formats gpufx writes on the GPU. So an effect without
-`output.formats` may output YUV without alpha: the alpha it writes is dropped unless the filter after it
-takes an alpha format. **An effect that produces alpha should declare `output.formats`** (e.g.
+`formats` may output YUV without alpha: the alpha it writes is dropped unless the filter after it
+takes an alpha format. **An effect that produces alpha should declare `formats`** (e.g.
 `["rgba", "yuva420p"]`). FFmpeg
 picks one format from the list when linking filters; if a downstream filter demands a format outside the list,
 FFmpeg inserts a converter after `gpufx`.
 
-`output.size`: `first` (default) — the output has the size of the first input; `hstack` — every
+`size`: `first` (default) — the output has the size of the first input; `hstack` — every
 input must have the height of the first, the output width is the sum of the widths; `vstack` — every input
 must have the width of the first, the output height is the sum of the heights. A mismatch is an error like
 `same_size` (at configuration and when the frame size changes):
@@ -96,7 +105,7 @@ aspect ratio still come from the first input).
     "width": { "min": 64, "multiple_of": 2 }, "height": { "min": 64, "multiple_of": 2 } },
   { "name": "matte", "formats": ["gray"], "same_size": true }
 ],
-"output": { "formats": ["yuva420p", "rgba"] }
+"output": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
 ```
 
 How the rules apply:
@@ -107,13 +116,13 @@ How the rules apply:
   To make it work, change the format first with `format=yuv420p,gpufx=...`. The size is checked
   at configuration and whenever the frame size changes. A misspelled format name is also an error.
 - **Chains and graphs** (`graph='a|b'`, `graph='...'`): every effect is checked where it sits. An effect
-  reading another sees that effect's size (the size of its first input, or the stacked size with
-  `output.size`) and the first format of its
-  `output.formats` that the reader accepts; an input pad read by several effects must have a format
+  reading another sees the size of the output it reads (the size of the first input, or the stacked size with
+  `size`) and the first format of that output's
+  `formats` that the reader accepts; an input pad read by several effects must have a format
   all of them accept. `same_size` therefore also holds between two branches of a graph.
 - **`gpufx run`:** the format comes from the PNG (`rgba`, `rgb24`, `gray`, `ya8`, and the 16-bit versions
   `rgba64be`, `rgb48be`, `gray16be`, `ya16be`). The CLI always writes an RGBA PNG, so it does not check
-  `output.formats`.
+  the output `formats`.
 - Shaders always see RGBA with straight alpha, whatever the input/output format is: the conversion happens
   on the GPU outside the shader. The textures are `rgba8unorm`, or `rgba16float` when an input or the
   output of the chain has more than 8 bits (10-bit video keeps its precision).
@@ -142,16 +151,18 @@ Each element of `passes` (of a group):
 | `language` | from the file extension | `wgsl` or `glsl` (`.glsl` and `.comp` are GLSL) |
 | `entry` | `main` | The compute function (WGSL; GLSL is always `main`) |
 | `inputs` | every input, then every texture | Textures this pass reads: input names, textures, or the output of a previous pass |
-| `output` | `["out"]` | Array of 1 to 4 names of the textures this pass writes (a plain string is an error). The first is the main output; the last pass writes one name, the result |
+| `output` | `["out"]` | Array of 1 to 4 names of the textures this pass writes (a plain string is an error). The first is the main output |
 
-The output has the same size as the first input unless `output.size` says otherwise. Input/texture/param names must be valid identifiers,
+A pass runs at the size of the effect output it writes (see [Several outputs](#several-outputs)), the size of the first input
+unless that output's `size` says otherwise. Input/texture/param names must be valid identifiers,
 must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
 
 **Several outputs from one pass.** `output` lists up to 4 names. The first is the main output (`out_tex`, written by
 `gpufx_write`); the others are `out_tex1`, `out_tex2`, `out_tex3` (written by `gpufx_write1`..`gpufx_write3`), bound after the
 input textures (see the binding table). They have the format and size of the main output, and later passes read them by name.
-Names in one array must differ, and the last pass writes exactly one output (the result):
+Names in one array must differ. Every texture a pass writes must be read by a later pass or be an output of the effect
+(`pass 0 writes `x`, which no later pass reads and is no output of the effect`):
 
 ```json
 "passes": [
@@ -171,6 +182,33 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     gpufx_write1(id, vec4f(full.rgb - c.rgb + 0.5, full.a)); // detail
 }
 ```
+
+### Several outputs
+
+`output` lists 1 to 4 outputs. Each one is the texture of the same name a pass writes, so an effect can give a color
+image and a matte from one dispatch, or the matte from an early pass:
+
+```json
+"inputs": [{ "name": "src", "formats": ["rgba"] }],
+"output": [
+  { "name": "color", "formats": ["rgba", "nv12"] },
+  { "name": "matte", "formats": ["gray", "rgba"] }
+],
+"groups": [{ "passes": [
+  { "shader": "key.wgsl", "inputs": ["src"], "output": ["color", "matte"] }
+]}]
+```
+
+Rules:
+
+- Omitted, `output` is one output named after the main output of the last pass (`[{"name": "out"}]` for a last pass
+  without `output`), so effects with one output need not declare it.
+- Each output name is written by exactly one pass of every group; that pass need not be the last.
+- Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable` or `bypass`.
+- A pass runs at the size of the first effect output it writes, or of output 0 when it writes none (a pass making
+  textures for later passes); `globals.size`, `gpufx_uv` and `gpufx_in_bounds` follow that size. The outputs one
+  pass writes must have the same `size`, and a texture written by several passes is written at one size.
+- `bypass` names the input an output passes when the effect is switched off; it must have the size of the output.
 
 ### Variable number of inputs
 
@@ -205,7 +243,7 @@ See `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 | `passes` | | The passes of this group (not empty), as described above |
 
 The **first** group whose `requires` match the device is used; put the most specific group first and a
-generic one last. The output is the last pass of that group. `inputs`, `output`, `params` and `textures` are shared by every
+generic one last. Every group must write every output of the effect (the textures named in `output`). `inputs`, `output`, `params` and `textures` are shared by every
 group, so all groups are one effect with one set of parameters; only the passes differ, and groups may have different
 numbers of passes. The top-level `passes` of older manifests is gone: wrap the passes in one group. Groups work with any `api` value.
 
@@ -273,7 +311,7 @@ The runtime inserts the following declarations for you (the example is for a pac
 
 ```wgsl
 struct GpufxGlobals {
-    size: vec2f,          // output size (px)
+    size: vec2f,          // size of the running pass (px)
     time: f32,            // time (seconds); f32 loses precision on long clips
     frame: u32,           // frame number, counted per filter (not stable across seeks)
     time_int: i32,        // exact time: time_int + time_frac seconds,
@@ -344,7 +382,7 @@ The short form of the prelude is under [Writing WGSL shaders](#writing-wgsl-shad
 
 | Field | WGSL type | GLSL type | Offset | Meaning |
 |-------|-----------|-----------|--------|---------|
-| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The output size of the effect (the first input's, or the stacked size with `output.size` `hstack`/`vstack`); the same for all its passes |
+| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The size the pass runs at: the size of the effect output it writes (the first input's, or the stacked size with `size` `hstack`/`vstack`), see [Several outputs](#several-outputs) |
 | `time` | `f32` | `float` | 8 | Presentation time in seconds (`t` of the filter). Loses precision on long clips (about 0.008 s steps after one day) |
 | `frame` | `u32` | `uint` | 12 | Frame count of this filter instance (also the `n` of expressions); restarts on a seek, so not for time-based motion |
 | `time_int` | `i32` | `int` | 16 | Whole seconds of the time (floor; saturates beyond the i32 range) |
@@ -395,7 +433,7 @@ runs the same everywhere. The manifest does not check the 16 reads today: going 
 
 | Item | Value |
 |------|-------|
-| Dispatch | One `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)` per pass, in manifest order, all in one compute pass; `w`, `h` = output size. The shader declares `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); the runtime does not check it. Threads past the edge must return: `gpufx_in_bounds(id)` |
+| Dispatch | One `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)` per pass, in manifest order, all in one compute pass; `w`, `h` = the size of the pass (`globals.size`). The shader declares `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); the runtime does not check it. Threads past the edge must return: `gpufx_in_bounds(id)` |
 | Pixel coordinates | `id.xy` of `global_invocation_id`, integers, origin at the top-left, y down; `textureLoad`/`imageStore` use `vec2i(x, y)` |
 | Normalised coordinates | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, the pixel centre, 0..1, v down |
 | Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores), `gpufx_write1`..`gpufx_write3` for extra outputs. GLSL versions take `uvec3` |
@@ -591,7 +629,7 @@ The examples live in group folders under `packages/gpufx/`: `ffmpeg/` (equivalen
 | `packages/gpufx/ffmpeg/chroma-key` | Green screen → alpha; input `formats` **rules**, output `rgba`/`yuva420p`/`yuva444p` |
 | `packages/gpufx/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
 | `packages/gpufx/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
-| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and `output.size` `hstack`/`vstack`, an output larger than the inputs |
+| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and an output `size` `hstack`/`vstack`, an output larger than the inputs |
 | `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/gpufx/ffmpeg/slide-transition`, `packages/gpufx/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
 | `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
 | `packages/gpufx/ffmpeg/blend` | 2 inputs, an `int` `mode` choosing one of 40 formulas |

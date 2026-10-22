@@ -22,6 +22,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] `size` của output chưa có giá trị thu nhỏ (`half`, `scale`)
+- **Vấn đề**: mỗi phần tử `output` của manifest đã có `size` riêng và pass chạy ở kích thước output nó ghi, nhưng `size` mới chỉ có `first`/`hstack`/`vstack`. Chưa làm được matte nửa độ phân giải hay output thu nhỏ theo hệ số.
+- **Vị trí**: [manifest.rs](../crates/gpufx-core/src/manifest.rs) (`enum OutputSize`, `OutputSize::apply`), tài liệu `docs/EFFECT_FORMAT.md` mục "Several outputs".
+- **Vì sao**: user chốt (2026-10-23) chưa làm trong đợt effect nhiều output. Thêm `half` hoặc `{"scale": 0.5}` chỉ cần mở rộng `OutputSize` (kèm làm tròn, kiểm tối thiểu 1 px) và test pixel; runtime/pool đã cấp texture theo kích thước từng pass.
+- **Ngày ghi**: 2026-10-23
+
 ### [Thấp] Manifest chưa kiểm giới hạn 16 texture đọc mỗi pass
 - **Vấn đề**: một pass đọc tối đa 16 texture (input kể cả mọi pad của `repeat`, texture package, output pass trước), nhưng manifest không đếm; vượt thì wgpu báo lỗi khó hiểu lúc tạo bind group layout.
 - **Vị trí**: các kiểm tra pass trong [manifest.rs](../crates/gpufx-core/src/manifest.rs), và `compile_pass` trong [runtime.rs](../crates/gpufx-core/src/runtime.rs).

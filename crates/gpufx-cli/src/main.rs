@@ -67,7 +67,10 @@ fn info(path: &str) -> Result<(), String> {
             println!("    same size as the first input");
         }
     }
-    println!("output formats: {}", m.output.formats.join(", "));
+    println!("outputs:");
+    for o in &m.outputs {
+        println!("  {}: formats {}, size {:?}", o.name, o.formats.join(", "), o.size);
+    }
     println!("params:");
     for p in &m.params {
         let default = p.default.as_ref().map(|d| d.to_string()).unwrap_or_else(|| "0".into());

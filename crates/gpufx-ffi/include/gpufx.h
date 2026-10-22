@@ -259,7 +259,7 @@ int gpufx_effect_output_source(const GpufxEffect *fx, uint32_t output);
 /*
  * Size of output for input pads of these sizes (count = the input count):
  * the size of its gpufx_effect_output_source() pad, or for effects such as
- * hstack/vstack (manifest output.size) the stacked size. 0 on success; a
+ * hstack/vstack (manifest output size) the stacked size. 0 on success; a
  * negative value (see gpufx_last_error()) when the sizes break a size rule or
  * the output is larger than the GPU allows.
  */

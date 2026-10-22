@@ -27,9 +27,11 @@ pub struct Manifest {
     /// Video inputs of the effect, in pad order. Defaults to a single `src` input.
     #[serde(default = "default_inputs")]
     pub inputs: Vec<InputDef>,
-    /// Rules for the effect output.
-    #[serde(default)]
-    pub output: OutputDef,
+    /// Outputs of the effect, in pad order, JSON key `output` (an array). Each is the
+    /// texture of the same name a pass writes. Omitted: one output named after the main
+    /// output of the last pass (filled in by [`Manifest::parse`]).
+    #[serde(default, rename = "output", deserialize_with = "outputs_array")]
+    pub outputs: Vec<OutputDef>,
     /// User tunable parameters, exposed to shaders as the `params` uniform struct.
     #[serde(default)]
     pub params: Vec<ParamDef>,
@@ -167,22 +169,40 @@ impl SizeRule {
     }
 }
 
+/// One output of an effect (see [`Manifest::outputs`]).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutputDef {
-    /// Pixel formats the effect may produce, in order of preference. Defaults to `rgba`
+    /// The texture a pass writes, and the name of the output pad of an effect with
+    /// several outputs.
+    pub name: String,
+    /// Pixel formats the output may have, in order of preference. Defaults to `rgba`
     /// and every other format the runtime writes on the GPU ([`crate::PixelFormat`]).
     #[serde(default = "default_output_formats")]
     pub formats: Vec<String>,
-    /// Size of the output.
+    /// Size of the output; the passes writing it run at that size.
     #[serde(default)]
     pub size: OutputSize,
+    /// The input this output passes when the effect is switched off; the first when omitted.
+    #[serde(default)]
+    pub bypass: Option<String>,
 }
 
-impl Default for OutputDef {
-    fn default() -> Self {
-        OutputDef { formats: default_output_formats(), size: OutputSize::First }
+/// Most outputs an effect may have.
+pub const MAX_OUTPUTS: usize = 4;
+
+/// `output` as an array, with a clear message for the object form of earlier versions.
+fn outputs_array<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<OutputDef>, D::Error> {
+    use serde::de::Error as _;
+    let v = serde_json::Value::deserialize(d)?;
+    if v.is_object() {
+        return Err(D::Error::custom(r#"`output` is an array: [{"name": "out", ...}]"#));
     }
+    let outputs: Vec<OutputDef> = serde_json::from_value(v).map_err(D::Error::custom)?;
+    if outputs.is_empty() {
+        return Err(D::Error::custom(format!("an effect has 1 to {MAX_OUTPUTS} outputs, not 0 (omit `output` for one)")));
+    }
+    Ok(outputs)
 }
 
 /// Properties of one input stream, checked against the manifest rules.
@@ -469,6 +489,10 @@ pub(crate) fn is_ident(s: &str) -> bool {
         && !RESERVED.contains(&s)
 }
 
+/// Options of a graph node besides its parameters (`<effect>.enable`...): no param or
+/// output takes these names.
+pub(crate) const NODE_OPTIONS: &[&str] = &["enable", "bypass"];
+
 /// Names the generated prelude already declares.
 const RESERVED: &[&str] = &["globals", "params", "out_tex", "out_tex1", "out_tex2", "out_tex3", "smp"];
 
@@ -485,7 +509,7 @@ impl Manifest {
                 return Err(Error::Manifest(format!("unsupported manifest api {api} (runtime supports <= {MANIFEST_API})")));
             }
         }
-        let m: Manifest = serde_json::from_slice(bytes).map_err(|e| {
+        let mut m: Manifest = serde_json::from_slice(bytes).map_err(|e| {
             let msg = e.to_string();
             if msg.starts_with("unknown field `passes`") || msg.starts_with("missing field `groups`") {
                 Error::Manifest(format!(r#"{msg}: put the passes in `groups`, e.g. "groups": [{{ "passes": [...] }}]"#))
@@ -495,6 +519,16 @@ impl Manifest {
                 Error::Manifest(msg)
             }
         })?;
+        if m.outputs.is_empty() {
+            // One output: what the last pass writes first (every group must write it).
+            let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
+            m.outputs.push(OutputDef {
+                name: last.unwrap_or_else(|| "out".into()),
+                formats: default_output_formats(),
+                size: OutputSize::First,
+                bypass: None,
+            });
+        }
         m.validate()?;
         Ok(m)
     }
@@ -561,10 +595,34 @@ impl Manifest {
                 }
             }
         }
-        if self.output.formats.is_empty() {
-            return bad("output formats must list at least one pixel format".into());
+        if self.outputs.is_empty() || self.outputs.len() > MAX_OUTPUTS {
+            return bad(format!("an effect has 1 to {MAX_OUTPUTS} outputs, not {}", self.outputs.len()));
         }
-        check_formats(&self.output.formats, "output formats")?;
+        for (k, o) in self.outputs.iter().enumerate() {
+            let n = &o.name;
+            if !is_ident(n) || NODE_OPTIONS.contains(&n.as_str()) {
+                return bad(format!("output name `{n}` is not a valid identifier (or is reserved)"));
+            }
+            if self.outputs[..k].iter().any(|x| x.name == *n) {
+                return bad(format!("duplicate output name `{n}`"));
+            }
+            if self.inputs.iter().any(|x| x.name == *n) || self.textures.iter().any(|x| x.name == *n) {
+                return bad(format!("output `{n}` shadows an input or texture"));
+            }
+            if self.params.iter().any(|p| p.name == *n) {
+                // `<output>=off` is a node option, beside the parameters.
+                return bad(format!("output `{n}` has the name of a param"));
+            }
+            if o.formats.is_empty() {
+                return bad(format!("output `{n}`: formats must list at least one pixel format"));
+            }
+            check_formats(&o.formats, &format!("output `{n}` formats"))?;
+            if let Some(b) = &o.bypass {
+                if self.input_index(b).is_none() {
+                    return bad(format!("output `{n}`: bypass `{b}` is not an input"));
+                }
+            }
+        }
         for t in &self.textures {
             declare(&t.name, "texture", &mut names)?;
             names.push(&t.name);
@@ -625,9 +683,6 @@ impl Manifest {
                 if pass.outputs.is_empty() || pass.outputs.len() > MAX_PASS_OUTPUTS {
                     return bad(format!("{} must write 1 to {MAX_PASS_OUTPUTS} outputs, not {}", at(i), pass.outputs.len()));
                 }
-                if i + 1 == passes.len() && pass.outputs.len() > 1 {
-                    return bad(format!("{} is the last pass, so it can write only one output", at(i)));
-                }
                 for (k, out) in pass.outputs.iter().enumerate() {
                     if !is_ident(out) {
                         return bad(format!("{} output `{out}` is not a valid identifier", at(i)));
@@ -647,9 +702,74 @@ impl Manifest {
                         names.push(out);
                     }
                 }
+                // The textures of one pass are written in one dispatch: one size.
+                let sizes: Vec<&OutputDef> = self.outputs.iter().filter(|o| pass.outputs.contains(&o.name)).collect();
+                if let Some(o) = sizes.iter().find(|o| o.size != sizes[0].size) {
+                    return bad(format!(
+                        "{} writes the outputs `{}` and `{}` of different sizes ({:?}, {:?}); one pass writes one size",
+                        at(i),
+                        sizes[0].name,
+                        o.name,
+                        sizes[0].size,
+                        o.size
+                    ));
+                }
+            }
+            for (i, pass) in passes.iter().enumerate() {
+                for out in &pass.outputs {
+                    let read = passes[i + 1..].iter().any(|p| p.inputs.iter().flatten().any(|s| s == out));
+                    if !read && !self.outputs.iter().any(|o| o.name == *out) {
+                        return bad(format!("{} writes `{out}`, which no later pass reads and is no output of the effect", at(i)));
+                    }
+                }
+            }
+            for o in &self.outputs {
+                let writers: Vec<usize> = (0..passes.len()).filter(|&i| passes[i].outputs.contains(&o.name)).collect();
+                if writers.len() != 1 {
+                    let what = if writers.is_empty() { "no pass writes it".to_string() } else { format!("passes {writers:?} write it") };
+                    let group = label.as_ref().map(|g| format!("group {g}: ")).unwrap_or_default();
+                    return bad(format!("{group}output `{}`: {what}; exactly one pass must", o.name));
+                }
+            }
+            // A texture written by several passes keeps one size.
+            for (i, pass) in passes.iter().enumerate() {
+                for out in &pass.outputs {
+                    if let Some(j) = (0..i).find(|&j| {
+                        passes[j].outputs.contains(out)
+                            && self.outputs[self.pass_size(&passes[j])].size != self.outputs[self.pass_size(pass)].size
+                    }) {
+                        return bad(format!("{} writes `{out}` at another size than pass {j}", at(i)));
+                    }
+                }
             }
         }
         Ok(())
+    }
+
+    /// The output whose size pass `pass` runs at: the first effect output it writes, else
+    /// output 0 (textures only passes read have the size of the first output).
+    pub fn pass_size(&self, pass: &PassDef) -> usize {
+        self.outputs.iter().position(|o| pass.outputs.contains(&o.name)).unwrap_or(0)
+    }
+
+    /// Index of the input named `name`, or of the first pad of a repeated input of that name.
+    pub fn input_index(&self, name: &str) -> Option<usize> {
+        self.inputs.iter().position(|i| i.name == name).or_else(|| self.inputs.iter().position(|i| i.name == format!("{name}0")))
+    }
+
+    /// The input output `k` passes when the effect is switched off (manifest `bypass`).
+    pub fn output_bypass(&self, k: usize) -> usize {
+        self.outputs[k].bypass.as_deref().and_then(|b| self.input_index(b)).unwrap_or(0)
+    }
+
+    /// Index of the output named `name`.
+    pub fn output_index(&self, name: &str) -> Option<usize> {
+        self.outputs.iter().position(|o| o.name == name)
+    }
+
+    /// Names of the outputs, comma separated (for error messages).
+    pub fn output_names(&self) -> String {
+        self.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
     }
 
     /// The pass lists to check: those of every group with its label, or the `passes` of a
@@ -708,14 +828,12 @@ impl Manifest {
         let first = (streams[0].width, streams[0].height);
         for (def, s) in self.inputs.iter().zip(streams) {
             let fail = |msg: String| Error::Unsupported(format!("input `{}` of `{}`: {msg}", def.name, self.name));
-            match self.output.size {
-                OutputSize::Hstack if s.height != first.1 => {
-                    return Err(fail(format!("height {} must equal the first input's ({}) to stack side by side", s.height, first.1)));
-                }
-                OutputSize::Vstack if s.width != first.0 => {
-                    return Err(fail(format!("width {} must equal the first input's ({}) to stack top to bottom", s.width, first.0)));
-                }
-                _ => {}
+            let stacks = |size: OutputSize| self.outputs.iter().any(|o| o.size == size);
+            if stacks(OutputSize::Hstack) && s.height != first.1 {
+                return Err(fail(format!("height {} must equal the first input's ({}) to stack side by side", s.height, first.1)));
+            }
+            if stacks(OutputSize::Vstack) && s.width != first.0 {
+                return Err(fail(format!("width {} must equal the first input's ({}) to stack top to bottom", s.width, first.0)));
             }
             if let Some(f) = s.format {
                 if !def.formats.is_empty() && !def.formats.iter().any(|x| x == f) {
@@ -770,21 +888,22 @@ impl Manifest {
         Ok(m)
     }
 
-    /// Size of the effect output for these input sizes, `None` when they break the
-    /// output size rule.
-    pub fn output_size(&self, sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
-        self.output.size.apply(sizes)
+    /// Size of output `k` for these input sizes, `None` when they break its size rule.
+    pub fn output_size(&self, k: usize, sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
+        self.outputs[k].size.apply(sizes)
     }
 
-    /// Checks that the effect may produce `format`.
-    pub fn check_output_format(&self, format: &str) -> Result<(), Error> {
-        if self.output.formats.iter().any(|x| x == format) {
+    /// Checks that output `k` may have `format`.
+    pub fn check_output_format(&self, k: usize, format: &str) -> Result<(), Error> {
+        let o = &self.outputs[k];
+        if o.formats.iter().any(|x| x == format) {
             Ok(())
         } else {
+            let what = if self.outputs.len() == 1 { "output".to_string() } else { format!("output `{}`", o.name) };
             Err(Error::Unsupported(format!(
-                "output of `{}`: pixel format `{format}` is not supported (supported: {})",
+                "{what} of `{}`: pixel format `{format}` is not supported (supported: {})",
                 self.name,
-                self.output.formats.join(", ")
+                o.formats.join(", ")
             )))
         }
     }
@@ -857,10 +976,12 @@ mod tests {
     fn default_rules_accept_anything_and_output_gpu_formats() {
         let m = manifest(r#"[{"name":"src"}]"#, "").unwrap();
         m.check_inputs(&[info("yuv420p", 3, 5)]).unwrap();
-        assert_eq!(m.output.formats[0], "rgba");
-        m.check_output_format("yuv420p").unwrap();
-        m.check_output_format("p010le").unwrap();
-        assert!(m.check_output_format("gray").is_err());
+        assert_eq!(m.outputs.len(), 1);
+        assert_eq!(m.outputs[0].name, "out");
+        assert_eq!(m.outputs[0].formats[0], "rgba");
+        m.check_output_format(0, "yuv420p").unwrap();
+        m.check_output_format(0, "p010le").unwrap();
+        assert!(m.check_output_format(0, "gray").is_err());
     }
 
     #[test]
@@ -868,7 +989,7 @@ mod tests {
         let m = manifest(
             r#"[{"name":"a","formats":["yuv420p","rgba"],"width":{"min":16,"max":64,"multiple_of":2}},
                 {"name":"b","same_size":true}]"#,
-            r#","output":{"formats":["yuv420p"]}"#,
+            r#","output":[{"name":"out","formats":["yuv420p"]}]"#,
         )
         .unwrap();
         m.check_inputs(&[info("rgba", 32, 9), info("gray", 32, 9)]).unwrap();
@@ -881,8 +1002,8 @@ mod tests {
         assert!(err(&[info("rgba", 32, 9)]).contains("takes 2 input(s), got 1"));
         // Unknown format (RGBA buffers from the CLI) only checks sizes.
         m.check_inputs(&[StreamInfo { format: None, ..info("", 32, 9) }; 2]).unwrap();
-        m.check_output_format("yuv420p").unwrap();
-        assert!(m.check_output_format("rgba").is_err());
+        m.check_output_format(0, "yuv420p").unwrap();
+        assert!(m.check_output_format(0, "rgba").is_err());
     }
 
     #[test]
@@ -892,7 +1013,7 @@ mod tests {
         assert!(manifest(r#"[{"name":"a","width":{"min":10,"max":5}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","height":{"multiple_of":0}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","same_size":true}]"#, "").is_err());
-        assert!(manifest(r#"[{"name":"a"}]"#, r#","output":{"formats":[]}"#).is_err());
+        assert!(manifest(r#"[{"name":"a"}]"#, r#","output":[{"name":"out","formats":[]}]"#).is_err());
     }
 
     #[test]
@@ -905,15 +1026,17 @@ mod tests {
                 .as_bytes(),
             )
         };
-        let m = parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"min":1,"max":3}}]"#, r#","output":{"size":"hstack"}"#).unwrap();
+        let m =
+            parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"min":1,"max":3}}]"#, r#","output":[{"name":"out","size":"hstack"}]"#)
+                .unwrap();
         let e = m.with_input_count(Some(3)).unwrap();
         let names: Vec<&str> = e.inputs.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, ["a", "s0", "s1", "s2"]);
         assert_eq!(e.groups[0].passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
         assert_eq!(m.with_input_count(None).unwrap().inputs.len(), 3);
         assert!(m.with_input_count(Some(4)).unwrap_err().to_string().contains("takes 1 to 3 inputs, got 4"));
-        assert_eq!(e.output_size(&[(2, 5), (3, 5), (4, 5), (1, 5)]), Some((10, 5)));
-        assert_eq!(e.output_size(&[(2, 5), (3, 4), (4, 5), (1, 5)]), None);
+        assert_eq!(e.output_size(0, &[(2, 5), (3, 5), (4, 5), (1, 5)]), Some((10, 5)));
+        assert_eq!(e.output_size(0, &[(2, 5), (3, 4), (4, 5), (1, 5)]), None);
         let err = e.check_inputs(&[info("rgba", 2, 5), info("rgba", 3, 4), info("rgba", 1, 5), info("rgba", 1, 5)]).unwrap_err();
         assert!(err.to_string().contains("height 4 must equal"), "{err}");
         assert_eq!(OutputSize::Vstack.apply(&[(4, 1), (4, 2)]), Some((4, 3)));
@@ -1131,6 +1254,69 @@ mod tests {
     }
 
     #[test]
+    fn effect_outputs_are_an_array_of_pass_textures() {
+        let parse = |extra: &str, passes: &str| {
+            Manifest::parse(
+                format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{{"name":"src"}},{{"name":"bg"}}]{extra},"groups":[{{"passes":[{passes}]}}]}}"#)
+                    .as_bytes(),
+            )
+            .map_err(|e| e.to_string())
+        };
+        // Omitted: one output named after the main output of the last pass.
+        let m = parse("", r#"{"shader":"a.wgsl","output":["tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"output":["res"]}"#).unwrap();
+        assert_eq!(m.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["res"]);
+        // Two outputs, one written by a middle pass, with their own formats, sizes and bypass.
+        let two = r#","output":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"],"size":"hstack","bypass":"bg"}]"#;
+        let m =
+            parse(two, r#"{"shader":"a.wgsl","output":["matte","tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"output":["color"]}"#).unwrap();
+        assert_eq!(m.output_index("matte"), Some(1));
+        assert_eq!((m.output_bypass(0), m.output_bypass(1)), (0, 1));
+        assert_eq!(m.output_size(1, &[(2, 3), (4, 3)]), Some((6, 3)));
+        assert_eq!(m.output_size(0, &[(2, 3), (4, 3)]), Some((2, 3)));
+        assert_eq!(m.pass_size(&m.groups[0].passes[0]), 1);
+        assert_eq!(m.pass_size(&m.groups[0].passes[1]), 0);
+        m.check_output_format(1, "gray").unwrap();
+        assert!(m.check_output_format(0, "gray").unwrap_err().to_string().contains("output `color` of `X`"));
+        // A stacked output asks the inputs to stack.
+        assert!(m.check_inputs(&[info("rgba", 2, 3), info("rgba", 2, 4)]).unwrap_err().to_string().contains("to stack side by side"));
+        let both = r#","output":[{"name":"color"},{"name":"matte"}]"#;
+        parse(both, r#"{"shader":"a.wgsl","output":["color","matte"]}"#).unwrap();
+        let err = |extra: &str, passes: &str| parse(extra, passes).unwrap_err();
+        let one = r#"{"shader":"a.wgsl","output":["color","matte"]}"#;
+        assert!(err(r#","output":{"formats":["rgba"]}"#, one).contains(r#"`output` is an array: [{"name": "out", ...}]"#));
+        assert!(err(r#","output":[]"#, one).contains("1 to 4 outputs, not 0"));
+        let five = r#","output":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"}]"#;
+        assert!(err(five, one).contains("1 to 4 outputs, not 5"));
+        assert!(err(r#","output":[{"name":"color"},{"name":"color"}]"#, one).contains("duplicate output name `color`"));
+        assert!(err(r#","output":[{"name":"color"},{"name":"bg"}]"#, one).contains("shadows an input"));
+        assert!(err(r#","output":[{"name":"enable"}]"#, one).contains("reserved"));
+        assert!(err(r#","output":[{"formats":["rgba"]}]"#, one).contains("missing field `name`"));
+        assert!(err(r#","output":[{"name":"color","bypass":"nope"}]"#, one).contains("bypass `nope` is not an input"));
+        assert!(err(r#","output":[{"name":"color","formats":[]}]"#, one).contains("at least one pixel format"));
+        assert!(err(r#","output":[{"name":"color"},{"name":"other"}]"#, r#"{"shader":"a.wgsl","output":["color"]}"#)
+            .contains("output `other`: no pass writes it"));
+        let twice = r#"{"shader":"a.wgsl","output":["color"]},{"shader":"b.wgsl","inputs":["src"],"output":["color","matte"]}"#;
+        assert!(err(both, twice).contains("output `color`: passes [0, 1] write it"));
+        // A texture nobody reads and that is no output is a mistake.
+        assert!(err(r#","output":[{"name":"color"}]"#, one).contains("writes `matte`, which no later pass reads"));
+        // One pass writes one size.
+        let sized = r#","output":[{"name":"color"},{"name":"matte","size":"vstack"}]"#;
+        assert!(err(sized, one).contains("of different sizes"));
+        let resized = r#"{"shader":"a.wgsl","output":["tmp"]},{"shader":"b.wgsl","inputs":["src"],"output":["matte","tmp"]},{"shader":"c.wgsl","inputs":["tmp"],"output":["color"]}"#;
+        assert!(err(sized, resized).contains("pass 1 writes `tmp` at another size than pass 0"));
+        // The output is named like a param: `<output>=off` would be ambiguous.
+        let param = Manifest::parse(
+            br#"{"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"color","type":"float"}],"output":[{"name":"color"}],"groups":[{"passes":[{"shader":"a.wgsl","output":["color"]}]}]}"#,
+        );
+        assert!(param.unwrap_err().to_string().contains("has the name of a param"));
+        // Every group writes every output.
+        let groups = Manifest::parse(
+            br#"{"id":"t.x","name":"X","used_for":["gpufx"],"output":[{"name":"color"},{"name":"matte"}],"groups":[{"name":"fast","passes":[{"shader":"a.wgsl","output":["color","matte"]}]},{"name":"slow","passes":[{"shader":"b.wgsl","output":["color"]}]}]}"#,
+        );
+        assert!(groups.unwrap_err().to_string().contains("group slow: output `matte`: no pass writes it"));
+    }
+
+    #[test]
     fn pass_outputs_are_an_array_checked_name_by_name() {
         let parse = |passes: &str| {
             Manifest::parse(format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],"groups":[{{"passes":[{passes}]}}]}}"#).as_bytes())
@@ -1150,7 +1336,7 @@ mod tests {
         assert!(err(r#"{"shader":"a.wgsl","output":[]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 0"));
         assert!(err(r#"{"shader":"a.wgsl","output":["a","b","c","d","e"]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 5"));
         assert!(err(r#"{"shader":"a.wgsl","output":["a","a"]},{"shader":"b.wgsl"}"#).contains("writes `a` twice"));
-        assert!(err(r#"{"shader":"a.wgsl","output":["a","b"]}"#).contains("last pass, so it can write only one output"));
+        assert!(err(r#"{"shader":"a.wgsl","output":["out","b"]}"#).contains("writes `b`, which no later pass reads and is no output"));
         assert!(err(r#"{"shader":"a.wgsl","output":["a","src"]},{"shader":"b.wgsl"}"#).contains("shadows an input"));
         assert!(err(r#"{"shader":"a.wgsl","inputs":["src"],"output":["a","b"]},{"shader":"b.wgsl","inputs":["b"],"output":["x","b"]},{"shader":"c.wgsl"}"#)
             .contains("cannot read its own output `b`"));
