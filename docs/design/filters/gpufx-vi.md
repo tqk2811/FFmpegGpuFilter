@@ -161,7 +161,7 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
 | Mục | Quy tắc |
 |-----|---------|
 | Dấu ngăn giữa các key | `:` (kiểu FFmpeg) hoặc `&`; trên dòng lệnh ffmpeg `&` không cần escape, còn `:` phải viết `\:` |
-| Tên key | Tên parameter của package, `enable` hoặc `bypass`. Key khác là lỗi, nêu tên effect và các key nó có; key lặp hai lần là lỗi; token không có `=` là lỗi |
+| Tên key | Tên parameter của package, `enable` hoặc `bypass`. Key khác là lỗi, nêu tên effect và các key nó có; key lặp hai lần là lỗi. Token không có `=` là giá trị theo vị trí: đứng đầu và lấy parameter theo thứ tự `params` của manifest (`scale.zip=1280&-2`); đứng sau key có tên, nhiều hơn số parameter, hoặc trùng parameter đã cho theo tên đều là lỗi; `enable`/`bypass` không bao giờ theo vị trí |
 | Escape và quote | `\` escape một trong `\ ' : & ; \| = [ ]` (trước ký tự khác thì `\` giữ nguyên, nên đường dẫn Windows dùng được); `'...'` bọc một giá trị; `'` không đóng là lỗi |
 | `enable=<expr>` | Theo từng frame, bật khi expression khác 0 (hằng số cũng là expression). Tắt: effect copy một input vào texture output (một compute pass, không cấp phát lại gì). Package không được khai báo parameter `enable` |
 | `bypass=0\|auto` | Input mà effect đang tắt sẽ copy: `0` input đầu, `auto` input đầu cho tới khi `enable` đúng một lần, sau đó là input cuối. Giá trị khác là lỗi (cũng lỗi khi input được copy và output khác size, như effect stack). Package không được khai báo parameter `bypass` |

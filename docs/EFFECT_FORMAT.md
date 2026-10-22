@@ -41,7 +41,7 @@ scripts/pack-packages.sh --check -o out my-fx    # compile the shaders on the GP
 | `version`, `description` | string | no | |
 | `inputs` | array | no (`[{"name":"src"}]`) | The video inputs, in the filter's pad order, with their rules (see below) |
 | `outputs` | array | no (one output named after the main output of the last pass, every GPU format, the size of the first input) | The outputs of the effect, in the filter's pad order, with their rules (see below and [Several outputs](#several-outputs)) |
-| `params` | array | no | Parameters, see below |
+| `params` | array | no | Parameters, see below. Their order is part of the effect's interface: values written without a key in `graph=` (`scale.zip=1280&-2`) take the parameters in this order, so reordering or inserting one before others breaks such graphs |
 | `textures` | array | no | Bundled PNG images (LUT, mask, sprites), see [Textures](#textures) |
 | `groups` | array | yes | Pass groups, each with its compute passes and the devices it needs; the first group matching the device is used, see [Pass groups and device requirements](#pass-groups-and-device-requirements) |
 

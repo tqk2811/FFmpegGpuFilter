@@ -41,7 +41,7 @@ scripts/pack-packages.sh --check -o out my-fx    # biên dịch shader trên GPU
 | `version`, `description` | chuỗi | không | |
 | `inputs` | mảng | không (`[{"name":"src"}]`) | Các video input, theo thứ tự pad của filter, kèm quy tắc (xem bên dưới) |
 | `outputs` | mảng | không (một output mang tên output chính của pass cuối, mọi format GPU, kích thước input đầu) | Các output của effect, theo thứ tự output pad của filter, kèm quy tắc (xem bên dưới và [Nhiều output](#nhiều-output)) |
-| `params` | mảng | không | Tham số, xem bên dưới |
+| `params` | mảng | không | Tham số, xem bên dưới. Thứ tự của chúng là một phần interface của effect: giá trị viết không có key trong `graph=` (`scale.zip=1280&-2`) lấy parameter theo thứ tự này, nên đổi thứ tự hoặc chèn parameter lên trước sẽ làm hỏng các graph đó |
 | `textures` | mảng | không | Ảnh PNG đi kèm (LUT, mask, sprite), xem [Texture](#texture) |
 | `groups` | mảng | có | Các group pass, mỗi group có pass compute và thiết bị nó cần; dùng group đầu tiên khớp thiết bị, xem [Nhóm pass và yêu cầu thiết bị](#nhóm-pass-và-yêu-cầu-thiết-bị) |
 

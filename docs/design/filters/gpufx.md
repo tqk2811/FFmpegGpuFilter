@@ -164,7 +164,7 @@ Parsed by `parse_effect_item` (`crates/gpufx-core/src/graph.rs`) for each effect
 | Item | Rule |
 |------|------|
 | Separators between keys | `:` (FFmpeg style) or `&`; on the ffmpeg command line `&` needs no escaping, `:` must be written `\:` |
-| Key names | A parameter name of the package, `enable` or `bypass`. Any other key is an error naming the effect and the keys it knows; a key given twice is an error; a token without `=` is an error |
+| Key names | A parameter name of the package, `enable` or `bypass`. Any other key is an error naming the effect and the keys it knows; a key given twice is an error. A token without `=` is a positional value: positional values come first and take the parameters in manifest `params` order (`scale.zip=1280&-2`); one after a named key, more of them than parameters, or one naming a parameter also given by name is an error; `enable`/`bypass` are never positional |
 | Escape and quote | `\` escapes one of `\ ' : & ; \| = [ ]` (before any other character it stays literal, so Windows paths work); `'...'` quotes a value; an unclosed `'` is an error |
 | `enable=<expr>` | Per frame, on while the expression is not 0 (a constant is an expression). Off: the effect copies one input into its output texture (one compute pass, nothing is reallocated). No package may declare a parameter `enable` |
 | `bypass=0\|auto` | Which input an effect switched off copies: `0` its first input, `auto` its first input until `enable` has been true once, then its last input. Any other value is an error (also when the copied input and the output differ in size, as for a stack effect). No package may declare a parameter `bypass` |

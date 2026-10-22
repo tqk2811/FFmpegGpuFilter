@@ -55,11 +55,16 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 Parameters are written **inline**, right after the package name, like the options of a native FFmpeg filter:
 `pkg.zip=key=value:key2=value2`. This works in `graph=` (also in a chain: `graph='a.zip=k=1|b.zip'`) and in
-every node of `graph=`. Keys are named, a value is a constant or an expression (`t`, `n`, `w`, `h`, `a`, `sar`,
+every node of `graph=`. A value is is a constant or an expression (`t`, `n`, `w`, `h`, `a`, `sar`,
 `dar`), and two keys are reserved for the effect instance: `enable=<expr>` switches that effect on and off per
 frame and `bypass=0|auto` picks the input it copies while off. They are separate from the filter's own timeline
 `enable=` and `bypass=` options, which stay outside the effect string. An unknown key, a key given twice or a
 `bypass` other than `0`/`auto` is an error that names the effect and the key.
+
+As in FFmpeg (`scale=1280:720`), the key may be left out: values without `key=` take the effect's parameters in
+the order of its manifest `params`, so `scale.zip=1280&-2` is `scale.zip=w=1280&h=-2`. Positional values come before
+any named key, there may be no more of them than parameters, and `enable`/`bypass` are always named; a parameter
+given both ways is "given twice".
 
 - Put the whole `graph=` value in `'...'`. FFmpeg splits filter options at `:` *after* it removes
   those quotes, so separate inline keys with `&` (`graph='x.zip=a=1&b=2'`, no escaping needed at the FFmpeg

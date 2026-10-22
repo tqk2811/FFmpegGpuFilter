@@ -1140,7 +1140,9 @@ const NODE_KEYS: [&str; 2] = ["enable", "bypass"];
 /// and options, without escapes and quotes. Options are separated by `:` (as in FFmpeg) or `&`
 /// (no `:` needed inside an FFmpeg option value). `\` escapes the next character (one of
 /// [`ESCAPED`]; before others it stays, for Windows paths) and `'...'` quotes, so values may hold `:`, `;`, `|`, `[`, `]` and `=`. Keys are named (parameter
-/// names, `enable`, `bypass`); a key given twice fails.
+/// names, `enable`, `bypass`) or positional: values without `key=` come first and take the
+/// parameters in manifest order (`scale.zip=1280&-2`). Positional values are returned with
+/// an empty key, named once the effect is open. A key given twice fails.
 pub fn parse_effect_item(item: &str) -> Result<(String, InlineOptions), Error> {
     let item = item.trim();
     let (path, rest) = match find_unquoted(item, b'=') {
@@ -1154,7 +1156,17 @@ pub fn parse_effect_item(item: &str) -> Result<(String, InlineOptions), Error> {
     {
         let option = option.trim();
         let Some(eq) = find_unquoted(option, b'=') else {
-            return Err(graph_err(format!("`{option}` in `{item}` is not key=value (options are named: `{path}=key=value:key=value`)")));
+            // A positional value: named later, by the manifest `params` order.
+            if option.is_empty() {
+                return Err(graph_err(format!("empty option in `{item}`")));
+            }
+            if options.iter().any(|(k, _)| !k.is_empty()) {
+                return Err(graph_err(format!(
+                    "effect `{path}`: positional value `{option}` after a named key (positional values come first)"
+                )));
+            }
+            options.push((String::new(), unescape(option, item)?));
+            continue;
         };
         let key = unescape(option[..eq].trim(), item)?;
         let value = unescape(option[eq + 1..].trim(), item)?;
@@ -1167,6 +1179,29 @@ pub fn parse_effect_item(item: &str) -> Result<(String, InlineOptions), Error> {
         options.push((key, value));
     }
     Ok((path, options))
+}
+
+/// Names the positional values of `options` (empty keys, first) after the parameters of
+/// `fx` in manifest order; `enable` and `bypass` are never positional.
+fn name_positional(path: &str, fx: &Effect, options: &mut InlineOptions) -> Result<(), Error> {
+    let defs = fx.params.defs();
+    let count = options.iter().take_while(|(k, _)| k.is_empty()).count();
+    if count > defs.len() {
+        return Err(graph_err(format!(
+            "effect `{path}`: {count} positional values, but it has {} parameter{}",
+            defs.len(),
+            if defs.len() == 1 { "" } else { "s" }
+        )));
+    }
+    for (option, def) in options.iter_mut().zip(defs).take(count) {
+        option.0 = def.name.clone();
+    }
+    for (i, (key, _)) in options.iter().enumerate() {
+        if options[..i].iter().any(|(k, _)| k == key) {
+            return Err(graph_err(format!("effect `{path}`: key `{key}` given twice")));
+        }
+    }
+    Ok(())
 }
 
 /// Fails when an option of the effect opened from `path` is not one of its parameters,
@@ -1277,8 +1312,9 @@ fn open_items(
 ) -> Result<Vec<Opened>, Error> {
     let mut opened: Vec<Opened> = Vec::new();
     for item in items {
-        let (path, options) = parse_effect_item(item.text)?;
+        let (path, mut options) = parse_effect_item(item.text)?;
         let (label, mut fx) = open(&path)?;
+        name_positional(&path, &fx, &mut options)?;
         check_options(&path, &fx, &options)?;
         apply_constants(&mut fx, &options);
         if !opened.is_empty() && fx.input_count() != 1 {
