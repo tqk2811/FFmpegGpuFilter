@@ -95,7 +95,7 @@ pub(crate) fn plane_format(plane: Plane, deep: bool, f16: bool) -> wgpu::Texture
 }
 
 /// The WGSL name of a storage texture format of [`plane_format`].
-fn wgsl_format(f: wgpu::TextureFormat) -> &'static str {
+pub(crate) fn wgsl_format(f: wgpu::TextureFormat) -> &'static str {
     use wgpu::TextureFormat as F;
     match f {
         F::Rgba16Float => "rgba16float",
@@ -1126,6 +1126,14 @@ impl Effect {
     pub(crate) fn output(&self, o: usize) -> &wgpu::Texture {
         let bound = self.bound.as_ref().expect("bound before use");
         &bound.outputs[&self.program.package.manifest.outputs[o].name]
+    }
+
+    /// The textures of output `o`, one per plane of its `pixel_layout` (the one texture of
+    /// an `rgba` output). Only valid after `bind`, for an output in use.
+    pub(crate) fn output_planes(&self, o: usize) -> Vec<wgpu::Texture> {
+        let bound = self.bound.as_ref().expect("bound before use");
+        let def = &self.program.package.manifest.outputs[o];
+        def.pixel_layout.planes().iter().map(|&p| bound.outputs[&def.pixel_layout.plane_key(&def.name, p)].clone()).collect()
     }
 
     pub(crate) fn encode(&self, cpass: &mut wgpu::ComputePass, info: &FrameInfo) {

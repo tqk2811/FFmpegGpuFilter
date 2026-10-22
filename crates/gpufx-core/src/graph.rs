@@ -4,13 +4,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::convert::{read_outputs, readback_key, work_format, GpuOutputSlot, InputKey, InputSlot, OutputSlot};
+use crate::convert::{read_outputs, readback_key, work_format, GpuOutputSlot, InputKey, InputSlot, LayoutConvert, OutputSlot};
 use crate::frame::{Frame, FrameMut, GpuFrame, PixelFormat};
-use crate::manifest::StreamInfo;
+use crate::manifest::{PixelLayout, Plane, StreamInfo};
 use crate::mips::MipChain;
 use crate::params::ParamBlock;
 use crate::pool::PoolKey;
-use crate::runtime::{Effect, FrameInfo, Image, ImageMut};
+use crate::runtime::{plane_format, Effect, FrameInfo, Image, ImageMut};
 use crate::Error;
 
 /// Where an effect input or a graph output takes its frame from.
@@ -158,7 +158,20 @@ pub(crate) struct FrameIo {
     bypass_pad: BypassPad,
     /// The pad each output slot is bound to in bypass, to rebind when it changes.
     bypass_bound: Vec<usize>,
+    /// The layout converts of the plan, made for the pooled textures: (index in
+    /// `Plan::converts`, pass), in recording order; and the textures each one writes.
+    converts: Vec<(usize, LayoutConvert)>,
+    convert_dsts: Vec<Vec<wgpu::Texture>>,
+    /// The matrix and range of the layout converts: those of the first input frame.
+    color: crate::frame::ColorInfo,
+    /// The layout converts standing for the copies of effects switched off, by effect, by
+    /// output, for an input or output with planes; with the source textures they were made for.
+    off_converts: Vec<Vec<Option<OffConvert>>>,
 }
+
+/// A layout convert standing for the copy of an effect switched off, with the source
+/// textures it was made for.
+type OffConvert = (Vec<wgpu::Texture>, LayoutConvert);
 
 /// The planned textures of a graph for one set of inputs.
 struct Layout {
@@ -202,6 +215,12 @@ impl FrameIo {
         let ctx = &effects[0].program.ctx;
         self.copy_groups.clear();
         self.copy_groups.resize(effects.len(), Vec::new());
+        self.off_converts.resize_with(effects.len(), Vec::new);
+        for (k, c) in self.off_converts.iter_mut().enumerate() {
+            if self.enabled.get(k).copied().unwrap_or(true) {
+                c.clear();
+            }
+        }
         if self.enabled.iter().all(|&on| on) {
             return Ok(());
         }
@@ -211,13 +230,22 @@ impl FrameIo {
                 continue;
             }
             let mut groups = vec![None; effects[k].output_count()];
+            self.off_converts[k].resize_with(effects[k].output_count(), || None);
             for (o, group) in groups.iter_mut().enumerate() {
                 if !topo.used(k, o) {
+                    self.off_converts[k][o] = None;
                     continue;
                 }
                 let i = self.bypass(effects, k, o);
-                let src = source_texture(effects, &self.inputs, topo.node_inputs[k][i]);
-                let dst = effects[k].output(o).clone();
+                let source = topo.node_inputs[k][i];
+                let (from, to) = (source_layout(effects, source), effects[k].package().manifest.outputs[o].pixel_layout);
+                let planes = from != PixelLayout::Rgba || to != PixelLayout::Rgba;
+                let (src, dst) = if planes {
+                    (source_planes(effects, &self.inputs, source), effects[k].output_planes(o))
+                } else {
+                    (vec![source_texture(effects, &self.inputs, source)], vec![effects[k].output(o).clone()])
+                };
+                let (src, dst, srcs, dsts) = (src[0].clone(), dst[0].clone(), src, dst);
                 if (src.width(), src.height()) != (dst.width(), dst.height()) {
                     let what = if effects[k].output_count() == 1 {
                         "its output".to_string()
@@ -232,6 +260,19 @@ impl FrameIo {
                         dst.height()
                     )));
                 }
+                if planes {
+                    // Through a layout convert, from the planes of the source to those of the
+                    // output (the same values when the layouts are the same).
+                    let fresh = !matches!(&self.off_converts[k][o], Some((made, _)) if *made == srcs);
+                    if fresh {
+                        let size = (dst.width(), dst.height());
+                        let c = LayoutConvert::new(&ctx.device, &ctx.conv, (from, to), &srcs, &dsts, size, self.deep, ctx.plane_f16);
+                        self.off_converts[k][o] = Some((srcs, c));
+                        self.frame_binds += 1;
+                    }
+                    continue;
+                }
+                let _ = dsts;
                 let made = self.copies[k].get_or_make((src, dst), |(src, dst)| Ok::<_, Error>(ctx.mips.copy_group(&ctx.device, src, dst)));
                 let (made_group, made) = made.expect("infallible");
                 *group = Some(made_group.clone());
@@ -276,20 +317,120 @@ fn mip_sources(effects: &[Effect], topo: &Topology) -> (Vec<bool>, Vec<Vec<bool>
     (pads, nodes)
 }
 
+/// A pooled texture: size, whether it has a mip chain, and the plane it holds (its format).
+type Slot = (u32, u32, bool, Plane);
+
+/// Fails for an effect output with planes some effect reads through a `mipmaps` input: the
+/// mip chain is made of the output's own texture, which an output with planes does not have.
+fn check_plane_mips(effects: &[Effect], node_mips: &[Vec<bool>]) -> Result<(), Error> {
+    for (k, mips) in node_mips.iter().enumerate() {
+        for (o, _) in mips.iter().enumerate().filter(|(_, &m)| m) {
+            let def = &effects[k].package().manifest.outputs[o];
+            if def.pixel_layout != PixelLayout::Rgba {
+                return Err(Error::Manifest(format!(
+                    "output `{}` of `{}` has pixel_layout planes, and is read by a `mipmaps` input",
+                    def.name,
+                    effects[k].package().manifest.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Which input pads an effect reads in a layout with planes, through a layout convert.
+fn converted_pads(effects: &[Effect], topo: &Topology) -> Vec<bool> {
+    let mut pads = vec![false; topo.nb_inputs];
+    for (k, sources) in topo.node_inputs.iter().enumerate() {
+        for (def, src) in effects[k].package().manifest.inputs.iter().zip(sources) {
+            if let (Source::Input(i), true) = (*src, def.pixel_layout != PixelLayout::Rgba) {
+                pads[i] = true;
+            }
+        }
+    }
+    pads
+}
+
+/// The textures of `src`, one per plane of its layout: an input pad's slot (`rgba`), or
+/// the planes of an effect output.
+fn source_planes(effects: &[Effect], inputs: &[InputSlot], src: Source) -> Vec<wgpu::Texture> {
+    match src {
+        Source::Input(i) => vec![inputs[i].texture.clone()],
+        Source::Node(j, o) => effects[j].output_planes(o),
+    }
+}
+
+/// The input textures effect `k` is bound with, in [`crate::Manifest::input_keys`] order:
+/// the planes of each source, or those of the layout convert of an input reading a source
+/// of another layout.
+fn effect_inputs(effects: &[Effect], topo: &Topology, io: &FrameIo, plan: &Plan, k: usize) -> Vec<wgpu::Texture> {
+    topo.node_inputs[k]
+        .iter()
+        .enumerate()
+        .flat_map(|(i, &src)| match plan.input_convert[k][i] {
+            Some(c) => io.convert_dsts[c].clone(),
+            None => source_planes(effects, &io.inputs, src),
+        })
+        .collect()
+}
+
+/// The RGBA texture graph output `n` reads, from `src`: the layout convert to `rgba` of an
+/// effect output with planes, else the source itself.
+fn output_texture(effects: &[Effect], io: &FrameIo, n: usize, src: Source) -> wgpu::Texture {
+    match io.layout.as_ref().and_then(|l| l.plan.output_convert.get(n).copied().flatten()) {
+        Some(c) => io.convert_dsts[c][0].clone(),
+        None => source_texture(effects, &io.inputs, src),
+    }
+}
+
 /// Which pooled texture each pass output gets, and the size of each pooled texture.
 struct Plan {
+    /// By effect: the pooled texture of each pass texture key (see [`PixelLayout::plane_key`]).
     assign: Vec<HashMap<String, usize>>,
-    /// Size of each pooled texture, and whether it has a mip chain.
-    slots: Vec<(u32, u32, bool)>,
+    slots: Vec<Slot>,
+    /// The layout converts of the graph (see [`LayoutConvert`]): one per source and
+    /// `pixel_layout` some effect input or graph output wants another layout of.
+    converts: Vec<ConvertPlan>,
+    /// By effect, by input: the convert the input reads, if its source has another layout.
+    input_convert: Vec<Vec<Option<usize>>>,
+    /// By graph output: the convert to `rgba` it reads, for an effect output with planes.
+    output_convert: Vec<Option<usize>>,
+}
+
+/// One layout convert of a [`Plan`].
+struct ConvertPlan {
+    src: Source,
+    from: PixelLayout,
+    to: PixelLayout,
+    /// Size of Y (of the source).
+    size: (u32, u32),
+    /// The pooled textures it writes, one per plane of `to`.
+    slots: Vec<usize>,
+    /// The effect it runs right before (its first reader), or `None`: after every effect,
+    /// for a graph output only.
+    before: Option<usize>,
+    /// The last pass reading it, in execution order (see `plan`).
+    end: usize,
 }
 
 impl Plan {
-    fn bytes(&self, deep: bool) -> u64 {
-        let texel = if deep { 8 } else { 4 };
+    fn bytes(&self, deep: bool, f16: bool) -> u64 {
         self.slots
             .iter()
-            .map(|&(w, h, mips)| w as u64 * h as u64 * texel + if mips { crate::mips::chain_bytes(w, h, texel) } else { 0 })
+            .map(|&(w, h, mips, plane)| {
+                let texel = plane_format(plane, deep, f16).block_copy_size(None).unwrap_or(4) as u64;
+                w as u64 * h as u64 * texel + if mips { crate::mips::chain_bytes(w, h, texel) } else { 0 }
+            })
             .sum()
+    }
+}
+
+/// The `pixel_layout` of a source: an input pad comes as `rgba` (the frame conversions),
+/// an effect output in the layout its manifest gives.
+fn source_layout(effects: &[Effect], src: Source) -> PixelLayout {
+    match src {
+        Source::Input(_) => PixelLayout::Rgba,
+        Source::Node(j, o) => effects[j].package().manifest.outputs[o].pixel_layout,
     }
 }
 
@@ -301,7 +442,7 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
     let mut direct: Vec<Vec<Option<usize>>> = effects.iter().map(|fx| vec![None; fx.output_count()]).collect();
     for (j, (src, out)) in topo.outputs.iter().zip(outs).enumerate() {
         let Source::Node(k, o) = *src else { continue };
-        if out.format != PixelFormat::Rgba || out.premultiplied || node_mips[k][o] {
+        if out.format != PixelFormat::Rgba || out.premultiplied || node_mips[k][o] || source_layout(effects, *src) != PixelLayout::Rgba {
             continue;
         }
         if topo.outputs.iter().filter(|s| **s == *src).count() != 1 || topo.node_inputs.iter().flatten().any(|s| s == src) {
@@ -320,13 +461,19 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
 }
 
 /// Assigns the pass outputs of every effect to pooled textures: a texture goes back to
-/// the pool (per size) after the last pass that reads it, counted over the whole graph
-/// in execution order. Graph outputs stay alive until they are read back. The effect
+/// the pool (per size and plane) after the last pass that reads it, counted over the whole
+/// graph in execution order. Graph outputs stay alive until they are read back. The effect
 /// outputs in `mips` get pooled textures with a mip chain, kept apart from the others.
-/// Passes that do not run (outputs nobody uses) get nothing.
+/// Passes that do not run (outputs nobody uses) get nothing. A texture of a layout with
+/// planes takes one pooled texture per plane, while its liveness stays that of its name.
+/// An effect input reading a source of another `pixel_layout` reads a layout convert run
+/// before the effect, alive through its passes; the convert is shared by the readers of
+/// the same source in the same layout, and a graph output with planes reads one to `rgba`.
+#[allow(clippy::too_many_arguments)]
 fn plan(
     effects: &[Effect],
     topo: &Topology,
+    pads: &[(u32, u32)],
     sizes: &[Vec<(u32, u32)>],
     mips: &[Vec<bool>],
     direct_out: &[Vec<Option<usize>>],
@@ -339,17 +486,32 @@ fn plan(
         let end = last.entry(key).or_insert(g);
         *end = (*end).max(g);
     }
+    let mut converts: Vec<ConvertPlan> = Vec::new();
+    let mut input_convert: Vec<Vec<Option<usize>>> = effects.iter().map(|fx| vec![None; fx.input_count()]).collect();
+    let convert_of = |converts: &mut Vec<ConvertPlan>, src: Source, to: PixelLayout, before: Option<usize>, end: usize| {
+        if let Some(c) = converts.iter().position(|c| c.src == src && c.to == to) {
+            converts[c].end = converts[c].end.max(end);
+            return c;
+        }
+        let from = source_layout(effects, src);
+        converts.push(ConvertPlan { src, from, to, size: source_size(src, pads, sizes), slots: Vec::new(), before, end });
+        converts.len() - 1
+    };
     let mut g = 0;
     for &k in &topo.order {
         let m = &effects[k].program.package.manifest;
         let passes = effects[k].passes(deep)?;
         let runs = (0..passes.len()).filter(|&i| effects[k].runs(i)).count();
-        for &src in &topo.node_inputs[k] {
+        for (i, &src) in topo.node_inputs[k].iter().enumerate() {
             if let Source::Node(j, o) = src {
                 // Any input may be read by the copies of the effect when it is switched off
                 // (`bypass`), even if no pass reads it. The copies write the outputs: keep the
                 // input alive up to the last pass so the pool cannot give its texture to one.
                 bump(&mut last, (j, finals[j][o]), g + runs.max(1) - 1);
+            }
+            let to = m.inputs[i].pixel_layout;
+            if source_layout(effects, src) != to {
+                input_convert[k][i] = Some(convert_of(&mut converts, src, to, Some(k), g + runs.max(1) - 1));
             }
         }
         for (i, pass) in passes.iter().enumerate() {
@@ -373,29 +535,52 @@ fn plan(
             g += 1;
         }
     }
-    for src in &topo.outputs {
+    let mut output_convert = vec![None; topo.outputs.len()];
+    for (n, src) in topo.outputs.iter().enumerate() {
         if let Source::Node(j, o) = *src {
             // Read by the output conversion, after every effect.
             last.insert((j, finals[j][o]), usize::MAX);
+            if source_layout(effects, *src) != PixelLayout::Rgba {
+                output_convert[n] = Some(convert_of(&mut converts, *src, PixelLayout::Rgba, None, usize::MAX));
+            }
         }
     }
 
-    let mut free: HashMap<(u32, u32, bool), Vec<usize>> = HashMap::new();
+    let mut free: HashMap<Slot, Vec<usize>> = HashMap::new();
     let mut live: Vec<(usize, usize)> = Vec::new();
-    let mut slots: Vec<(u32, u32, bool)> = Vec::new();
+    let mut slots: Vec<Slot> = Vec::new();
+    fn take(free: &mut HashMap<Slot, Vec<usize>>, slots: &mut Vec<Slot>, key: Slot) -> usize {
+        free.get_mut(&key).and_then(|f| f.pop()).unwrap_or_else(|| {
+            slots.push(key);
+            slots.len() - 1
+        })
+    }
+    fn expire(live: &mut Vec<(usize, usize)>, free: &mut HashMap<Slot, Vec<usize>>, slots: &[Slot], g: usize) {
+        live.retain(|&(end, slot)| {
+            if end < g {
+                free.entry(slots[slot]).or_default().push(slot);
+            }
+            end >= g
+        });
+    }
     let mut assign = vec![HashMap::new(); effects.len()];
     let mut g = 0;
     for &k in &topo.order {
+        // The converts this effect reads first, alive through its passes.
+        expire(&mut live, &mut free, &slots, g);
+        for c in converts.iter_mut().filter(|c| c.before == Some(k)) {
+            for &plane in c.to.planes() {
+                let (w, h) = c.to.plane_size(plane, c.size);
+                let slot = take(&mut free, &mut slots, (w, h, false, plane));
+                live.push((c.end, slot));
+                c.slots.push(slot);
+            }
+        }
         for (i, pass) in effects[k].passes(deep)?.iter().enumerate() {
             if !effects[k].runs(i) {
                 continue;
             }
-            live.retain(|&(end, slot)| {
-                if end < g {
-                    free.entry(slots[slot]).or_default().push(slot);
-                }
-                end >= g
-            });
+            expire(&mut live, &mut free, &slots, g);
             let (w, h) = sizes[k][pass.size_of];
             for out in &pass.outputs {
                 let o = finals[k].iter().position(|n| n == out);
@@ -403,20 +588,29 @@ fn plan(
                 // switched off (its pass writes a stand-in, see `Effect::bind`).
                 let in_place = o.is_some_and(|o| direct_out[k][o].is_some());
                 let off = effects[k].package().manifest.off_outputs.contains(out);
-                if !in_place && !off && !assign[k].contains_key(out) {
-                    let key = (w, h, o.is_some_and(|o| mips[k][o]));
-                    let slot = free.get_mut(&key).and_then(|f| f.pop()).unwrap_or_else(|| {
-                        slots.push(key);
-                        slots.len() - 1
-                    });
+                let layout = effects[k].package().manifest.layout_of(out);
+                for &plane in layout.planes() {
+                    let key = layout.plane_key(out, plane);
+                    if in_place || off || assign[k].contains_key(&key) {
+                        continue;
+                    }
+                    let (pw, ph) = layout.plane_size(plane, (w, h));
+                    let slot = take(&mut free, &mut slots, (pw, ph, o.is_some_and(|o| mips[k][o]), plane));
                     live.push((last[&(k, out.as_str())], slot));
-                    assign[k].insert(out.clone(), slot);
+                    assign[k].insert(key, slot);
                 }
             }
             g += 1;
         }
     }
-    Ok(Plan { assign, slots })
+    // The converts of graph outputs only, after every effect.
+    for c in converts.iter_mut().filter(|c| c.before.is_none()) {
+        for &plane in c.to.planes() {
+            let (w, h) = c.to.plane_size(plane, c.size);
+            c.slots.push(take(&mut free, &mut slots, (w, h, false, plane)));
+        }
+    }
+    Ok(Plan { assign, slots, converts, input_convert, output_convert })
 }
 
 /// Checks every effect against its manifest rules: an input pad gives its stream, an
@@ -590,12 +784,15 @@ fn prepare(
     let deep = keys.iter().chain(others).any(|k| work_format(k.format) != wgpu::TextureFormat::Rgba8Unorm)
         || outs.iter().any(|o| work_format(o.format) != wgpu::TextureFormat::Rgba8Unorm);
     let (pad_mips, node_mips) = mip_sources(effects, topo);
+    check_plane_mips(effects, &node_mips)?;
+    // Input pads some effect reads in another layout: read through a convert, so not in place.
+    let converted = converted_pads(effects, topo);
     // Vulkan frames in straight RGBA8, in a graph that is not deep: effects read the
     // frame itself, with no pooled texture and no conversion pass.
     let in_place = gpu && io.direct_gpu && !deep;
     if in_place {
         for (i, k) in keys.iter_mut().enumerate() {
-            k.direct = k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i];
+            k.direct = k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i] && !converted[i];
         }
     }
     // And the pass writing an effect output writes a straight RGBA8 output frame in place.
@@ -619,7 +816,7 @@ fn prepare(
         check_nodes(effects, topo, None, &streams)?;
         let pads: Vec<(u32, u32)> = keys.iter().map(|k| (k.width, k.height)).collect();
         let sizes = node_sizes(effects, topo, &pads)?;
-        let plan = plan(effects, topo, &sizes, &node_mips, &direct_out, deep)?;
+        let plan = plan(effects, topo, &pads, &sizes, &node_mips, &direct_out, deep)?;
         // Drop the bindings of the old textures; they go back to the pool's trimming.
         io.input_mips.clear();
         io.node_mips.clear();
@@ -630,11 +827,15 @@ fn prepare(
         io.readback_id = None;
         io.bound_ids.clear();
         io.out_ids.clear();
+        io.converts.clear();
+        io.convert_dsts.clear();
+        io.off_converts.clear();
         for fx in effects.iter_mut() {
             fx.bound = None;
         }
         io.deep = deep;
-        io.memory = MemoryStats { pass_textures: plan.slots.len(), pass_texture_bytes: plan.bytes(deep), ..Default::default() };
+        io.memory =
+            MemoryStats { pass_textures: plan.slots.len(), pass_texture_bytes: plan.bytes(deep, ctx.plane_f16), ..Default::default() };
         io.layout = Some(Layout { keys, plan, sizes, pad_mips, node_mips, direct_out });
     }
     acquire(effects, topo, io, &ctx)
@@ -653,7 +854,7 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
     // Taken out while the slots are rebuilt, put back below.
     let layout = io.layout.take().expect("planned before");
     let deep = io.deep;
-    let format = if deep { wgpu::TextureFormat::Rgba16Float } else { wgpu::TextureFormat::Rgba8Unorm };
+    let f16 = ctx.plane_f16;
     let usage = wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING;
     let mut keys = Vec::new();
     let mut counts = Vec::new();
@@ -662,7 +863,13 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
         counts.push(slot.len());
         keys.extend(slot);
     }
-    keys.extend(layout.plan.slots.iter().map(|&(width, height, mips)| PoolKey::Texture { width, height, format, usage, mips }));
+    keys.extend(layout.plan.slots.iter().map(|&(width, height, mips, plane)| PoolKey::Texture {
+        width,
+        height,
+        format: plane_format(plane, deep, f16),
+        usage,
+        mips,
+    }));
     let wants: Vec<(PoolKey, Option<u64>)> = keys.iter().enumerate().map(|(n, &k)| (k, io.bound_ids.get(n).copied())).collect();
     let leases = ctx.pool.take(device, &wants);
     let ids: Vec<u64> = leases.iter().map(|l| l.id).collect();
@@ -676,6 +883,7 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
     io.bound_ids.clear();
     // The copies of effects switched off hold the old textures.
     io.copies.clear();
+    io.off_converts.clear();
     let mut textures = leases.iter().map(|l| l.texture().clone());
     io.input_mips.clear();
     io.node_mips.clear();
@@ -690,8 +898,19 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
         })
         .collect();
     let pool: Vec<wgpu::Texture> = textures.collect();
+    io.convert_dsts = layout.plan.converts.iter().map(|c| c.slots.iter().map(|&s| pool[s].clone()).collect()).collect();
+    io.converts.clear();
+    let make_convert = |effects: &[Effect], io: &FrameIo, c: &ConvertPlan, n: usize| {
+        let src = source_planes(effects, &io.inputs, c.src);
+        LayoutConvert::new(device, conv, (c.from, c.to), &src, &io.convert_dsts[n], c.size, deep, f16)
+    };
     for &k in &topo.order {
-        let sources: Vec<wgpu::Texture> = topo.node_inputs[k].iter().map(|&s| source_texture(effects, &io.inputs, s)).collect();
+        // The converts read before the effect: their sources are bound by now.
+        for (n, c) in layout.plan.converts.iter().enumerate().filter(|(_, c)| c.before == Some(k)) {
+            let made = make_convert(&*effects, io, c, n);
+            io.converts.push((n, made));
+        }
+        let sources = effect_inputs(effects, topo, io, &layout.plan, k);
         let mut outputs: HashMap<String, wgpu::Texture> =
             layout.plan.assign[k].iter().map(|(name, &slot)| (name.clone(), pool[slot].clone())).collect();
         for (o, j) in layout.direct_out[k].iter().enumerate() {
@@ -706,6 +925,10 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
             io.layout = Some(layout);
             return Err(e);
         }
+    }
+    for (n, c) in layout.plan.converts.iter().enumerate().filter(|(_, c)| c.before.is_none()) {
+        let made = make_convert(&*effects, io, c, n);
+        io.converts.push((n, made));
     }
     io.input_mips = io.inputs.iter().zip(&layout.pad_mips).map(|(slot, &m)| m.then(|| ctx.mips.chain(device, &slot.texture))).collect();
     io.node_mips = (0..effects.len())
@@ -731,15 +954,6 @@ fn desc_of(f: &Frame) -> Desc {
 /// shared buffer. Without `info` the effects are bypassed: each output is its source
 /// input pad (the pad whose size it has) converted to the output format; `inputs` may
 /// then hold only the first pads.
-/// Graphs do not carry planes yet: an effect with a `pixel_layout` other than `rgba` fails
-/// here (the conversions and pool keys for planes come with them).
-fn no_planes(effects: &[Effect]) -> Result<(), Error> {
-    match effects.iter().map(|fx| &fx.package().manifest).find(|m| m.has_planes()) {
-        Some(m) => Err(Error::Manifest(format!("effect `{}`: pixel_layout other than rgba is not supported in a graph yet", m.name))),
-        None => Ok(()),
-    }
-}
-
 pub(crate) fn run(
     effects: &mut [Effect],
     topo: &Topology,
@@ -748,7 +962,6 @@ pub(crate) fn run(
     outs: &mut [FrameMut],
     info: Option<&FrameInfo>,
 ) -> Result<(), Error> {
-    no_planes(effects)?;
     let bypass = info.is_none();
     if !bypass {
         for fx in effects.iter_mut() {
@@ -768,6 +981,9 @@ pub(crate) fn run(
     let out_descs: Vec<Desc> =
         outs.iter().map(|o| Desc { format: o.format, width: o.width, height: o.height, premultiplied: o.color.premultiplied }).collect();
     prepare(effects, topo, io, &ins, &out_descs, bypass, false)?;
+    if let Some(f) = inputs.first() {
+        io.color = f.color;
+    }
 
     let ctx = effects[0].program.ctx.clone();
     let (device, queue, conv) = (&ctx.device, &ctx.queue, &ctx.conv);
@@ -813,8 +1029,11 @@ pub(crate) fn run(
             check_bypass_pad(&ins, out_desc, pad)?;
         }
         if !io.outputs[k].is_bound(bypass) || (bypass && io.bypass_bound[k] != pad) {
-            let src = if bypass { Source::Input(pad) } else { topo.outputs[k] };
-            let tex = source_texture(effects, &io.inputs, src);
+            let tex = if bypass {
+                source_texture(effects, &io.inputs, Source::Input(pad))
+            } else {
+                output_texture(effects, io, k, topo.outputs[k])
+            };
             io.outputs[k].bind(device, conv, &tex, bypass);
             if bypass {
                 io.bypass_bound[k] = pad;
@@ -884,27 +1103,39 @@ fn encode_inputs(effects: &[Effect], io: &FrameIo, given: usize, info: Option<&F
     }
 }
 
-/// The effect half of [`encode_effects`].
+/// The effect half of [`encode_effects`]: each effect after the layout converts it reads,
+/// then the converts of graph outputs only.
 fn encode_nodes(effects: &[Effect], topo: &Topology, io: &FrameIo, info: Option<&FrameInfo>, cpass: &mut wgpu::ComputePass) {
     let ctx = &effects[0].program.ctx;
-    if let Some(info) = info {
-        for &k in &topo.order {
-            match (io.copy_groups.get(k).filter(|g| g.iter().any(Option::is_some)), &io.layout) {
-                // Switched off: an input copied into each output (see `bind_copies`).
-                (Some(groups), Some(layout)) => {
-                    for (o, group) in groups.iter().enumerate() {
-                        if let Some(group) = group {
-                            let format = effects[k].output(o).format();
-                            ctx.mips.encode_copy(&ctx.device, format, group, layout.sizes[k][o], cpass);
-                        }
+    let Some(info) = info else { return };
+    let before = |n: usize| io.layout.as_ref().and_then(|l| l.plan.converts.get(n)).and_then(|c| c.before);
+    for &k in &topo.order {
+        for (_, c) in io.converts.iter().filter(|(n, _)| before(*n) == Some(k)) {
+            c.encode(&ctx.queue, &io.color, cpass);
+        }
+        let groups = io.copy_groups.get(k).filter(|g| g.iter().any(Option::is_some));
+        let converts = io.off_converts.get(k).filter(|c| c.iter().any(Option::is_some));
+        match (groups, converts, &io.layout) {
+            // Switched off: an input copied into each output (see `bind_copies`).
+            (None, None, _) | (_, _, None) => effects[k].encode(cpass, info),
+            (groups, converts, Some(layout)) => {
+                for (o, group) in groups.into_iter().flatten().enumerate() {
+                    if let Some(group) = group {
+                        let format = effects[k].output(o).format();
+                        ctx.mips.encode_copy(&ctx.device, format, group, layout.sizes[k][o], cpass);
                     }
                 }
-                _ => effects[k].encode(cpass, info),
-            }
-            for chain in io.node_mips.get(k).into_iter().flatten().flatten() {
-                chain.encode(&ctx.device, &ctx.mips, cpass);
+                for (_, c) in converts.into_iter().flatten().flatten() {
+                    c.encode(&ctx.queue, &io.color, cpass);
+                }
             }
         }
+        for chain in io.node_mips.get(k).into_iter().flatten().flatten() {
+            chain.encode(&ctx.device, &ctx.mips, cpass);
+        }
+    }
+    for (_, c) in io.converts.iter().filter(|(n, _)| before(*n).is_none()) {
+        c.encode(&ctx.queue, &io.color, cpass);
     }
 }
 
@@ -921,7 +1152,6 @@ pub(crate) fn run_gpu(
     info: Option<&FrameInfo>,
     enc: &mut wgpu::CommandEncoder,
 ) -> Result<(), Error> {
-    no_planes(effects)?;
     let bypass = info.is_none();
     if !bypass {
         for fx in effects.iter_mut() {
@@ -944,6 +1174,9 @@ pub(crate) fn run_gpu(
     io.frame_ins = inputs.iter().map(|f| f.planes.first().cloned()).collect();
     io.frame_outs = outs.iter().map(|f| f.planes.first().cloned()).collect();
     let prepared = prepare(effects, topo, io, &ins, &out_descs, bypass, true);
+    if let Some(f) = inputs.first() {
+        io.color = f.color;
+    }
     io.frame_ins.clear();
     io.frame_outs.clear();
     prepared?;
@@ -999,7 +1232,8 @@ fn record_gpu(
             let writes: Vec<Option<&wgpu::Texture>> =
                 direct_out.get(k).into_iter().flatten().map(|j| j.map(|j| &outs[j].planes[0])).collect();
             if reads || writes.iter().any(Option::is_some) {
-                let sources: Vec<wgpu::Texture> = topo.node_inputs[k].iter().map(|&s| source_texture(effects, &io.inputs, s)).collect();
+                let plan = &io.layout.as_ref().expect("planned before").plan;
+                let sources = effect_inputs(effects, topo, io, plan, k);
                 io.frame_binds += effects[k].rebind(&sources.iter().collect::<Vec<_>>(), &writes)? as usize;
             }
         }
@@ -1020,7 +1254,7 @@ fn record_gpu(
         } else {
             topo.outputs[k]
         };
-        let tex = source_texture(effects, &io.inputs, src);
+        let tex = if bypass { source_texture(effects, &io.inputs, src) } else { output_texture(effects, io, k, src) };
         io.frame_binds += io.gpu_outputs[k].bind(device, queue, conv, &tex, &out.planes, &out.color)? as usize;
     }
     let t1 = std::time::Instant::now();
@@ -2209,8 +2443,8 @@ impl EffectGraph {
         }
         let (_, mips) = mip_sources(&self.effects, &self.topo);
         let none: Vec<Vec<Option<usize>>> = self.effects.iter().map(|fx| vec![None; fx.output_count()]).collect();
-        let plan = plan(&self.effects, &self.topo, &node_sizes(&self.effects, &self.topo, sizes)?, &mips, &none, deep)?;
-        Ok((plan.slots.len(), plan.bytes(deep)))
+        let plan = plan(&self.effects, &self.topo, sizes, &node_sizes(&self.effects, &self.topo, sizes)?, &mips, &none, deep)?;
+        Ok((plan.slots.len(), plan.bytes(deep, self.effects[0].program.ctx.plane_f16)))
     }
 
     /// GPU memory held for the current frames; zero before the first one.
@@ -2313,6 +2547,13 @@ impl EffectGraph {
     #[doc(hidden)]
     pub fn frame_binds(&self) -> usize {
         self.io.frame_binds
+    }
+
+    /// How many layout converts (between `pixel_layout`s) the current frames run, not
+    /// counting those standing for the copies of effects switched off. For tests.
+    #[doc(hidden)]
+    pub fn layout_converts(&self) -> usize {
+        self.io.converts.len()
     }
 }
 

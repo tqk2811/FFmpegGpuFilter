@@ -9,10 +9,12 @@
 //! On output a pass encodes each plane into a storage buffer of packed words, which is
 //! copied into a mappable buffer and from there into the caller's planes.
 
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::frame::{ColorInfo, FrameMut, Layout, PixelFormat, PlaneKind};
 use crate::lru::Lru;
+use crate::manifest::{PixelLayout, Plane};
 use crate::pool::PoolKey;
 use crate::shader_cache::{PipelineDesc, ShaderCache};
 use crate::Error;
@@ -66,6 +68,9 @@ pub(crate) struct Converter {
     /// Bound in place of the planes a format does not have.
     dummy: wgpu::TextureView,
     dummy_gpu: OnceLock<wgpu::TextureView>,
+    /// Passes between the `pixel_layout`s of effects (see [`LayoutConvert`]), compiled the
+    /// first time a graph needs one.
+    layouts: Mutex<HashMap<LayoutPass, (wgpu::ComputePipeline, wgpu::BindGroupLayout)>>,
 }
 
 /// Plane texture formats of GPU frames, with their WGSL storage format names.
@@ -211,6 +216,7 @@ impl Converter {
             to_yuv: Default::default(),
             dummy,
             dummy_gpu: OnceLock::new(),
+            layouts: Default::default(),
         }
     }
 
@@ -893,4 +899,183 @@ pub(crate) fn read_outputs(
     }
     readback.unmap();
     Ok(())
+}
+
+/// A layout pass: (from, to, deep, 16-bit planes).
+type LayoutPass = (PixelLayout, PixelLayout, bool, bool);
+
+/// Size of the `LayoutConv` uniform struct of convert_layout.wgsl.
+const LAYOUT_UNIFORM_SIZE: u64 = 48;
+/// Binding of the first destination texture of a layout pass; the sources start at 1.
+const LAYOUT_FIRST_DST: u32 = 8;
+
+/// The WGSL name of the texture of `plane` in a layout pass: `src_y`, `dst_rgba`, ...
+fn layout_var(side: &str, plane: Plane) -> String {
+    format!("{side}_{}", plane.suffix())
+}
+
+/// convert_layout.wgsl with the bindings and the load and store code of one layout pass.
+fn layout_source(from: PixelLayout, to: PixelLayout, deep: bool, f16: bool) -> String {
+    let mut s = String::new();
+    for (b, &plane) in from.planes().iter().enumerate() {
+        s.push_str(&format!("@group(0) @binding({}) var {}: texture_2d<f32>;\n", b + 1, layout_var("src", plane)));
+    }
+    for (b, &plane) in to.planes().iter().enumerate() {
+        let format = crate::runtime::wgsl_format(crate::runtime::plane_format(plane, deep, f16));
+        s.push_str(&format!(
+            "@group(0) @binding({}) var {}: texture_storage_2d<{format}, write>;\n",
+            LAYOUT_FIRST_DST + b as u32,
+            layout_var("dst", plane)
+        ));
+    }
+    let load = match from {
+        PixelLayout::Rgba => "return to_codes(textureLoad(src_rgba, p, 0));".to_string(),
+        PixelLayout::Y => "return vec4f(textureLoad(src_y, p, 0).r, NEUTRAL, NEUTRAL, 1.0);".to_string(),
+        _ => format!(
+            "let uv = textureLoad(src_uv, p / vec2i(lc.src_scale), 0).rg;\n    return vec4f(textureLoad(src_y, p, 0).r, uv, {});",
+            if from.planes().contains(&Plane::A) { "textureLoad(src_a, p, 0).r" } else { "1.0" }
+        ),
+    };
+    s.push_str(&format!("fn load_src(p: vec2i) -> vec4f {{\n    {load}\n}}\n"));
+    let mut store = String::new();
+    for &plane in to.planes() {
+        store.push_str(match plane {
+            Plane::Rgba => "    textureStore(dst_rgba, p, from_codes(load_src(p)));\n",
+            Plane::Y => "    textureStore(dst_y, p, vec4f(load_src(p).x, 0.0, 0.0, 1.0));\n",
+            Plane::A => "    textureStore(dst_a, p, vec4f(load_src(p).w, 0.0, 0.0, 1.0));\n",
+            Plane::Uv => "    store_uv(p);\n",
+        });
+    }
+    if to.planes().contains(&Plane::Uv) {
+        s.push_str(
+            "// The mean chroma of the luma pixels of a UV texel, written by its first pixel.\n\
+             fn store_uv(p: vec2i) {\n    \
+             let s = vec2i(lc.dst_scale);\n    \
+             if (any(p % s != vec2i(0))) { return; }\n    \
+             var sum = vec2f(0.0);\n    var n = 0.0;\n    \
+             for (var dy = 0; dy < s.y; dy++) {\n        for (var dx = 0; dx < s.x; dx++) {\n            \
+             let q = p + vec2i(dx, dy);\n            \
+             if (all(q < vec2i(lc.size))) { sum += load_src(q).yz; n += 1.0; }\n        }\n    }\n    \
+             textureStore(dst_uv, p / s, vec4f(sum / n, 0.0, 1.0));\n}\n",
+        );
+    }
+    s.push_str(&format!(
+        "@compute @workgroup_size({WORKGROUP}, {WORKGROUP})\nfn main(@builtin(global_invocation_id) id: vec3u) {{\n    \
+         if (any(id.xy >= lc.size)) {{ return; }}\n    let p = vec2i(id.xy);\n{store}}}\n"
+    ));
+    format!("{}{s}", include_str!("convert_layout.wgsl"))
+}
+
+impl Converter {
+    /// The pass converting textures of layout `from` into `to` (see [`LayoutConvert`]).
+    fn layout_pass(&self, key: LayoutPass) -> (wgpu::ComputePipeline, wgpu::BindGroupLayout) {
+        let mut passes = self.layouts.lock().unwrap_or_else(|e| e.into_inner());
+        passes
+            .entry(key)
+            .or_insert_with(|| {
+                let (from, to, deep, f16) = key;
+                let source = layout_source(from, to, deep, f16);
+                let mut entries = vec![entry(0, UNIFORM)];
+                for b in 0..from.planes().len() {
+                    // textureLoad only: 32-bit float planes cannot be filtered.
+                    entries.push(entry(b as u32 + 1, texture(wgpu::TextureSampleType::Float { filterable: false })));
+                }
+                for (b, &plane) in to.planes().iter().enumerate() {
+                    entries.push(entry(
+                        LAYOUT_FIRST_DST + b as u32,
+                        wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: crate::runtime::plane_format(plane, deep, f16),
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                    ));
+                }
+                let label = "gpufx layout convert";
+                let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{label}: {}", e.emit_to_string(&source)));
+                let layout =
+                    self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some(label), entries: &entries });
+                let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(label),
+                    bind_group_layouts: &[Some(&layout)],
+                    immediate_size: 0,
+                });
+                let pipeline = ShaderCache::compute_pipeline(
+                    self.cache.as_deref(),
+                    &self.device,
+                    &PipelineDesc { label, layout: &pipeline_layout, entries: &entries, entry: "main" },
+                    module,
+                    &["convert layout", "main", &source],
+                    None,
+                );
+                (pipeline, layout)
+            })
+            .clone()
+    }
+}
+
+/// A pass converting the textures of an effect output or an input pad from one
+/// `pixel_layout` into another, on the GPU: RGBA (straight alpha, as effects work) to and
+/// from Y'CbCr planes holding the stored codes of a frame (0..1, in the matrix and range
+/// of the graph's first input), and between plane layouts without going through RGBA.
+/// Chroma is the mean of the pixels of a UV texel when subsampled and the nearest UV
+/// texel when upsampled; a missing alpha is 1, a missing chroma neutral. One thread per
+/// luma pixel, at the size of Y.
+pub(crate) struct LayoutConvert {
+    pipeline: wgpu::ComputePipeline,
+    group: wgpu::BindGroup,
+    uniform: wgpu::Buffer,
+    from: PixelLayout,
+    to: PixelLayout,
+    size: (u32, u32),
+}
+
+impl LayoutConvert {
+    /// `src` and `dst` hold the planes of `layouts` (from, to), in their order, for a luma `size`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        device: &wgpu::Device,
+        conv: &Converter,
+        layouts: (PixelLayout, PixelLayout),
+        src: &[wgpu::Texture],
+        dst: &[wgpu::Texture],
+        size: (u32, u32),
+        deep: bool,
+        f16: bool,
+    ) -> Self {
+        let (from, to) = layouts;
+        let (pipeline, layout) = conv.layout_pass((from, to, deep, f16));
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gpufx layout convert"),
+            size: LAYOUT_UNIFORM_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let level0 = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor { mip_level_count: Some(1), ..Default::default() });
+        let views: Vec<wgpu::TextureView> = src.iter().chain(dst).map(level0).collect();
+        let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }];
+        for (b, v) in views.iter().enumerate() {
+            let binding = if b < src.len() { b as u32 + 1 } else { LAYOUT_FIRST_DST + (b - src.len()) as u32 };
+            entries.push(wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(v) });
+        }
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gpufx layout convert"),
+            layout: &layout,
+            entries: &entries,
+        });
+        LayoutConvert { pipeline, group, uniform, from, to, size }
+    }
+
+    /// Records the pass, with the matrix and range of `color`.
+    pub fn encode(&self, queue: &wgpu::Queue, color: &ColorInfo, cpass: &mut wgpu::ComputePass) {
+        let (kr, kb) = color.matrix.kr_kb();
+        let full = (color.range == crate::frame::Range::Full) as u32;
+        let (fx, fy) = self.from.chroma_scale();
+        let (tx, ty) = self.to.chroma_scale();
+        let words: [u32; 12] = [kr.to_bits(), kb.to_bits(), full, 0, self.size.0, self.size.1, fx, fy, tx, ty, 0, 0];
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        queue.write_buffer(&self.uniform, 0, &bytes);
+        cpass.set_pipeline(&self.pipeline);
+        cpass.set_bind_group(0, &self.group, &[]);
+        cpass.dispatch_workgroups(self.size.0.div_ceil(WORKGROUP), self.size.1.div_ceil(WORKGROUP), 1);
+    }
 }

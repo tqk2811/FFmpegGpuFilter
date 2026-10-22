@@ -285,9 +285,10 @@ fn gpufx_output_enabled(i: u32) -> bool   // output i của pass (0 = out_tex, k
 
 ### Pixel layout (plane)
 
-> Đang làm dở: phần manifest và shader đã có, nhưng core chưa nạp plane từ frame và chưa convert giữa các layout, nên
-> effect có `pixel_layout` khác `rgba` bị từ chối trong graph (và trong filter) với lỗi
-> `pixel_layout other than rgba is not supported in a graph yet`.
+> Frame vẫn vào và ra dạng RGBA: core convert trên GPU giữa layout của nguồn và layout mà input của effect yêu cầu
+> (không convert giữa các effect cùng layout), và convert output có plane về RGBA cho frame. Plane giữ mã Y'CbCr theo
+> matrix và range của input đầu (0..1), chroma lấy trung bình khi giảm xuống 4:2:0/4:2:2 và lặp lại khi tăng. Nạp và
+> ghi plane của frame trực tiếp làm sau. Output có plane không cấp được cho input `mipmaps`.
 
 `pixel_layout` trên input, output, hoặc texture giữa các pass (`intermediates`) chọn bộ texture mà shader thấy. Đây
 không phải tên pixel format: các format cùng loại chỉ khác cách xếp plane và bit depth, shader thấy cùng một bộ texture

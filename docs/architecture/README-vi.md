@@ -114,56 +114,56 @@ Tóm tắt `manifest.json`:
   (`default` nếu không có nhãn); prelude thêm `gpufx_input_count/size/load`.
 - Output cuối cũng có thể mang `repeat` (chỉ WGSL): option node `outputs=N` (mặc định là `default`) nở nó thành các
   output `<name>0..N-1`, tổng cộng tối đa 4 output. Cách hoạt động, cho lập trình viên:
-  - **Nở**: [`Manifest::with_output_count`](../../crates/gpufx-core/src/manifest.rs#L835) thay output bằng các bản sao (cùng
+  - **Nở**: [`Manifest::with_output_count`](../../crates/gpufx-core/src/manifest.rs#L1) thay output bằng các bản sao (cùng
     `bypass`) và thay tên trong mọi danh sách `outputs`/`inputs` của pass bằng tên các bản sao, tại chỗ, rồi validate lại,
     nên runtime và graph chỉ thấy manifest có output cố định.
-  - **Giữ cả hai số**: [`Package`](../../crates/gpufx-core/src/package.rs#L17) giữ manifest như lúc viết; số bản sao
+  - **Giữ cả hai số**: [`Package`](../../crates/gpufx-core/src/package.rs#L1) giữ manifest như lúc viết; số bản sao
     lưu thẳng trong package (`input_copies`, `output_copies`), không suy từ hiệu số độ dài; `with_output_count`
     và `with_input_count` nở lại từ đó và giữ nguyên số còn lại, nên node graph vừa gán input `repeat` theo tên vừa có
     `outputs=N` không mất N.
-  - **Option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1328) lấy `outputs=N` ra khỏi inline option lúc mở package
+  - **Option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1562) lấy `outputs=N` ra khỏi inline option lúc mở package
     của node và dựng lại effect cho N (option không tới phía gọi như một param). Lệnh runtime `node.outputs` bị
-    [`find_param`](../../crates/gpufx-core/src/graph.rs#L1958) từ chối: số pad đã chốt. Output pad của graph, tức `nb_outputs` của
+    [`find_param`](../../crates/gpufx-core/src/graph.rs#L1) từ chối: số pad đã chốt. Output pad của graph, tức `nb_outputs` của
     filter `gpufx`, suy ra từ effect đã nở như mọi effect.
   - **Bind**: bản sao là output pass bình thường, bind `out_tex`, `out_tex1`...; chỉ prelude của pass ghi chúng thêm `gpufx_output_count()`
     và `gpufx_write_at(i, ...)`, một `switch` theo output của pass, cùng `gpufx_copy_count()` và `gpufx_write_copy(j, ...)`
     = `gpufx_write_at(first + j, ...)` với `first` là vị trí bản sao đầu trong danh sách của pass
-    ([`pass_copies`](../../crates/gpufx-core/src/runtime.rs#L1080), [prelude](../../crates/gpufx-core/src/runtime.rs#L1129)).
+    ([`pass_copies`](../../crates/gpufx-core/src/runtime.rs#L1), [prelude](../../crates/gpufx-core/src/runtime.rs#L1129)).
     Pass khác không có gì thêm, nên source và key shader cache của chúng giữ như trước khi có tính năng này.
     `gpufx_output_size` chạy một lần cho mỗi bản sao với chỉ số output effect của nó, và luật "một pass, một kích thước"
     có sẵn áp cho các bản sao.
   - **Kiểm lúc nạp**: `max` lớn hơn số vừa bên cạnh các output khác, và tên khác dạng `<name>d+`, bị từ chối ở
-    [`validate`](../../crates/gpufx-core/src/manifest.rs#L604); output không ghi `max` thì `parse` đặt bằng số vừa.
+    [`validate`](../../crates/gpufx-core/src/manifest.rs#L1); output không ghi `max` thì `parse` đặt bằng số vừa.
 - Output có thể `optional`: option node `<name>=off` tắt nó. Cách làm, cho lập trình viên:
-  - **Bỏ hẳn, không phải cờ**: [`Manifest::with_outputs_off`](../../crates/gpufx-core/src/manifest.rs#L951) chuyển output
+  - **Bỏ hẳn, không phải cờ**: [`Manifest::with_outputs_off`](../../crates/gpufx-core/src/manifest.rs#L1) chuyển output
     từ `outputs` sang `off_outputs`, chạy trước `with_output_count` (nên kiểm 4 output sau khi nở chỉ đếm output còn lại);
     graph, FFI và filter `gpufx` thấy một effect ít output hơn, `nb_outputs` theo đó mà phía C không phải sửa.
-    [`Package::with_outputs`](../../crates/gpufx-core/src/package.rs#L87) dựng lại từ manifest gốc (giữ cho mọi package có
+    [`Package::with_outputs`](../../crates/gpufx-core/src/package.rs#L1) dựng lại từ manifest gốc (giữ cho mọi package có
     output tuỳ chọn) và giữ danh sách tắt cạnh số bản sao.
   - **Pass giữ nguyên binding**: pass vẫn liệt kê texture đó, nên `out_tex{k}` và `gpufx_write{k}` còn nguyên, shader biên
-    dịch không đổi; [`make_bound`](../../crates/gpufx-core/src/runtime.rs#L991) bind nó vào một texture thế chỗ 1x1 đúng
-    format làm việc, và [`plan`](../../crates/gpufx-core/src/graph.rs#L405) không cấp texture pool cho nó. Ghi storage ngoài
+    dịch không đổi; [`make_bound`](../../crates/gpufx-core/src/runtime.rs#L1) bind nó vào một texture thế chỗ 1x1 đúng
+    format làm việc, và [`plan`](../../crates/gpufx-core/src/graph.rs#L1) không cấp texture pool cho nó. Ghi storage ngoài
     khoảng bị bỏ (hoặc rơi vào texture thế chỗ), nên ghi vào đó không hiện ra đâu. Pass chỉ ghi output đã tắt thì
     `set_used_outputs` có sẵn bỏ qua (không ai cần).
   - **Không gì đọc output tuỳ chọn** (kiểm ở `validate`): không thì pass sau sẽ đọc texture thế chỗ.
   - **Chỉ số size giữ như đã viết**: `off_indices` giữ vị trí của từng output đã tắt, và
-    [`Manifest::size_index`](../../crates/gpufx-core/src/manifest.rs#L987) đổi một output còn lại (hoặc một bản sao,
+    [`Manifest::size_index`](../../crates/gpufx-core/src/manifest.rs#L1) đổi một output còn lại (hoặc một bản sao,
     sau `with_output_count`) về chỉ số đó cho `gpufx_output_size`, nên shader định kích thước theo chỉ số không cần
     xét `off`. Các bước kiểm kích thước bỏ qua output đã tắt (texture thế chỗ không có kích thước riêng).
-  - **Hàm hỗ trợ**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1102) thêm `gpufx_output_enabled(i)` (mỗi
+  - **Hàm hỗ trợ**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1) thêm `gpufx_output_enabled(i)` (mỗi
     output tắt một phép `i != k`, không có thì `true`) chỉ cho pass ghi output tuỳ chọn, giống các hàm của `repeat`: pass
     khác giữ nguyên source và key shader cache.
-  - **Option** được lấy ra khỏi inline option ở [graph.rs](../../crates/gpufx-core/src/graph.rs#L1338) cùng `outputs=N`
+  - **Option** được lấy ra khỏi inline option ở [graph.rs](../../crates/gpufx-core/src/graph.rs#L1572) cùng `outputs=N`
     (dựng lại effect một lần cho cả hai); lệnh lúc chạy gọi tên output thì `find_param` báo lỗi.
 - Kích thước output: mặc định bằng input đầu; shader đặt khác bằng hàm tuỳ chọn `gpufx_output_size(out_index)` của pass
   ghi output đó (chỉ đọc `params`, `gpufx_input_count()`, `gpufx_input_size(i)`). Tính một lần bằng một dispatch GPU lúc configure,
   từ giá trị param khi đó; 0 hoặc quá `max_texture_dimension_2d` của GPU là lỗi, đổi kích thước về sau thì xử lý báo lỗi. Các node graph phía sau thấy size đã lan truyền.
   Cách làm, cho lập trình viên:
   - **Tìm hàm**: pass có định kích thước output khi module naga của shader đã biên dịch có function tên đúng `gpufx_output_size`
-    ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1263)), không dò chuỗi trong source (comment không tính). Pass đó có thêm một pipeline một thread gọi hàm
+    ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1271)), không dò chuỗi trong source (comment không tính). Pass đó có thêm một pipeline một thread gọi hàm
     ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L540)).
-  - **Param hàm đọc**: `params_read` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1418)) duyệt IR naga của entry point kích thước và mọi function nó gọi
-    (`Statement::Call`, kể cả block lồng, [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1456)), ghi mỗi `AccessIndex` trên global `params` (group 0, binding 1)
+  - **Param hàm đọc**: `params_read` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1426)) duyệt IR naga của entry point kích thước và mọi function nó gọi
+    (`Statement::Call`, kể cả block lồng, [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1464)), ghi mỗi `AccessIndex` trên global `params` (group 0, binding 1)
     là đọc một field. Một field là cả một param: param `vec2`/`color` tính là một. Khi không quy được về field (đọc cả block,
     vd truyền hoặc copy cả struct, hay `Access` chỉ số động) thì coi như đọc mọi param: an toàn, không sót.
   - **Khi nào**: `Effect::output_sizes` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L711)) tính kích thước một lần bằng dispatch + readback, giữ lại cùng kích
@@ -225,24 +225,39 @@ Kiểm tra shader trước khi chạy: naga phân tích và validate, lỗi tr�
 trí trong mã (thử: `gpufx check <gói>`). Filter FFmpeg in lỗi đó qua `av_log` và từ chối khởi
 tạo graph thay vì chạy sai.
 
-### Plane (`pixel_layout`, bước A: phần manifest và shader)
+### Plane (`pixel_layout`)
 
 - **Key của plane**: texture có layout khác `rgba` được bind thành mỗi plane một texture, key `<name>.y`, `<name>.uv`,
-  `<name>.a` ([`PixelLayout::plane_key`](../../crates/gpufx-core/src/manifest.rs#L185); `.` không phải identifier nên không tên nào khác trùng được); texture
-  `rgba` giữ key là tên của nó. Texture input của effect theo thứ tự [`Manifest::input_keys`](../../crates/gpufx-core/src/manifest.rs#L950), nên effect
+  `<name>.a` ([`PixelLayout::plane_key`](../../crates/gpufx-core/src/manifest.rs#L1); `.` không phải identifier nên không tên nào khác trùng được); texture
+  `rgba` giữ key là tên của nó. Texture input của effect theo thứ tự [`Manifest::input_keys`](../../crates/gpufx-core/src/manifest.rs#L1), nên effect
   không có plane bind y như trước.
-- **Prelude thứ hai**: chỉ pass đụng tới plane ([`Manifest::pass_has_planes`](../../crates/gpufx-core/src/manifest.rs#L930)) mới có
-  [`PassPlanes`](../../crates/gpufx-core/src/runtime.rs#L1251) và [`plane_prelude`](../../crates/gpufx-core/src/runtime.rs#L1297); mọi pass khác giữ nguyên từng byte prelude cũ, nên key
+- **Prelude thứ hai**: chỉ pass đụng tới plane ([`Manifest::pass_has_planes`](../../crates/gpufx-core/src/manifest.rs#L1)) mới có
+  [`PassPlanes`](../../crates/gpufx-core/src/runtime.rs#L1) và [`plane_prelude`](../../crates/gpufx-core/src/runtime.rs#L1); mọi pass khác giữ nguyên từng byte prelude cũ, nên key
   shader cache không đổi. Binding vẫn theo vị trí: các plane storage theo thứ tự, cái đầu ở 2, các cái sau xếp sau
   texture đọc (`extra_output_binding` đếm trên bộ texture đã nở).
-- **Format plane**: [`plane_format`](../../crates/gpufx-core/src/runtime.rs#L80) chọn `r16float`/`rg16float` khi [`plane_f16`](../../crates/gpufx-core/src/runtime.rs#L71) thấy adapter cho
+- **Format plane**: [`plane_format`](../../crates/gpufx-core/src/runtime.rs#L1) chọn `r16float`/`rg16float` khi [`plane_f16`](../../crates/gpufx-core/src/runtime.rs#L71) thấy adapter cho
   chúng làm storage (format feature riêng của adapter), không thì `r32float`/`rg32float`. Texture float 32 bit không
-  lọc được, nên entry layout của texture đọc ghi `filterable: false` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1568)).
-- **Kiểm manifest** ([`validate_layouts`](../../crates/gpufx-core/src/manifest.rs#L869)): 4 storage texture mỗi pass đếm sau khi nở, plane chỉ cho WGSL và
+  lọc được, nên entry layout của texture đọc ghi `filterable: false` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1576)).
+- **Kiểm manifest** ([`validate_layouts`](../../crates/gpufx-core/src/manifest.rs#L1)): 4 storage texture mỗi pass đếm sau khi nở, plane chỉ cho WGSL và
   không dùng với `mipmaps`/`repeat`.
-- **Chưa nối**: graph từ chối effect có plane ([`no_planes`](../../crates/gpufx-core/src/graph.rs#L736)); pool, convert frame và convert giữa các layout
-  làm ở bước B. Output bị tắt giữ layout của nó (`off_layouts`) để stand-in 1x1 có đúng format plane
-  ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1050)).
+- **Convert giữa layout (bước B1)**: [`plan`](../../crates/gpufx-core/src/graph.rs#L473) gắn cho input của effect có nguồn khác
+  `pixel_layout` (input pad luôn là `rgba`, output effect theo layout trong manifest) một
+  [`LayoutConvert`](../../crates/gpufx-core/src/convert.rs#L1023) chạy ngay trước effect, sống hết các pass của nó và dùng chung cho
+  các bên đọc cùng nguồn cùng layout; nguồn cùng layout thì bind thẳng (không có pass). Output của graph có plane đọc
+  một convert sang `rgba` sau mọi effect, nên frame vẫn vào ra qua bộ convert RGBA. Shader sinh theo (from, to, deep,
+  plane 16 bit) ([`layout_source`](../../crates/gpufx-core/src/convert.rs#L918)): plane giữ mã Y'CbCr lưu trữ (0..1) theo matrix và
+  range của frame input đầu, chroma lấy trung bình các pixel của một texel UV khi giảm và texel gần nhất khi tăng,
+  convert plane sang plane không đi qua RGBA.
+- **Khoá pool của plane**: texture trong pool là (kích thước, mips, plane) ([`Slot`](../../crates/gpufx-core/src/graph.rs#L321)), format
+  theo `plane_format`; output của pass lấy một texture mỗi plane theo plane key, kích thước theo `plane_size`, còn
+  liveness vẫn tính theo tên. [`effect_inputs`](../../crates/gpufx-core/src/graph.rs#L366) bind effect theo thứ tự `input_keys` từ plane
+  của nguồn ([`Effect::output_planes`](../../crates/gpufx-core/src/runtime.rs#L1133)) hoặc texture của convert.
+- **Giới hạn**: effect bị tắt có input hoặc output có plane thì đi qua một layout convert thay cho copy
+  ([`bind_copies`](../../crates/gpufx-core/src/graph.rs#L214)); input pad mà effect đọc dạng plane thì không đọc tại chỗ
+  ([`converted_pads`](../../crates/gpufx-core/src/graph.rs#L342)); output có plane không ghi thẳng vào frame và không cho input
+  `mipmaps` đọc ([`check_plane_mips`](../../crates/gpufx-core/src/graph.rs#L325)). Output bị tắt giữ layout của nó (`off_layouts`) để
+  stand-in 1x1 có đúng format plane ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1050)). Nạp và ghi plane của frame trực tiếp
+  (không qua RGBA) là bước B2.
 
 ## 5. Filter FFmpeg `gpufx`
 
@@ -335,8 +350,8 @@ CPU hay CUDA.
 ### Chuyển đổi format dựng sẵn (format của frame ↔ RGBA)
 
 Hiệu ứng không bao giờ thấy format của frame. gpufx-core bọc mỗi graph bằng hai stage compute dựng sẵn, ghi vào
-cùng một lần submit GPU với các pass hiệu ứng (`run` cho frame CPU, [graph.rs](../../crates/gpufx-core/src/graph.rs#L680), và `run_gpu` cho frame GPU,
-[graph.rs](../../crates/gpufx-core/src/graph.rs#L847)):
+cùng một lần submit GPU với các pass hiệu ứng (`run` cho frame CPU, [graph.rs](../../crates/gpufx-core/src/graph.rs#L888), và `run_gpu` cho frame GPU,
+[graph.rs](../../crates/gpufx-core/src/graph.rs#L1066)):
 
 ```mermaid
 flowchart TD
@@ -346,7 +361,7 @@ flowchart TD
     D --> E["frame planes của output"]
 ```
 
-1. **Convert in**: `InputSlot::encode` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L604)) ghi một dispatch cho
+1. **Convert in**: `InputSlot::encode` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L610)) ghi một dispatch cho
    mỗi input, đổi các plane thành texture RGBA mà pass hiệu ứng đầu tiên sample.
 2. **Hiệu ứng**: texture của các pass là `rgba8unorm`, hoặc `rgba16float` khi graph "deep" (quy tắc bên dưới). Tác giả
    shader luôn thấy cùng một texture màu dù frame ban đầu là gì.
@@ -354,9 +369,9 @@ flowchart TD
    tất cả plane (đường fused YUV) ghi các plane của format output từ kết quả RGBA.
 
 Stage nào chỉ là một bản copy thì bị bỏ qua. Input `rgba` straight từ CPU được upload thành `rgba8unorm` và đọc tại chỗ
-(`InputKey::direct`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L427), gán ở
-[graph.rs](../../crates/gpufx-core/src/graph.rs#L535)). Input `rgba` straight là frame Vulkan được đọc tại chỗ khi graph
-không deep và không hiệu ứng nào đọc mip chain của nó ([graph.rs](../../crates/gpufx-core/src/graph.rs#L548)); output GPU
+(`InputKey::direct`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L433), gán ở
+[graph.rs](../../crates/gpufx-core/src/graph.rs#L729)). Input `rgba` straight là frame Vulkan được đọc tại chỗ khi graph
+không deep và không hiệu ứng nào đọc mip chain của nó ([graph.rs](../../crates/gpufx-core/src/graph.rs#L742)); output GPU
 `rgba` straight có thể do chính pass cuối của hiệu ứng ghi (`direct_out`, mô tả ở mục "Frame Vulkan").
 
 Việc chuyển đổi **không** làm: không có transfer function (gamma/PQ/HLG) và không đổi primaries. Các giá trị trong
@@ -369,7 +384,7 @@ sao primaries và transfer sang phía RGBA của một lần đổi bằng swsca
 
 | File | Vai trò |
 |------|---------|
-| [convert.rs](../../crates/gpufx-core/src/convert.rs) | Phía Rust: `Converter` (pipeline theo device, [L52](../../crates/gpufx-core/src/convert.rs#L52)), `InputSlot` (stage input, [L440](../../crates/gpufx-core/src/convert.rs#L440)), `GpuOutputSlot` (output frame GPU, [L617](../../crates/gpufx-core/src/convert.rs#L617)), `OutputSlot` và `read_outputs` (output đọc về CPU, [L748](../../crates/gpufx-core/src/convert.rs#L748), [L875](../../crates/gpufx-core/src/convert.rs#L875)), `uniform` ([L370](../../crates/gpufx-core/src/convert.rs#L370)) |
+| [convert.rs](../../crates/gpufx-core/src/convert.rs) | Phía Rust: `Converter` (pipeline theo device, [L52](../../crates/gpufx-core/src/convert.rs#L54)), `InputSlot` (stage input, [L440](../../crates/gpufx-core/src/convert.rs#L446)), `GpuOutputSlot` (output frame GPU, [L617](../../crates/gpufx-core/src/convert.rs#L623)), `OutputSlot` và `read_outputs` (output đọc về CPU, [L748](../../crates/gpufx-core/src/convert.rs#L754), [L875](../../crates/gpufx-core/src/convert.rs#L881)), `uniform` ([L370](../../crates/gpufx-core/src/convert.rs#L376)) |
 | [convert.wgsl](../../crates/gpufx-core/src/convert.wgsl) | Ghép vào đầu mọi shader chuyển đổi: struct uniform `Conv` ([L5](../../crates/gpufx-core/src/convert.wgsl#L5)) và các hàm `code_max`, `code_scale`, `kg` |
 | [convert_in.wgsl](../../crates/gpufx-core/src/convert_in.wgsl) | `pixel(id)`: plane sang RGBA straight của một pixel (range, upsample chroma, ma trận, alpha). Không có entry point |
 | [convert_in_plain.wgsl](../../crates/gpufx-core/src/convert_in_plain.wgsl) | Entry point, workgroup 8x8, chroma đọc thẳng từ plane (frame upload từ CPU) |
@@ -385,34 +400,34 @@ sao primaries và transfer sang phía RGBA của một lần đổi bằng swsca
 Toàn bộ text shader được ghép trong Rust và biên dịch theo device bởi `Converter` (tạo cùng context ở
 [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L229)):
 
-- `pipeline()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L92)) nối `convert.wgsl` với một body (`include_str!`),
+- `pipeline()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L97)) nối `convert.wgsl` với một body (`include_str!`),
   parse bằng naga rồi gọi `ShaderCache::compute_pipeline`. Toàn bộ source nằm trong key của cache
   (`&["convert", "main", &source]`), nên cache trên đĩa (xem "Cache shader trên đĩa") không cần cơ chế vô hiệu hoá thêm
   khi sửa file `.wgsl`. Các pipeline này được dựng không kèm package (`pkg = None`), nên `gpufx pack --precompile` không
   làm nóng cũng không lưu chúng: chúng được biên dịch (hoặc đọc từ cache trên đĩa) khi context tạo ra chúng, hoặc ở lần dùng
   đầu với loại lazy.
-- Input ([convert.rs](../../crates/gpufx-core/src/convert.rs#L120)): `convert_in_source(deep, unorm)` sinh bốn binding plane
+- Input ([convert.rs](../../crates/gpufx-core/src/convert.rs#L125)): `convert_in_source(deep, unorm)` sinh bốn binding plane
   `plane0..3` (binding 2..5) và các hàm `load0..3`, rồi nối `convert_in.wgsl`, rồi entry point plain hoặc tiled. `unorm`
   chọn kiểu texture plane: `texture_2d<u32>` cho upload từ CPU (load trả về mã đã lưu) hoặc `texture_2d<f32>` cho frame
   GPU (`round(texel * 255 hoặc 65535)` cho lại mã). `deep` thay text `rgba16float` bằng `rgba8unorm` trong
   `convert_in.wgsl`, nên mọi chỗ có chữ `rgba16float` trong file đó đều bị thay. Tổng cộng bốn pipeline (CPU hoặc GPU,
   8-bit hoặc deep). Cặp CPU dựng trong `Converter::new`; cặp GPU dựng ở frame GPU đầu tiên (`OnceLock`).
-- Output ra buffer ([convert.rs](../../crates/gpufx-core/src/convert.rs#L180)): `convert_out.wgsl` và
+- Output ra buffer ([convert.rs](../../crates/gpufx-core/src/convert.rs#L185)): `convert_out.wgsl` và
   `convert_out_buffer.wgsl`, một pipeline cho mọi format và mọi plane; khác biệt giữa các plane nằm hết trong uniform.
   Nó đọc RGBA bằng `textureLoad` trên texture float non-filterable, nên nguồn `rgba8unorm` và `rgba16float` dùng chung.
-- Output ra image của plane ([convert.rs](../../crates/gpufx-core/src/convert.rs#L236)): `convert_out_image.wgsl` với
+- Output ra image của plane ([convert.rs](../../crates/gpufx-core/src/convert.rs#L242)): `convert_out_image.wgsl` với
   text `STORAGE_FORMAT` được thay bằng tên storage format WGSL trong `PLANE_FORMATS`
-  ([L72](../../crates/gpufx-core/src/convert.rs#L72): `r8unorm`, `rg8unorm`, `rgba8unorm` và ba bản 16-bit). Mỗi format
+  ([L72](../../crates/gpufx-core/src/convert.rs#L77): `r8unorm`, `rg8unorm`, `rgba8unorm` và ba bản 16-bit). Mỗi format
   texture của plane có một pipeline dựng lazy.
-- Output YUV fused ([convert.rs](../../crates/gpufx-core/src/convert.rs#L269); `fused_source`,
-  [L283](../../crates/gpufx-core/src/convert.rs#L283)): mỗi `PixelFormat` một pipeline dựng lazy (mảng cỡ `PIXEL_FORMATS`,
-  [L315](../../crates/gpufx-core/src/convert.rs#L315)). Rust sinh các binding storage `dst0..` của các plane của format và hai
+- Output YUV fused ([convert.rs](../../crates/gpufx-core/src/convert.rs#L275); `fused_source`,
+  [L283](../../crates/gpufx-core/src/convert.rs#L289)): mỗi `PixelFormat` một pipeline dựng lazy (mảng cỡ `PIXEL_FORMATS`,
+  [L315](../../crates/gpufx-core/src/convert.rs#L321)). Rust sinh các binding storage `dst0..` của các plane của format và hai
   hàm shader gọi: `store_luma` (plane 0, thêm plane 3 cho alpha của `yuva*`) và `store_chroma` (plane 1 và 2, hoặc
   plane 1 hai kênh của semi-planar). Kênh nào texture plane có mà format không dùng thì ghi 0, alpha 1.
 - Bind group được cache: `InputSlot` giữ một LRU các bind group theo texture plane của các frame GPU gần đây, và
   `GpuOutputSlot` giữ một LRU theo cặp (source, planes) gần đây, nên pool frame quay vòng chỉ bind một lần.
 
-Uniform `Conv` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L370), 112 byte) mang kích thước frame, kích thước chroma
+Uniform `Conv` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L376), 112 byte) mang kích thước frame, kích thước chroma
 và subsampling, loại plane, cờ alpha, depth, shift, range, cờ premultiplied, `kr`/`kb`, vị trí chroma (siting) và, với
 output, hình học của plane cùng việc mỗi mẫu xen kẽ chứa kênh nào (Y/R, U/G, V/B, A). Struct WGSL
 ([convert.wgsl](../../crates/gpufx-core/src/convert.wgsl#L5)) và danh sách word bên Rust phải cùng thứ tự; đổi kích thước
@@ -439,17 +454,17 @@ Theo từng pixel, `pixel()` trong [convert_in.wgsl](../../crates/gpufx-core/src
 Hai entry point khác nhau ở cách lấy chroma. `convert_in_plain` là một invocation cho mỗi pixel, mỗi pixel có tới bốn
 lần load chroma có clamp. `convert_in_tiled` (frame GPU) để mỗi workgroup 16x16 nạp các mẫu chroma nó cần một lần vào
 `uv_tile` (tối đa 18x18 phần tử; `uv_width = 15 / sub_x + 3`), chờ ở barrier, rồi gọi cùng `pixel()`; giá trị giống hệt.
-`in_group()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L40)) quyết định kích thước dispatch và phải khớp
+`in_group()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L42)) quyết định kích thước dispatch và phải khớp
 `workgroup_size` của entry point đang dùng.
 
-Frame CPU: `InputSlot::pool_keys` ([L461](../../crates/gpufx-core/src/convert.rs#L461)) liệt kê các texture upload (mỗi plane
-một cái, format số nguyên từ `plane_format`, [L356](../../crates/gpufx-core/src/convert.rs#L356)) và đích RGBA; `upload`
-([L568](../../crates/gpufx-core/src/convert.rs#L568)) ghi các plane và uniform. Frame GPU: `use_gpu_frame`
-([L586](../../crates/gpufx-core/src/convert.rs#L586)) bind thẳng texture plane của frame và chỉ upload uniform. Plane mà
+Frame CPU: `InputSlot::pool_keys` ([L461](../../crates/gpufx-core/src/convert.rs#L467)) liệt kê các texture upload (mỗi plane
+một cái, format số nguyên từ `plane_format`, [L356](../../crates/gpufx-core/src/convert.rs#L362)) và đích RGBA; `upload`
+([L568](../../crates/gpufx-core/src/convert.rs#L574)) ghi các plane và uniform. Frame GPU: `use_gpu_frame`
+([L586](../../crates/gpufx-core/src/convert.rs#L592)) bind thẳng texture plane của frame và chỉ upload uniform. Plane mà
 format không có được bind vào một texture dummy 1x1 (`Converter::dummy`).
 
-**Deep hay không** (`work_format`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L22)): format có `depth > 8` đòi
-`rgba16float`. Graph là deep khi có input hoặc output nào đòi nó ([graph.rs](../../crates/gpufx-core/src/graph.rs#L543));
+**Deep hay không** (`work_format`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L24)): format có `depth > 8` đòi
+`rgba16float`. Graph là deep khi có input hoặc output nào đòi nó ([graph.rs](../../crates/gpufx-core/src/graph.rs#L737));
 texture của mọi pass trong graph và các pipeline chuyển đổi đi theo. `rgba16float` giữ khoảng 11 bit, nên `rgba64le`
 vào và ra không giữ được đủ 16 bit.
 
@@ -481,7 +496,7 @@ mẫu trong plane, còn `encode()` ([L51](../../crates/gpufx-core/src/convert_ou
 - **Depth**: `encode()` làm tròn gần nhất rồi clamp. Format planar 10-bit lưu mã ở các bit thấp, P010 dịch lên bit cao
   (`shift` = 6). Mẫu dài 1 hoặc 2 byte (`bytes`); đường buffer đóng gói little-endian.
 - **Giới hạn kích thước**: `OutputSlot::new` báo lỗi nếu một plane cần hơn `max_storage_buffer_binding_size`
-  ([convert.rs](../../crates/gpufx-core/src/convert.rs#L759)); các đường image ghi texture nên không có giới hạn này.
+  ([convert.rs](../../crates/gpufx-core/src/convert.rs#L765)); các đường image ghi texture nên không có giới hạn này.
 
 #### Format output được chọn thế nào
 
@@ -540,7 +555,7 @@ Lớp C chỉ cho qua những format GPU đọc được và dùng swscale cho p
 
 1. [frame.rs](../../crates/gpufx-core/src/frame.rs): thêm variant `PixelFormat`, dòng `NAMES`, tăng cả hai hằng `12`
    (`NAMES`, `ALL`) và thêm một dòng `layout()` (kind, depth, shift, subsampling, alpha). Đặt variant **ở cuối** và đổi
-   `PIXEL_FORMATS` trong [convert.rs](../../crates/gpufx-core/src/convert.rs#L315) (`Yuva444p as usize + 1`) sang variant
+   `PIXEL_FORMATS` trong [convert.rs](../../crates/gpufx-core/src/convert.rs#L321) (`Yuva444p as usize + 1`) sang variant
    cuối mới. Nếu format là tổ hợp của thứ đã có (YUV hoặc RGBA planar hay semi-planar, depth tới 16, subsampling 1 hoặc 2,
    plane alpha tuỳ chọn) thì `plane_dims`, `plane_texture_format`, `plane_format`, `uniform` và các shader không cần
    sửa; `from_name` và `gpufx_format_supported` đi theo `NAMES`.

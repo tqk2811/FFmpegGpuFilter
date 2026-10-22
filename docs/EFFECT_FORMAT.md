@@ -287,9 +287,11 @@ fn gpufx_output_enabled(i: u32) -> bool   // pass output i (0 = out_tex, k = out
 
 ### Pixel layout (planes)
 
-> Work in progress: the manifest and the shader side are in place, but the core does not yet feed planes from frames
-> nor convert between layouts, so an effect with a `pixel_layout` other than `rgba` fails in a graph (and so in the
-> filter) with `pixel_layout other than rgba is not supported in a graph yet`.
+> Frames still come in and go out as RGBA: the core converts on the GPU between the layout of a source and the layout
+> an effect input asks for (none between effects of the same layout), and an output with planes back to RGBA for the
+> frame. Planes hold the Y'CbCr codes of the matrix and range of the first input (0..1), chroma averaged going down to
+> 4:2:0/4:2:2 and repeated going up. Loading and writing frame planes directly comes later. An output with planes cannot
+> feed a `mipmaps` input.
 
 `pixel_layout` on an input, an output, or a texture between passes (`intermediates`) chooses the textures the shader
 sees. It is not a pixel format: the formats of one kind only differ in plane packing and bit depth, the shader sees the
