@@ -627,7 +627,10 @@ fn inline_options_are_split_unescaped_and_named() {
     let err = |item: &str| parse_effect_item(item).unwrap_err().to_string();
     assert!(err("a.zip=k=1:k=2").contains("key `k` given twice"), "{}", err("a.zip=k=1:k=2"));
     assert!(err("a.zip=enable=1:enable=0").contains("given twice"));
-    assert!(err("a.zip=1").contains("is not key=value"), "{}", err("a.zip=1"));
+    // Values without `key=` are positional (named once the effect is open), and come first.
+    assert_eq!(parse_effect_item("a.zip=1&t/2:k=3").unwrap().1, opts(&[("", "1"), ("", "t/2"), ("k", "3")]));
+    assert!(err("a.zip=k=3&1").contains("effect `a.zip`: positional value `1` after a named key"), "{}", err("a.zip=k=3&1"));
+    assert!(err("a.zip=1&&2").contains("empty option"));
     assert!(err("a.zip==1").contains("has no key"));
     assert!(err("a.zip=k='1").contains("unclosed `'`"));
 }
@@ -657,6 +660,15 @@ fn inline_options_set_parameters_and_keep_the_rest_for_the_caller() {
     assert_eq!(chain.effects()[1].params().get("strength").unwrap().0[0], 0.5);
     assert_eq!(chain.inline_options()[1].len(), 2);
     assert!(chain.inline_options()[0].is_empty());
+
+    // Positional values take the parameters in manifest order (vignette: strength, radius,
+    // color), in a chain and in a graph node, and reach the caller named as if written so.
+    for text in ["invert.zip | vignette.zip=0.5&t/2:enable=gt(t,2)", "[0]invert.zip|vignette.zip=0.5&t/2&enable=gt(t,2)[x]"] {
+        let g = graph(&ctx, text).unwrap();
+        assert_eq!(g.effects()[1].params().get("strength").unwrap().0[0], 0.5, "{text}");
+        let named = [("strength", "0.5"), ("radius", "t/2"), ("enable", "gt(t,2)")].map(|(k, v)| (k.to_string(), v.to_string()));
+        assert_eq!(g.inline_options()[1], named, "{text}");
+    }
 }
 
 #[test]
@@ -666,7 +678,10 @@ fn inline_option_mistakes_are_explained() {
         ("[0]vignette.zip=amount=1[a]", "effect `vignette.zip` has no parameter `amount` (keys: strength, radius, color, enable, bypass)"),
         ("[0]vignette.zip=strength=1:strength=2[a]", "key `strength` given twice"),
         ("[0]vignette.zip=bypass=1[a]", "bypass is 0 or auto"),
-        ("[0]vignette.zip=0.5[a]", "is not key=value"),
+        ("[0]vignette.zip=strength=0.5&0.5[a]", "effect `vignette.zip`: positional value `0.5` after a named key"),
+        ("[0]vignette.zip=0.5&0.2&#fff&1[a]", "effect `vignette.zip`: 4 positional values, but it has 3 parameters"),
+        ("[0]vignette.zip=0.5&strength=1[a]", "effect `vignette.zip`: key `strength` given twice"),
+        ("[0]invert.zip=1&2[a]", "effect `invert.zip`: 2 positional values, but it has 1 parameter"),
         // Names given to a node of several effects belong to one of them.
         ("[0]invert.zip|vignette.zip=amount=1[a]", "has no parameter `amount`"),
     ];

@@ -52,11 +52,16 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 Tham số được viết **inline**, ngay sau tên package, giống option của một filter FFmpeg gốc:
 `pkg.zip=key=value:key2=value2`. Dùng được trong `graph=` (kể cả chain: `graph='a.zip=k=1|b.zip'`) và trong
-mọi node của `graph=`. Key phải có tên, giá trị là hằng số hoặc biểu thức (`t`, `n`, `w`, `h`, `a`, `sar`, `dar`),
+mọi node của `graph=`. Giá trị là hằng số hoặc biểu thức (`t`, `n`, `w`, `h`, `a`, `sar`, `dar`),
 và có hai key dành riêng cho từng instance effect: `enable=<expr>` bật/tắt effect đó theo từng frame, còn
 `bypass=0|auto` chọn input mà nó copy khi đang tắt. Chúng khác với option timeline `enable=` và option `bypass=`
 của chính filter, vốn nằm ngoài chuỗi effect. Key lạ, key cho hai lần, hoặc `bypass` khác `0`/`auto` là lỗi, có
 nêu tên effect và key.
+
+Giống FFmpeg (`scale=1280:720`), có thể bỏ key: giá trị không có `key=` lấy lần lượt các parameter của effect theo
+thứ tự `params` trong manifest, nên `scale.zip=1280&-2` chính là `scale.zip=w=1280&h=-2`. Giá trị theo vị trí phải
+đứng trước mọi key có tên, không được nhiều hơn số parameter, còn `enable`/`bypass` luôn phải ghi tên; một
+parameter vừa cho theo vị trí vừa cho theo tên là lỗi "given twice".
 
 - Bọc cả giá trị `graph=` trong `'...'`. FFmpeg tách option của filter tại `:` *sau khi* đã bỏ các dấu
   nháy đó, nên phân tách các key inline bằng `&` (`graph='x.zip=a=1&b=2'`, không cần escape ở tầng FFmpeg). Dấu
