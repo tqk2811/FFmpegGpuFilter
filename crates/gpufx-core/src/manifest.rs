@@ -108,7 +108,7 @@ pub struct InputDef {
 /// format: the formats of one kind only differ in plane packing and bit depth, the shader
 /// sees the same float textures. `rgba` (the default) is one RGBA texture; the others are
 /// planes: Y (`r`), UV (`rg`, subsampled as named, sizes rounded up) and A (`r`, full size).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PixelLayout {
     #[default]
@@ -122,7 +122,7 @@ pub enum PixelLayout {
 }
 
 /// One texture of a [`PixelLayout`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Plane {
     Rgba,
     Y,

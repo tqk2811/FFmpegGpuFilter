@@ -60,6 +60,7 @@ Quyết định trong mục này ghi đè các chữ "đề xuất" bên dưới
 
 - (9) Bước A (2026-10-23) chọn thêm: ghi plane bằng `gpufx_write{k}_<plane>(p: vec2u, v)` với `p` là texel của chính plane (đúng ví dụ trên), kèm `gpufx_chroma_scale{k}()`; input/output `rgba` trong pass có plane giữ tên cũ. Plane chỉ cho WGSL, không cho input `mipmaps`/`repeat` và output lặp. Plane 32 bit khai `filterable: false` (chỉ `textureLoad`). Graph từ chối effect có plane tới khi bước B nối convert/pool.
 - (8) Bộ convert hiện KHÔNG ghi được `gray` trên GPU (test-bundle 2026-10-23: `out_format=gray is not converted on the GPU`). Layout `y` phải thêm đường ghi gray vào convert, hoặc đổi format ra mặc định của `y`.
+- (10) Bước B1 (2026-10-23) chọn thêm: plane giữ mã Y'CbCr lưu trữ chuẩn hoá 0..1 theo thang 8 bit (limited: Y = (16 + 219y)/255, C = (128 + 224c)/255; full: C = c + 128/255), matrix và range lấy từ frame input đầu của graph. Giảm chroma = trung bình các pixel của texel UV, tăng = texel gần nhất. Convert dùng chung cho các bên đọc cùng nguồn cùng layout; nguồn khác layout của effect bị tắt đi qua layout convert thay copy. Input pad cấp cho input có plane không đọc tại chỗ (GPU), output có plane không ghi thẳng frame; output có plane cấp cho input `mipmaps` báo lỗi. B2 phải giữ đúng quy ước mã này khi nạp/ghi plane frame (10 bit: mã / 1023 lệch nhẹ so với thang 8 bit, cần chốt).
 
 ## Điểm cần chốt khi làm
 
