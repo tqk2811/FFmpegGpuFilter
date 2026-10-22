@@ -13,3 +13,15 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
     gpufx_write(id, vec4f(0.0));
 }
+
+// The output: the inputs side by side, the same height (0, an error, when one differs).
+fn gpufx_output_size(out_index: u32) -> vec2u {
+    let first = gpufx_input_size(0u);
+    var size = first;
+    for (var i = 1u; i < gpufx_input_count(); i++) {
+        let s = gpufx_input_size(i);
+        if (s.y != first.y) { return vec2u(0u); }
+        size.x += s.x;
+    }
+    return size;
+}

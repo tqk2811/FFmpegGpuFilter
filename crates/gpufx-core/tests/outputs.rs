@@ -106,15 +106,37 @@ impl Packages {
         pkgs.add(
             "stk",
             r#"{"id":"t.stk","name":"Stack","api":1,"used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"b"}],
-                "output":[{"name":"color"},{"name":"side","size":"hstack"}],
+                "output":[{"name":"color"},{"name":"side"}],
                 "groups":[{"passes":[{"shader":"c.wgsl","inputs":["a"],"output":["color"]},{"shader":"s.wgsl","inputs":["a","b"],"output":["side"]}]}]}"#,
             &[
                 ("c.wgsl", wgsl("gpufx_write(id, textureLoad(a, vec2i(id.xy), 0).bgra);")),
                 (
                     "s.wgsl",
-                    wgsl("let wa = i32(textureDimensions(a).x);\n    let p = vec2i(id.xy);\n    if (f32(id.x) >= globals.size.x) { return; }\n    if (p.x < wa) { gpufx_write(id, textureLoad(a, p, 0)); } else { gpufx_write(id, textureLoad(b, vec2i(p.x - wa, p.y), 0)); }"),
+                    format!("{}{}", wgsl("let wa = i32(textureDimensions(a).x);\n    let p = vec2i(id.xy);\n    if (f32(id.x) >= globals.size.x) { return; }\n    if (p.x < wa) { gpufx_write(id, textureLoad(a, p, 0)); } else { gpufx_write(id, textureLoad(b, vec2i(p.x - wa, p.y), 0)); }"), "fn gpufx_output_size(o: u32) -> vec2u { if (o == 0u) { return gpufx_input_size(0u); } return vec2u(gpufx_input_size(0u).x + gpufx_input_size(1u).x, gpufx_input_size(0u).y); }\n"),
                 ),
             ],
+        );
+        // Sized by params: the top-left `w`x`h` of the input (0 when a param is 0).
+        let crop_params =
+            r#""params":[{"name":"w","type":"int","default":4,"min":0,"max":100},{"name":"h","type":"int","default":3,"min":0,"max":100}]"#;
+        pkgs.add(
+            "crop",
+            &format!(r#"{{"id":"t.crop","name":"Crop","api":1,"used_for":["gpufx"],{crop_params},"groups":[{{"passes":[{{"shader":"c.wgsl"}}]}}]}}"#),
+            &[(
+                "c.wgsl",
+                format!(
+                    "{}fn gpufx_output_size(o: u32) -> vec2u {{ return vec2u(u32(params.w), u32(params.h)); }}\n",
+                    wgsl("gpufx_write(id, textureLoad(src, vec2i(id.xy), 0));")
+                ),
+            )],
+        );
+        pkgs.add(
+            "cropglsl",
+            &format!(r#"{{"id":"t.cropglsl","name":"Crop GLSL","api":1,"used_for":["gpufx"],{crop_params},"groups":[{{"passes":[{{"shader":"c.glsl"}}]}}]}}"#),
+            &[(
+                "c.glsl",
+                "#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\nuvec2 gpufx_output_size(uint o) { return uvec2(uint(params.w), uint(params.h)); }\nvoid main() {\n    uvec3 id = gl_GlobalInvocationID;\n    if (!gpufx_in_bounds(id)) { return; }\n    gpufx_write(id, texelFetch(sampler2D(src, smp), ivec2(id.xy), 0));\n}\n".to_string(),
+            )],
         );
         pkgs
     }
@@ -367,4 +389,80 @@ fn outputs_have_their_own_sizes_and_passes_run_at_them() {
         .flat_map(|y| [&a[y * wa as usize * 4..(y + 1) * wa as usize * 4], &b[y * wb as usize * 4..(y + 1) * wb as usize * 4]].concat())
         .collect();
     assert_eq!(side, want, "the second pass ran at the stacked size");
+}
+
+#[test]
+fn without_a_size_function_an_output_has_the_first_input_size() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    // `color` is written by a pass without gpufx_output_size.
+    let g = pkgs.graph(&ctx, "stk.zip").unwrap();
+    assert_eq!(g.output_size(0, &[(7, 3), (2, 3)]).unwrap(), (7, 3));
+    let g = pkgs.graph(&ctx, "key.zip").unwrap();
+    assert_eq!(g.output_size(1, &[(7, 3)]).unwrap(), (7, 3));
+}
+
+/// The top-left `w`x`h` of a W x H input.
+fn cropped(src: &[u8], w: u32, h: u32) -> Vec<u8> {
+    (0..h as usize).flat_map(|y| src[y * W as usize * 4..(y * W as usize + w as usize) * 4].to_vec()).collect()
+}
+
+fn run_sized(g: &mut EffectGraph, input: &[u8], w: u32, h: u32) -> Result<Vec<u8>, Error> {
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    g.process(&[img(input)], vec![ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }], &FrameInfo::new(0.0, 0))?;
+    Ok(out)
+}
+
+#[test]
+fn params_size_an_output_in_wgsl_and_glsl() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(3);
+    for name in ["crop", "cropglsl"] {
+        let mut g = pkgs.graph(&ctx, &format!("{name}.zip=w=6:h=5")).unwrap();
+        assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (6, 5), "{name}");
+        assert_eq!(run_sized(&mut g, &src, 6, 5).unwrap(), cropped(&src, 6, 5), "{name}");
+        let mut g = pkgs.graph(&ctx, &format!("{name}.zip")).unwrap();
+        assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (4, 3), "{name}: the defaults");
+        assert_eq!(run_sized(&mut g, &src, 4, 3).unwrap(), cropped(&src, 4, 3), "{name}");
+    }
+}
+
+#[test]
+fn a_zero_size_is_an_error() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let g = pkgs.graph(&ctx, "crop.zip=w=0").unwrap();
+    let err = g.output_size(0, &[(W, H)]).unwrap_err().to_string();
+    assert!(err.contains("gpufx_output_size gives 0x3"), "{err}");
+}
+
+#[test]
+fn a_param_change_that_changes_the_size_is_an_error() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(1);
+    let mut g = pkgs.graph(&ctx, "crop.zip").unwrap();
+    assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (4, 3));
+    run_sized(&mut g, &src, 4, 3).unwrap();
+    g.set_param("w", &[5.0]).unwrap();
+    let err = run_sized(&mut g, &src, 4, 3).unwrap_err().to_string();
+    assert!(err.contains("5x3"), "{err}");
+}
+
+#[test]
+fn scale_follows_ffmpeg_size_rules() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let size = |opts: &str, ins: (u32, u32)| pkgs.graph(&ctx, &format!("scale.zip={opts}")).unwrap().output_size(0, &[ins]).unwrap();
+    assert_eq!(size("w=1280:h=-2", (1920, 1080)), (1280, 720));
+    assert_eq!(size("w=-1:h=360", (1920, 1080)), (640, 360));
+    // 300 * 1000 / 562 = 533.8, the nearest multiple of 4 is 532.
+    assert_eq!(size("w=-4:h=300", (1000, 562)), (532, 300));
+    assert_eq!(size("w=-1:h=-1", (1000, 562)), (1000, 562));
+    assert_eq!(size("w=0:h=-2", (1001, 563)), (1001, 564));
+    // Same size: the bilinear samples fall on the pixel centers.
+    let src = gradient(2);
+    let mut g = pkgs.graph(&ctx, &format!("scale.zip=w={W}:h={H}")).unwrap();
+    assert_eq!(run_sized(&mut g, &src, W, H).unwrap(), src);
 }

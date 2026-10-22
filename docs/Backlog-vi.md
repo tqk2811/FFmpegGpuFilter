@@ -22,12 +22,6 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
 - **Ngày ghi**: 2026-10-19
 
-### [Thấp] `size` của output chưa có giá trị thu nhỏ (`half`, `scale`)
-- **Vấn đề**: mỗi phần tử `output` của manifest đã có `size` riêng và pass chạy ở kích thước output nó ghi, nhưng `size` mới chỉ có `first`/`hstack`/`vstack`. Chưa làm được matte nửa độ phân giải hay output thu nhỏ theo hệ số.
-- **Vị trí**: [manifest.rs](../crates/gpufx-core/src/manifest.rs) (`enum OutputSize`, `OutputSize::apply`), tài liệu `docs/EFFECT_FORMAT.md` mục "Several outputs".
-- **Vì sao**: user chốt (2026-10-23) chưa làm trong đợt effect nhiều output. Thêm `half` hoặc `{"scale": 0.5}` chỉ cần mở rộng `OutputSize` (kèm làm tròn, kiểm tối thiểu 1 px) và test pixel; runtime/pool đã cấp texture theo kích thước từng pass.
-- **Ngày ghi**: 2026-10-23
-
 ### [Thấp] Manifest chưa kiểm giới hạn 16 texture đọc mỗi pass
 - **Vấn đề**: một pass đọc tối đa 16 texture (input kể cả mọi pad của `repeat`, texture package, output pass trước), nhưng manifest không đếm; vượt thì wgpu báo lỗi khó hiểu lúc tạo bind group layout.
 - **Vị trí**: các kiểm tra pass trong [manifest.rs](../crates/gpufx-core/src/manifest.rs), và `compile_pass` trong [runtime.rs](../crates/gpufx-core/src/runtime.rs).
@@ -186,7 +180,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 ### [Thấp] Frame đổi kích thước giữa chừng: thiết kế để sau
 - **Vấn đề**: `check_frame` báo lỗi khi input đổi kích thước giữa luồng; effect không ra được output đổi kích thước theo thời gian. User tạm bỏ vì phức tạp; zoom to dần dùng canvas trong suốt cố định (input đầu) thay thế.
 - **Vị trí**: [vf_gpufx.c:1684](../ffmpeg/vf_gpufx.c#L1684) (`check_frame`), [vf_gpufx.c:2067](../ffmpeg/vf_gpufx.c#L2067) (biến `w`/`h` lấy từ outlink), [vf_gpufx.c:2127](../ffmpeg/vf_gpufx.c#L2127) (`ff_get_video_buffer` theo link), `vf_gpufx_transfer.c` (`transfer_setup`)
-- **Vì sao / cách làm**: core (`graph.rs` `prepare`) đã dựng lại slot khi đổi cỡ. Phần C cần cache frames context theo (sw_format, w, h) như `old_frames`/`config_out_frames` của `vf_gpufx_ai_upscale.c`, kích thước theo từng frame cho output, biến biểu thức, passthrough, pool upload; `gpufx_upload`/`download` cấu hình lại. Output động cần `output.size` dạng biểu thức + API FFI `_at`. Giới hạn của FFmpeg: chỉ `scale`, `libplacebo`, `format`, `null`, buffersink... nhận frame khác cỡ link; encoder giữ cỡ frame đầu.
+- **Vì sao / cách làm**: core (`graph.rs` `prepare`) đã dựng lại slot khi đổi cỡ. Phần C cần cache frames context theo (sw_format, w, h) như `old_frames`/`config_out_frames` của `vf_gpufx_ai_upscale.c`, kích thước theo từng frame cho output, biến biểu thức, passthrough, pool upload; `gpufx_upload`/`download` cấu hình lại. Output động cần kích thước output đổi được giữa chừng (hiện `gpufx_output_size` chỉ tính một lần lúc configure) + API FFI `_at`. Giới hạn của FFmpeg: chỉ `scale`, `libplacebo`, `format`, `null`, buffersink... nhận frame khác cỡ link; encoder giữ cỡ frame đầu.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] `xfade.zip` `custom`: thiếu hàm đọc pixel `a0..a3`/`b0..b3`

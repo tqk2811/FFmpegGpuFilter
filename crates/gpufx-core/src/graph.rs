@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::convert::{read_outputs, readback_key, work_format, GpuOutputSlot, InputKey, InputSlot, OutputSlot};
 use crate::frame::{Frame, FrameMut, GpuFrame, PixelFormat};
-use crate::manifest::{OutputSize, StreamInfo};
+use crate::manifest::StreamInfo;
 use crate::mips::MipChain;
 use crate::params::ParamBlock;
 use crate::pool::PoolKey;
@@ -449,24 +449,18 @@ fn check_nodes<'a>(
 /// within the `max` texture side of the device.
 fn node_size(fx: &Effect, ins: &[(u32, u32)], max: u32) -> Result<Vec<(u32, u32)>, Error> {
     let m = &fx.package().manifest;
-    (0..m.outputs.len())
-        .map(|o| {
+    let sizes = fx.output_sizes(ins)?;
+    for (o, &(w, h)) in sizes.iter().enumerate() {
+        if w > max || h > max {
             let what = if m.outputs.len() == 1 {
                 format!("output of `{}`", m.name)
             } else {
                 format!("output `{}` of `{}`", m.outputs[o].name, m.name)
             };
-            let Some((w, h)) = m.output_size(o, ins) else {
-                let streams: Vec<StreamInfo> = ins.iter().map(|&(width, height)| StreamInfo { format: None, width, height }).collect();
-                m.check_inputs(&streams)?;
-                return Err(Error::Unsupported(format!("{what}: the size overflows")));
-            };
-            if w > max || h > max {
-                return Err(Error::Unsupported(format!("{what} would be {w}x{h}; this GPU allows at most {max} a side")));
-            }
-            Ok((w, h))
-        })
-        .collect()
+            return Err(Error::Unsupported(format!("{what} would be {w}x{h}; this GPU allows at most {max} a side")));
+        }
+    }
+    Ok(sizes)
 }
 
 /// Size of every effect output for the given pad sizes (see [`node_size`]).
@@ -539,7 +533,7 @@ fn prepare(
         return Err(Error::Frame(format!("effect writes {} outputs, got {}", topo.outputs.len(), outs.len())));
     }
     // Effects that stack their inputs write a size no input pad has.
-    let stacked = if effects.iter().any(|fx| fx.package().manifest.outputs.iter().any(|o| o.size != OutputSize::First)) {
+    let stacked = if effects.iter().any(|fx| fx.program.has_size_functions()) {
         let planned: &[InputKey] = io.layout.as_ref().map_or(&[], |l| &l.keys);
         let pads: Vec<(u32, u32)> = (0..topo.nb_inputs)
             .map(|i| match (inputs.get(i), planned.get(i)) {
@@ -558,7 +552,10 @@ fn prepare(
         if let Some(sizes) = &stacked {
             let (w, h) = sizes[k];
             if (out.width, out.height) != (w, h) {
-                return Err(Error::Frame(format!("{what} is {}x{}, the effect writes {w}x{h}", out.width, out.height)));
+                return Err(Error::Frame(format!(
+                    "{what} is {}x{}, the effect writes {w}x{h} (a size from gpufx_output_size must not change while the stream runs, e.g. with a parameter)",
+                    out.width, out.height
+                )));
             }
             continue;
         }
@@ -1900,6 +1897,12 @@ impl EffectGraph {
 
     pub fn output_count(&self) -> usize {
         self.topo.outputs.len()
+    }
+
+    /// Some effect sizes an output in its shader (`gpufx_output_size`): sizes then need
+    /// the GPU (not the noop device).
+    pub fn has_size_functions(&self) -> bool {
+        self.effects.iter().any(|fx| fx.program.has_size_functions())
     }
 
     /// Labels of the outputs, in the order they are written.

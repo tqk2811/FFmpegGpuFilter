@@ -1,0 +1,45 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.scale",
+  "name": "Scale",
+  "used_for": ["gpufx"],
+  "version": "1.0.0",
+  "description": "Resizes the picture with bilinear sampling, with FFmpeg scale's width and height rules.",
+  "inputs": [
+    {
+      "name": "src"
+    }
+  ],
+  "params": [
+    {
+      "name": "w",
+      "type": "int",
+      "default": -1,
+      "min": -64,
+      "max": 16384,
+      "description": "Output width; 0 = the input's, -n = from the height keeping the aspect ratio, a multiple of n"
+    },
+    {
+      "name": "h",
+      "type": "int",
+      "default": -1,
+      "min": -64,
+      "max": 16384,
+      "description": "Output height; 0 = the input's, -n = from the width keeping the aspect ratio, a multiple of n"
+    }
+  ],
+  "output": [
+    {
+      "name": "out"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/scale.wgsl"
+        }
+      ]
+    }
+  ]
+}

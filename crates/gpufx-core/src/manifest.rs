@@ -110,38 +110,6 @@ fn default_repeat_max() -> u32 {
     MAX_REPEAT
 }
 
-/// Size of the effect output, from the sizes of its inputs.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OutputSize {
-    /// The size of the first input.
-    #[default]
-    First,
-    /// Inputs side by side: same height, widths summed.
-    Hstack,
-    /// Inputs top to bottom: same width, heights summed.
-    Vstack,
-}
-
-impl OutputSize {
-    /// The output size for these input sizes; `None` when they do not fit the rule
-    /// (see [`Manifest::check_inputs`]) or the sum overflows.
-    pub fn apply(self, sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let first = *sizes.first()?;
-        match self {
-            OutputSize::First => Some(first),
-            OutputSize::Hstack => {
-                sizes.iter().all(|s| s.1 == first.1).then_some(())?;
-                Some((sizes.iter().try_fold(0u32, |a, s| a.checked_add(s.0))?, first.1))
-            }
-            OutputSize::Vstack => {
-                sizes.iter().all(|s| s.0 == first.0).then_some(())?;
-                Some((first.0, sizes.iter().try_fold(0u32, |a, s| a.checked_add(s.1))?))
-            }
-        }
-    }
-}
-
 /// Limits on one frame dimension, in pixels.
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -180,9 +148,6 @@ pub struct OutputDef {
     /// and every other format the runtime writes on the GPU ([`crate::PixelFormat`]).
     #[serde(default = "default_output_formats")]
     pub formats: Vec<String>,
-    /// Size of the output; the passes writing it run at that size.
-    #[serde(default)]
-    pub size: OutputSize,
     /// The input this output passes when the effect is switched off; the first when omitted.
     #[serde(default)]
     pub bypass: Option<String>,
@@ -522,12 +487,7 @@ impl Manifest {
         if m.outputs.is_empty() {
             // One output: what the last pass writes first (every group must write it).
             let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
-            m.outputs.push(OutputDef {
-                name: last.unwrap_or_else(|| "out".into()),
-                formats: default_output_formats(),
-                size: OutputSize::First,
-                bypass: None,
-            });
+            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), formats: default_output_formats(), bypass: None });
         }
         m.validate()?;
         Ok(m)
@@ -702,18 +662,6 @@ impl Manifest {
                         names.push(out);
                     }
                 }
-                // The textures of one pass are written in one dispatch: one size.
-                let sizes: Vec<&OutputDef> = self.outputs.iter().filter(|o| pass.outputs.contains(&o.name)).collect();
-                if let Some(o) = sizes.iter().find(|o| o.size != sizes[0].size) {
-                    return bad(format!(
-                        "{} writes the outputs `{}` and `{}` of different sizes ({:?}, {:?}); one pass writes one size",
-                        at(i),
-                        sizes[0].name,
-                        o.name,
-                        sizes[0].size,
-                        o.size
-                    ));
-                }
             }
             for (i, pass) in passes.iter().enumerate() {
                 for out in &pass.outputs {
@@ -731,23 +679,13 @@ impl Manifest {
                     return bad(format!("{group}output `{}`: {what}; exactly one pass must", o.name));
                 }
             }
-            // A texture written by several passes keeps one size.
-            for (i, pass) in passes.iter().enumerate() {
-                for out in &pass.outputs {
-                    if let Some(j) = (0..i).find(|&j| {
-                        passes[j].outputs.contains(out)
-                            && self.outputs[self.pass_size(&passes[j])].size != self.outputs[self.pass_size(pass)].size
-                    }) {
-                        return bad(format!("{} writes `{out}` at another size than pass {j}", at(i)));
-                    }
-                }
-            }
         }
         Ok(())
     }
 
     /// The output whose size pass `pass` runs at: the first effect output it writes, else
-    /// output 0 (textures only passes read have the size of the first output).
+    /// output 0 (textures only passes read have the size of the first output). The sizes
+    /// come from the shaders (`gpufx_output_size`), checked when they are known.
     pub fn pass_size(&self, pass: &PassDef) -> usize {
         self.outputs.iter().position(|o| pass.outputs.contains(&o.name)).unwrap_or(0)
     }
@@ -828,13 +766,6 @@ impl Manifest {
         let first = (streams[0].width, streams[0].height);
         for (def, s) in self.inputs.iter().zip(streams) {
             let fail = |msg: String| Error::Unsupported(format!("input `{}` of `{}`: {msg}", def.name, self.name));
-            let stacks = |size: OutputSize| self.outputs.iter().any(|o| o.size == size);
-            if stacks(OutputSize::Hstack) && s.height != first.1 {
-                return Err(fail(format!("height {} must equal the first input's ({}) to stack side by side", s.height, first.1)));
-            }
-            if stacks(OutputSize::Vstack) && s.width != first.0 {
-                return Err(fail(format!("width {} must equal the first input's ({}) to stack top to bottom", s.width, first.0)));
-            }
             if let Some(f) = s.format {
                 if !def.formats.is_empty() && !def.formats.iter().any(|x| x == f) {
                     return Err(fail(format!("pixel format `{f}` is not supported (accepted: {})", def.formats.join(", "))));
@@ -886,11 +817,6 @@ impl Manifest {
         }
         m.validate()?;
         Ok(m)
-    }
-
-    /// Size of output `k` for these input sizes, `None` when they break its size rule.
-    pub fn output_size(&self, k: usize, sizes: &[(u32, u32)]) -> Option<(u32, u32)> {
-        self.outputs[k].size.apply(sizes)
     }
 
     /// Checks that output `k` may have `format`.
@@ -1026,21 +952,13 @@ mod tests {
                 .as_bytes(),
             )
         };
-        let m =
-            parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"min":1,"max":3}}]"#, r#","output":[{"name":"out","size":"hstack"}]"#)
-                .unwrap();
+        let m = parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"min":1,"max":3}}]"#, "").unwrap();
         let e = m.with_input_count(Some(3)).unwrap();
         let names: Vec<&str> = e.inputs.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, ["a", "s0", "s1", "s2"]);
         assert_eq!(e.groups[0].passes[0].inputs.as_deref().unwrap(), ["a", "s0", "s1", "s2"]);
         assert_eq!(m.with_input_count(None).unwrap().inputs.len(), 3);
         assert!(m.with_input_count(Some(4)).unwrap_err().to_string().contains("takes 1 to 3 inputs, got 4"));
-        assert_eq!(e.output_size(0, &[(2, 5), (3, 5), (4, 5), (1, 5)]), Some((10, 5)));
-        assert_eq!(e.output_size(0, &[(2, 5), (3, 4), (4, 5), (1, 5)]), None);
-        let err = e.check_inputs(&[info("rgba", 2, 5), info("rgba", 3, 4), info("rgba", 1, 5), info("rgba", 1, 5)]).unwrap_err();
-        assert!(err.to_string().contains("height 4 must equal"), "{err}");
-        assert_eq!(OutputSize::Vstack.apply(&[(4, 1), (4, 2)]), Some((4, 3)));
-        assert_eq!(OutputSize::Hstack.apply(&[(u32::MAX, 1), (1, 1)]), None);
         // Rules on the rules.
         assert!(parse(r#"[{"name":"s","repeat":{"default":2}},{"name":"a"}]"#, "").unwrap_err().to_string().contains("only the last"));
         assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":5,"max":3}}]"#, "").is_err());
@@ -1266,19 +1184,15 @@ mod tests {
         let m = parse("", r#"{"shader":"a.wgsl","output":["tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"output":["res"]}"#).unwrap();
         assert_eq!(m.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["res"]);
         // Two outputs, one written by a middle pass, with their own formats, sizes and bypass.
-        let two = r#","output":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"],"size":"hstack","bypass":"bg"}]"#;
+        let two = r#","output":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"],"bypass":"bg"}]"#;
         let m =
             parse(two, r#"{"shader":"a.wgsl","output":["matte","tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"output":["color"]}"#).unwrap();
         assert_eq!(m.output_index("matte"), Some(1));
         assert_eq!((m.output_bypass(0), m.output_bypass(1)), (0, 1));
-        assert_eq!(m.output_size(1, &[(2, 3), (4, 3)]), Some((6, 3)));
-        assert_eq!(m.output_size(0, &[(2, 3), (4, 3)]), Some((2, 3)));
         assert_eq!(m.pass_size(&m.groups[0].passes[0]), 1);
         assert_eq!(m.pass_size(&m.groups[0].passes[1]), 0);
         m.check_output_format(1, "gray").unwrap();
         assert!(m.check_output_format(0, "gray").unwrap_err().to_string().contains("output `color` of `X`"));
-        // A stacked output asks the inputs to stack.
-        assert!(m.check_inputs(&[info("rgba", 2, 3), info("rgba", 2, 4)]).unwrap_err().to_string().contains("to stack side by side"));
         let both = r#","output":[{"name":"color"},{"name":"matte"}]"#;
         parse(both, r#"{"shader":"a.wgsl","output":["color","matte"]}"#).unwrap();
         let err = |extra: &str, passes: &str| parse(extra, passes).unwrap_err();
@@ -1299,11 +1213,8 @@ mod tests {
         assert!(err(both, twice).contains("output `color`: passes [0, 1] write it"));
         // A texture nobody reads and that is no output is a mistake.
         assert!(err(r#","output":[{"name":"color"}]"#, one).contains("writes `matte`, which no later pass reads"));
-        // One pass writes one size.
-        let sized = r#","output":[{"name":"color"},{"name":"matte","size":"vstack"}]"#;
-        assert!(err(sized, one).contains("of different sizes"));
-        let resized = r#"{"shader":"a.wgsl","output":["tmp"]},{"shader":"b.wgsl","inputs":["src"],"output":["matte","tmp"]},{"shader":"c.wgsl","inputs":["tmp"],"output":["color"]}"#;
-        assert!(err(sized, resized).contains("pass 1 writes `tmp` at another size than pass 0"));
+        // The size is the shader's business now.
+        assert!(err(r#","output":[{"name":"color","size":"hstack"}]"#, one).contains("unknown field `size`"));
         // The output is named like a param: `<output>=off` would be ambiguous.
         let param = Manifest::parse(
             br#"{"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"color","type":"float"}],"output":[{"name":"color"}],"groups":[{"passes":[{"shader":"a.wgsl","output":["color"]}]}]}"#,

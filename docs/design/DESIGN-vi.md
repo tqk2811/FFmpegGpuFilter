@@ -112,9 +112,9 @@ Tóm tắt `manifest.json`:
 - `inputs` quyết định số pad input của filter (transition dùng 2 input, v.v.). Input cuối có thể mang `repeat`
   (chỉ WGSL, `{default, min, max <= 16}`): nó mở thành các pad `<name>0..N-1`, N = số nhãn mà node graph đọc
   (`default` nếu không có nhãn); prelude thêm `gpufx_input_count/size/load`.
-- `output.size`: `first` (mặc định, kích thước input đầu), `hstack` (rộng = tổng các chiều rộng, mọi input cùng
-  chiều cao) hoặc `vstack` (cao = tổng, cùng chiều rộng). Kiểm ở configure và khi đổi size; kết quả phải vừa
-  `max_texture_dimension_2d` của GPU. Các node graph phía sau thấy size đã lan truyền.
+- Kích thước output: mặc định bằng input đầu; shader đặt khác bằng hàm tuỳ chọn `gpufx_output_size(out_index)` của pass
+  ghi output đó (chỉ đọc `params`, `gpufx_input_count()`, `gpufx_input_size(i)`). Tính một lần bằng một dispatch GPU lúc configure,
+  từ giá trị param khi đó; 0 hoặc quá `max_texture_dimension_2d` của GPU là lỗi, đổi kích thước về sau thì xử lý báo lỗi. Các node graph phía sau thấy size đã lan truyền.
 - `params` được runtime **tự sinh** thành struct `params` trong shader, đúng quy tắc căn lề
   uniform của WGSL/std140; tác giả chỉ việc dùng `params.radius`.
 - `passes` chạy tuần tự; output của pass trước là texture đọc được ở pass sau; pass cuối là
@@ -189,8 +189,7 @@ Lý do thiết kế:
 - **Tắt một effect không cấp phát gì.** `enable=` / `bypass=` inline biến effect thành bản copy của một input, nên plan,
   texture trong pool và binding giữ nguyên, bật/tắt không cấp phát. `enable=` ở mức filter có thể đưa texture input đi
   tiếp mà không copy trên GPU (`passthrough`), và `bypass=auto` phục vụ transition cần tiếp tục hiện clip nó kết thúc ở đó.
-- **Framesync khi có nhiều input.** Input đầu quyết định độ dài, frame rate, SAR và (trừ khi effect xếp input bằng
-  `output.size`) kích thước; input khác lặp, bỏ hoặc giữ frame để theo nó.
+- **Framesync khi có nhiều input.** Input đầu quyết định độ dài, frame rate, SAR và (trừ khi `gpufx_output_size` của effect cho kích thước khác) kích thước; input khác lặp, bỏ hoặc giữ frame để theo nó.
 - **Kiểm chặt lúc configure**, báo lỗi nêu tên effect, input và key, thay vì chuyển đổi lặng lẽ.
 
 Đường đi của frame phía sau nằm ở [mục 6](#6-đường-đi-của-frame-và-hiệu-năng). Shader nhận gì (prelude, binding, dispatch,
@@ -512,7 +511,7 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
   pass chỉ phục vụ nó. Trong engine một cạnh là `Source::Node(effect, output)`; mỗi output có texture, kích
   thước, format, input bypass và frame ghi tại chỗ riêng. `split` và
   `null` không tốn gì: output của chúng *chính là* input (hai cạnh cùng đọc một texture).
-- Hiệu ứng ghi kích thước input đầu của nó (size xếp chồng với `output.size` `hstack`/`vstack`, lan truyền tới các node phía sau); output pad k lấy SAR và frame rate của input
+- Hiệu ứng ghi kích thước input đầu của nó (hoặc size từ `gpufx_output_size`, lan truyền tới các node phía sau); output pad k lấy SAR và frame rate của input
   pad mà nguồn của nó đi ra. Frame ra theo sự kiện của input 0 (framesync như khi có nhiều input).
 - Mỗi input pad upload một lần, mỗi output pad readback một lần, mọi output qua một buffer readback
   dùng chung; cả đồ thị chạy trong một lần submit, hiệu ứng theo thứ tự topo. Các frame output của

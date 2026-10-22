@@ -14,8 +14,7 @@
   ],
   "output": [
     {
-      "name": "out",
-      "size": "hstack"
+      "name": "out"
     }
   ],
   "groups": [

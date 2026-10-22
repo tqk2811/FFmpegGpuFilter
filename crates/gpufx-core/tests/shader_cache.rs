@@ -170,7 +170,7 @@ fn run_all_d3d12(dir: Option<&Path>) -> Option<(Vec<Vec<u8>>, Option<gpufx_core:
         .into_iter()
         .map(|mut fx| {
             let inputs = vec![Image { data: &src, width: w, height: h, stride: w * 4 }; fx.input_count()];
-            let (ow, oh) = fx.package().manifest.output_size(0, &vec![(w, h); fx.input_count()]).unwrap();
+            let (ow, oh) = fx.output_sizes(&vec![(w, h); fx.input_count()]).unwrap()[0];
             let mut out = vec![0u8; (ow * oh * 4) as usize];
             fx.process(&inputs, ImageMut { data: &mut out, width: ow, height: oh, stride: ow * 4 }, &FrameInfo::new(0.5, 3)).unwrap();
             out

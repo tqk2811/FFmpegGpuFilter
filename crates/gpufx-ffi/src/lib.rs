@@ -545,7 +545,18 @@ pub unsafe extern "C" fn gpufx_effect_output_size(
             return Err("streams, width and height must not be NULL".into());
         }
         let pads: Vec<(u32, u32)> = std::slice::from_raw_parts(streams, count as usize).iter().map(|s| (s.width, s.height)).collect();
-        let (w, h) = fx.graph.output_size(output as usize, &pads).map_err(|e| e.to_string())?;
+        let (w, h) = match fx.pending {
+            // A shader sizes an output: it runs on a GPU, not the noop device the effect is
+            // still on. Any device gives the same sizes; the parameters are the current ones.
+            Some(backend) if fx.graph.has_size_functions() => {
+                let ctx = context(backend).map_err(|e| e.to_string())?;
+                let (mut graph, _) = open_spec(&fx.spec, &ctx)?;
+                graph.copy_params_from(&fx.graph).map_err(|e| e.to_string())?;
+                graph.output_size(output as usize, &pads)
+            }
+            _ => fx.graph.output_size(output as usize, &pads),
+        }
+        .map_err(|e| e.to_string())?;
         *width = w;
         *height = h;
         Ok(0)

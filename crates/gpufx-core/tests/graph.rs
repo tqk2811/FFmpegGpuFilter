@@ -759,11 +759,12 @@ fn stack_mistakes_are_explained() {
     let mut g = graph(&ctx, "hstack.zip").unwrap();
     let rgba = |width, height| StreamInfo { format: Some("rgba"), width, height };
     let e = g.check_inputs(&[rgba(4, 3), rgba(4, 2)]).unwrap_err().to_string();
-    assert!(e.contains("input `src1` of `Horizontal Stack`: height 2 must equal the first input's (3)"), "{e}");
+    // The stack's gpufx_output_size gives 0 when a height differs.
+    assert!(e.contains("output of `Horizontal Stack`: gpufx_output_size gives 0x0"), "{e}");
     assert!(g.output_size(0, &[(4, 3), (4, 2)]).is_err());
     let v = graph(&ctx, "vstack.zip").unwrap();
     let e = v.check_inputs(&[rgba(4, 3), rgba(5, 3)]).unwrap_err().to_string();
-    assert!(e.contains("width 5 must equal the first input's (4)"), "{e}");
+    assert!(e.contains("output of `Vertical Stack`: gpufx_output_size gives 0x0"), "{e}");
     // Wider than the GPU allows.
     let max = ctx.device().limits().max_texture_dimension_2d;
     let e = g.output_size(0, &[(max, 2), (1, 2)]).unwrap_err().to_string();
@@ -779,5 +780,5 @@ fn stack_mistakes_are_explained() {
         )
         .unwrap_err()
         .to_string();
-    assert!(e.contains("must equal the first input's"), "{e}");
+    assert!(e.contains("gpufx_output_size gives 0x0"), "{e}");
 }

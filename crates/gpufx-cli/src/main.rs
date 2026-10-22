@@ -69,7 +69,7 @@ fn info(path: &str) -> Result<(), String> {
     }
     println!("outputs:");
     for o in &m.outputs {
-        println!("  {}: formats {}, size {:?}", o.name, o.formats.join(", "), o.size);
+        println!("  {}: formats {}", o.name, o.formats.join(", "));
     }
     println!("params:");
     for p in &m.params {
