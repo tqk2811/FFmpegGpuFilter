@@ -94,6 +94,21 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
 - `inputs` determines the number of input pads on the filter (a transition uses 2 inputs, etc.). The last input may
   carry `repeat` (WGSL only, `{default, min, max <= 16}`): it expands into pads `<name>0..N-1`, N = the number of
   labels the graph node reads (`default` without labels); the prelude adds `gpufx_input_count/size/load`.
+- The last output may carry `repeat` too (WGSL only): the node option `outputs=N` (default `default`) expands it into
+  outputs `<name>0..N-1`, at most 4 outputs in all. How it works, for programmers:
+  - **Expansion**: [`Manifest::with_output_count`](../../crates/gpufx-core/src/manifest.rs#L835) replaces the output by its
+    copies (same `bypass`) and the name in every pass `outputs`/`inputs` list by the copy names, in place, then validates
+    again, so the runtime and the graph only ever see a manifest with fixed outputs.
+  - **Keeping both counts**: a [`Package`](../../crates/gpufx-core/src/package.rs#L70) keeps the manifest as written;
+    `with_output_count` and `with_input_count` expand it again with the other count kept, so a graph node that also
+    names its repeated inputs keeps its `outputs=N`.
+  - **The option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1328) takes `outputs=N` out of the inline options when the
+    node's package opens and rebuilds the effect for N (the option never reaches the caller as a parameter). The graph's
+    output pads, and so the `gpufx` filter's `nb_outputs`, follow from the expanded effect as for any effect.
+  - **Binding**: the copies are ordinary pass outputs, bound `out_tex`, `out_tex1`...; the WGSL prelude adds
+    `gpufx_output_count()` and `gpufx_write_at(i, ...)`, a `switch` over the pass outputs
+    ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1110)). `gpufx_output_size` runs once per copy with the copy's
+    effect output index, and the existing "one pass, one size" check applies to the copies.
 - Output size: by default the size of the first input; a shader can set it with the optional function
   `gpufx_output_size(out_index)` of the pass that writes the output (it reads only `params`, `gpufx_input_count()` and
   `gpufx_input_size(i)`). Computed once by a one-off GPU dispatch at configure, from the param values then; 0 or above the GPU's

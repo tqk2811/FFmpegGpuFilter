@@ -112,6 +112,21 @@ Tóm tắt `manifest.json`:
 - `inputs` quyết định số pad input của filter (transition dùng 2 input, v.v.). Input cuối có thể mang `repeat`
   (chỉ WGSL, `{default, min, max <= 16}`): nó mở thành các pad `<name>0..N-1`, N = số nhãn mà node graph đọc
   (`default` nếu không có nhãn); prelude thêm `gpufx_input_count/size/load`.
+- Output cuối cũng có thể mang `repeat` (chỉ WGSL): option node `outputs=N` (mặc định là `default`) nở nó thành các
+  output `<name>0..N-1`, tổng cộng tối đa 4 output. Cách hoạt động, cho lập trình viên:
+  - **Nở**: [`Manifest::with_output_count`](../../crates/gpufx-core/src/manifest.rs#L835) thay output bằng các bản sao (cùng
+    `bypass`) và thay tên trong mọi danh sách `outputs`/`inputs` của pass bằng tên các bản sao, tại chỗ, rồi validate lại,
+    nên runtime và graph chỉ thấy manifest có output cố định.
+  - **Giữ cả hai số**: [`Package`](../../crates/gpufx-core/src/package.rs#L70) giữ manifest như lúc viết; `with_output_count`
+    và `with_input_count` nở lại từ đó và giữ nguyên số còn lại, nên node graph vừa gán input `repeat` theo tên vừa có
+    `outputs=N` không mất N.
+  - **Option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1328) lấy `outputs=N` ra khỏi inline option lúc mở package
+    của node và dựng lại effect cho N (option không tới phía gọi như một param). Output pad của graph, tức `nb_outputs` của
+    filter `gpufx`, suy ra từ effect đã nở như mọi effect.
+  - **Bind**: bản sao là output pass bình thường, bind `out_tex`, `out_tex1`...; prelude WGSL thêm `gpufx_output_count()`
+    và `gpufx_write_at(i, ...)`, một `switch` theo output của pass ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1110)).
+    `gpufx_output_size` chạy một lần cho mỗi bản sao với chỉ số output effect của nó, và luật "một pass, một kích thước"
+    có sẵn áp cho các bản sao.
 - Kích thước output: mặc định bằng input đầu; shader đặt khác bằng hàm tuỳ chọn `gpufx_output_size(out_index)` của pass
   ghi output đó (chỉ đọc `params`, `gpufx_input_count()`, `gpufx_input_size(i)`). Tính một lần bằng một dispatch GPU lúc configure,
   từ giá trị param khi đó; 0 hoặc quá `max_texture_dimension_2d` của GPU là lỗi, đổi kích thước về sau thì xử lý báo lỗi. Các node graph phía sau thấy size đã lan truyền.

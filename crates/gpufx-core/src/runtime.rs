@@ -1105,6 +1105,13 @@ fn prelude(params: &ParamBlock, inputs: &[String], arrays: &[bool], extra_output
             extra_output_binding(inputs.len(), k)
         ));
     }
+    // The outputs of the pass by index, for a repeated output whose copies the shader
+    // writes in a loop: 0 is `out_tex`, k is `out_tex{k}`; other indices are skipped.
+    s.push_str(&format!("fn gpufx_output_count() -> u32 {{ return {}u; }}\nfn gpufx_write_at(i: u32, id: vec3u, c: vec4f) {{\n    switch i {{\n        case 0u: {{ gpufx_write(id, c); }}\n", extra_outputs + 1));
+    for k in 1..=extra_outputs {
+        s.push_str(&format!("        case {k}u: {{ gpufx_write{k}(id, c); }}\n"));
+    }
+    s.push_str("        default: {}\n    }\n}\n");
     s.push_str(
         "fn gpufx_in_bounds(id: vec3u) -> bool { return f32(id.x) < globals.size.x && f32(id.y) < globals.size.y; }\n\
          fn gpufx_uv(id: vec3u) -> vec2f { return (vec2f(id.xy) + 0.5) / globals.size; }\n\

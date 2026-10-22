@@ -143,6 +143,10 @@ pub struct OutputDef {
     /// The input this output passes when the effect is switched off; the first when omitted.
     #[serde(default)]
     pub bypass: Option<String>,
+    /// The last output stands for a variable number of pads, named `<name>0`, `<name>1`...;
+    /// a graph node sets the number with its `outputs=N` option. See [`Manifest::with_output_count`].
+    #[serde(default)]
+    pub repeat: Option<RepeatRule>,
 }
 
 /// Most outputs an effect may have.
@@ -431,7 +435,7 @@ pub(crate) fn is_ident(s: &str) -> bool {
 
 /// Options of a graph node besides its parameters (`<effect>.enable`...): no param or
 /// output takes these names.
-pub(crate) const NODE_OPTIONS: &[&str] = &["enable", "bypass"];
+pub(crate) const NODE_OPTIONS: &[&str] = &["enable", "bypass", "outputs"];
 
 /// Names the generated prelude already declares.
 const RESERVED: &[&str] = &["globals", "params", "out_tex", "out_tex1", "out_tex2", "out_tex3", "smp"];
@@ -462,7 +466,7 @@ impl Manifest {
         if m.outputs.is_empty() {
             // One output: what the last pass writes first (every group must write it).
             let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
-            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None });
+            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None, repeat: None });
         }
         m.validate()?;
         Ok(m)
@@ -547,6 +551,27 @@ impl Manifest {
                 // `<output>=off` is a node option, beside the parameters.
                 return bad(format!("output `{n}` has the name of a param"));
             }
+            if let Some(r) = o.repeat {
+                if k + 1 != self.outputs.len() {
+                    return bad(format!("output `{n}`: only the last output may repeat"));
+                }
+                let fixed = self.outputs.len() as u32 - 1;
+                if r.min == 0 || r.min > r.max || r.default < r.min || r.default > r.max {
+                    return bad(format!(
+                        "output `{n}`: repeat needs 1 <= min <= default <= max (got min {}, default {}, max {})",
+                        r.min, r.default, r.max
+                    ));
+                }
+                if fixed + r.default > MAX_OUTPUTS as u32 {
+                    return bad(format!(
+                        "output `{n}`: {fixed} other outputs and {} copies by default are more than {MAX_OUTPUTS} outputs",
+                        r.default
+                    ));
+                }
+                if self.pass_lists().iter().flat_map(|(_, l)| l.iter()).any(|p| p.language() == ShaderLanguage::Glsl) {
+                    return bad(format!("output `{n}`: repeat is only for WGSL shaders"));
+                }
+            }
             if let Some(b) = &o.bypass {
                 if self.input_index(b).is_none() {
                     return bad(format!("output `{n}`: bypass `{b}` is not an input"));
@@ -561,6 +586,10 @@ impl Manifest {
         let mut param_names: Vec<&str> = Vec::new();
         for p in &self.params {
             declare(&p.name, "param", &mut param_names)?;
+            if p.name == "outputs" {
+                // `outputs=N` is the node option that sets the copies of a repeated output.
+                return bad("param name `outputs` is reserved: the node option `outputs=N` sets the copies of a repeated output".into());
+            }
             if p.name == "enable" || p.name == "bypass" {
                 // `<node>.enable` and `<node>.bypass` switch an effect of a chain or graph (the filter's `params`).
                 return bad(format!(
@@ -792,6 +821,64 @@ impl Manifest {
         Ok(m)
     }
 
+    /// The rule of the repeated output (the last one, with `repeat`), if any.
+    pub fn output_repeat(&self) -> Option<RepeatRule> {
+        self.outputs.last().and_then(|o| o.repeat)
+    }
+
+    /// The manifest with its repeated output expanded into `count` outputs (its default
+    /// when `None`) named `<name>0`, `<name>1`..., also in the lists of the passes: the one
+    /// pass writing `<name>` writes every copy there, in order, and a pass reading `<name>`
+    /// reads them all. The copies share the `bypass` of the output. A manifest without one
+    /// is returned as is; giving it a `count` fails. At most [`MAX_OUTPUTS`] outputs after
+    /// the expansion.
+    pub fn with_output_count(&self, count: Option<u32>) -> Result<Manifest, Error> {
+        let Some(rule) = self.output_repeat() else {
+            return match count {
+                None => Ok(self.clone()),
+                Some(_) => Err(Error::Manifest(format!(
+                    "effect `{}` has a fixed number of outputs (outputs=N is for a repeated output)",
+                    self.name
+                ))),
+            };
+        };
+        let n = count.unwrap_or(rule.default);
+        if n < rule.min || n > rule.max {
+            return Err(Error::Manifest(format!(
+                "effect `{}` writes {} to {} copies of its output `{}`, got outputs={n}",
+                self.name,
+                rule.min,
+                rule.max.min((MAX_OUTPUTS + 1 - self.outputs.len()) as u32),
+                self.outputs.last().expect("repeat").name
+            )));
+        }
+        let fixed = self.outputs.len() - 1;
+        if fixed + n as usize > MAX_OUTPUTS {
+            return Err(Error::Manifest(format!(
+                "effect `{}`: {fixed} other outputs and outputs={n} make {} outputs, more than {MAX_OUTPUTS}",
+                self.name,
+                fixed + n as usize
+            )));
+        }
+        let mut m = self.clone();
+        let last = m.outputs.pop().expect("repeat is on the last output");
+        let names: Vec<String> = (0..n).map(|k| format!("{}{k}", last.name)).collect();
+        for name in &names {
+            m.outputs.push(OutputDef { name: name.clone(), repeat: None, ..last.clone() });
+        }
+        let expand = |list: &mut Vec<String>| {
+            *list = list.iter().flat_map(|s| if *s == last.name { names.clone() } else { vec![s.clone()] }).collect()
+        };
+        for pass in m.passes.iter_mut().chain(m.groups.iter_mut().flat_map(|g| g.passes.iter_mut())) {
+            expand(&mut pass.outputs);
+            if let Some(list) = &mut pass.inputs {
+                expand(list);
+            }
+        }
+        m.validate()?;
+        Ok(m)
+    }
+
     /// Checks that output `k` may have `format`.
     pub fn check_output_format(&self, k: usize, format: &str) -> Result<(), Error> {
         let o = &self.outputs[k];
@@ -935,6 +1022,57 @@ mod tests {
         assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":5,"max":3}}]"#, "").is_err());
         assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"max":17}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"s"}]"#, "").unwrap().with_input_count(Some(2)).is_err());
+    }
+
+    #[test]
+    fn a_repeated_output_expands_to_named_copies_within_four_outputs() {
+        let parse = |outputs: &str, passes: &str, params: &str| {
+            Manifest::parse(
+                format!(r#"{{"api":1,"id":"t.x","name":"X","used_for":["gpufx"]{params},"outputs":{outputs},"groups":[{{"passes":[{passes}]}}]}}"#)
+                    .as_bytes(),
+            )
+            .map_err(|e| e.to_string())
+        };
+        let one = r#"{"shader":"a.wgsl","outputs":["color","part"]}"#;
+        let m = parse(r#"[{"name":"color"},{"name":"part","bypass":"src","repeat":{"default":2,"min":1,"max":3}}]"#, one, "").unwrap();
+        // Default and chosen counts; the pass writes every copy, in order.
+        assert_eq!(m.with_output_count(None).unwrap().outputs.len(), 3);
+        let e = m.with_output_count(Some(3)).unwrap();
+        let names: Vec<&str> = e.outputs.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(names, ["color", "part0", "part1", "part2"]);
+        assert_eq!(e.groups[0].passes[0].outputs, ["color", "part0", "part1", "part2"]);
+        assert!(e.outputs.iter().all(|o| o.repeat.is_none()));
+        assert_eq!(e.output_bypass(3), 0);
+        assert_eq!(e.output_repeat().map(|r| r.max), None);
+        // A later pass reading the name reads every copy.
+        let read = r#"{"shader":"a.wgsl","outputs":["part"]},{"shader":"b.wgsl","inputs":["part"],"outputs":["sum"]}"#;
+        let m2 = parse(r#"[{"name":"sum"},{"name":"part","repeat":{"default":2}}]"#, read, "").unwrap();
+        assert_eq!(m2.with_output_count(Some(2)).unwrap().groups[0].passes[1].inputs.as_deref().unwrap(), ["part0", "part1"]);
+        // min/max, and four outputs after the expansion.
+        let err = |m: &Manifest, n: u32| m.with_output_count(Some(n)).unwrap_err().to_string();
+        assert!(err(&m, 0).contains("writes 1 to 3 copies of its output `part`, got outputs=0"));
+        assert!(err(&m, 4).contains("got outputs=4"));
+        let wide = parse(r#"[{"name":"color"},{"name":"part","repeat":{"default":2,"max":4}}]"#, one, "").unwrap();
+        wide.with_output_count(Some(3)).unwrap();
+        assert!(err(&wide, 4).contains("1 other outputs and outputs=4 make 5 outputs, more than 4"));
+        let fixed = parse(r#"[{"name":"color"}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#, "").unwrap();
+        assert!(err(&fixed, 2).contains("fixed number of outputs"));
+        // Rules on the rules.
+        let bad = |outputs: &str, passes: &str| parse(outputs, passes, "").unwrap_err();
+        assert!(bad(r#"[{"name":"part","repeat":{"default":2}},{"name":"color"}]"#, one).contains("only the last output may repeat"));
+        assert!(bad(r#"[{"name":"color"},{"name":"part","repeat":{"default":0}}]"#, one).contains("1 <= min"));
+        assert!(bad(
+            r#"[{"name":"a"},{"name":"b"},{"name":"part","repeat":{"default":3}}]"#,
+            r#"{"shader":"a.wgsl","outputs":["a","b","part"]}"#
+        )
+        .contains("2 other outputs and 3 copies by default are more than 4"));
+        assert!(bad(r#"[{"name":"part","repeat":{"default":2}}]"#, r#"{"shader":"a.glsl","outputs":["part"]}"#).contains("only for WGSL"));
+        assert!(bad(r#"[{"name":"outputs"}]"#, r#"{"shader":"a.wgsl","outputs":["outputs"]}"#).contains("reserved"));
+        // `outputs=N` is a node option: no param takes the name.
+        let e =
+            parse(r#"[{"name":"color"}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#, r#","params":[{"name":"outputs","type":"int"}]"#)
+                .unwrap_err();
+        assert!(e.contains("param name `outputs` is reserved"), "{e}");
     }
 
     fn textures(api: u32, list: &str) -> Result<Manifest, Error> {

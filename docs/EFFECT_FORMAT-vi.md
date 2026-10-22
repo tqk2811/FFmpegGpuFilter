@@ -74,6 +74,7 @@ Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là l�
 |--------|----------|---------|
 | `name` | (bắt buộc) | Texture mà một pass ghi (xem [Nhiều output](#nhiều-output)), cũng là tên output pad của effect có nhiều output |
 | `bypass` | input đầu | Input mà output này truyền thẳng khi effect bị tắt (`<effect>.enable`) |
+| `repeat` | không | (chỉ output cuối, chỉ WGSL) `{ "default": 2, "min": 1, "max": 3 }`: output đại diện cho số pad thay đổi được, chọn bằng option node `outputs=N`, xem [Số output thay đổi được](#số-output-thay-đổi-được) |
 
 Pixel format: bộ chuyển đổi trên GPU đọc và ghi `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (và đọc thêm
@@ -138,6 +139,7 @@ Pass chạy ở kích thước của output effect mà nó ghi (xem [Nhiều out
 đặt kích thước khác bằng `gpufx_output_size` (xem [Kích thước output](#kích-thước-output)). Tên input/texture/param phải là định danh hợp lệ,
 không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`graph='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
+Cũng không được tên `outputs`: key inline `outputs=N` chọn số bản sao của output `repeat`.
 
 **Một pass ghi nhiều output.** `outputs` liệt kê tối đa 4 tên. Tên đầu là output chính (`out_tex`, ghi bằng `gpufx_write`); các
 tên sau là `out_tex1`, `out_tex2`, `out_tex3` (ghi bằng `gpufx_write1`..`gpufx_write3`), bind sau các texture input (xem bảng
@@ -185,7 +187,7 @@ Luật:
 - Bỏ trống thì `outputs` là một output mang tên output chính của pass cuối (`[{"name": "out"}]` khi pass cuối không ghi
   `outputs`), nên effect một output không cần khai báo.
 - Mỗi tên output do đúng một pass của mỗi group ghi; pass đó không nhất thiết là pass cuối.
-- Tên output là định danh, không trùng nhau, không trùng input, texture, param, và không phải `enable` hay `bypass`.
+- Tên output là định danh, không trùng nhau, không trùng input, texture, param, và không phải `enable`, `bypass` hay `outputs`. Chỉ output cuối được `repeat` (xem [Số output thay đổi được](#số-output-thay-đổi-được)).
 - Pass chạy ở kích thước của output effect đầu tiên nó ghi, hoặc của output 0 khi nó không ghi output nào (pass làm
   texture cho pass sau); `globals.size`, `gpufx_uv`, `gpufx_in_bounds` theo kích thước đó. Các output một pass ghi
   phải cùng kích thước (`gpufx_output_size` của pass trả cùng một kích thước cho mọi output đó), và texture được nhiều pass ghi thì ghi ở một kích thước.
@@ -215,6 +217,34 @@ Shader GLSL có `uint gpufx_input_count()` và `uvec2 gpufx_input_size(uint i)` 
 `gpufx_input_size(i)` trả kích thước của mọi input hiệu ứng, pass có bind hay không.
 
 Xem `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
+
+### Số output thay đổi được
+
+Output cuối có thể có `repeat` (`{ "default": 2, "min": 1, "max": 3 }`, cùng trường như `repeat` của input; chỉ WGSL).
+Nó nở thành các output tên `<name>0`, `<name>1`... (`part0`, `part1` với output `part`). Option node `outputs=N` chọn
+N (`graph='parts.zip=outputs=3'`, `[0]parts.zip=outputs=3[a][b][c]`); không có option thì N là `default`. Label không
+đổi N: label đặt tên pad từ đầu (`[a][b]`) hoặc theo tên (`[part1=x]`; `[part=x]` và bản sao vượt N là lỗi), bản sao
+không có label bị bỏ như mọi output. N chốt lúc dựng graph (số output pad của filter theo nó), không phải tham số shader,
+nên không param nào của package được tên `outputs`. `min <= N <= max`, và effect có tối đa 4 output SAU khi nở
+(`[{"name":"color"},{"name":"part","repeat":...}]` nhận tối đa `outputs=3`). N = 1 mà không có output nào khác thì pad
+tên `default`, như mọi effect một output.
+
+- Các bản sao dùng chung mọi thứ trừ tên: `bypass`, và luật format của output (`out_format` của filter nhận một mục `|`
+  cho mỗi pad sau khi nở).
+- Một pass ghi mọi bản sao: `"outputs": ["part"]` trong pass nở tại chỗ thành `part0`... `partN-1`, bind theo thứ tự
+  là `out_tex`, `out_tex1`... sau các output đứng trước nó (`["mask", "part"]` đặt `part0` vào `out_tex1`). Pass sau đọc
+  `"part"` là đọc mọi bản sao. Sau khi nở, pass ghi tối đa 4 texture.
+- Shader ghi bản sao theo chỉ số bằng hai hàm prelude (mọi pass WGSL đều có), đánh số theo output của pass theo thứ tự đó:
+
+```wgsl
+fn gpufx_output_count() -> u32                       // số texture pass ghi
+fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpufx_write1 (i = 1)...; i khác thì bỏ qua
+```
+
+- `gpufx_output_size(out_index)` được gọi một lần cho mỗi output effect, tức mỗi bản sao một lần với chỉ số output effect
+  của nó (bản sao j của `part` đứng sau một output cố định là chỉ số `1 + j`); các bản sao của một pass phải cùng kích thước.
+
+Gói được biên dịch cho số đó; `gpufx pack --precompile` chỉ biên dịch số `default`.
 
 ### Kích thước output
 
@@ -453,9 +483,9 @@ giống nhau ở mọi nơi. Manifest hiện chưa kiểm giới hạn 16 lần 
 | Dispatch | Mỗi pass một lần `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)`, theo thứ tự trong manifest, tất cả trong một compute pass; `w`, `h` = kích thước của pass (`globals.size`). Shader khai báo `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); runtime không kiểm tra điều này. Thread vượt mép phải `return`: `gpufx_in_bounds(id)` |
 | Tọa độ pixel | `id.xy` của `global_invocation_id`, số nguyên, gốc ở góc trên trái, y hướng xuống; `textureLoad`/`imageStore` dùng `vec2i(x, y)` |
 | Tọa độ chuẩn hóa | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, tâm pixel, 0..1, v hướng xuống |
-| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi), `gpufx_write1`..`gpufx_write3` cho output phụ. Bản GLSL nhận `uvec3` |
+| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi), `gpufx_write1`..`gpufx_write3` cho output phụ, `gpufx_output_count()` và `gpufx_write_at(i, id, color)` để ghi theo chỉ số (chỉ WGSL). Bản GLSL nhận `uvec3` |
 | Đạo hàm | Compute shader không có: dùng `textureSampleLevel` / `textureLod` hoặc `textureLoad` |
-| Tên dành riêng | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable` hay `bypass` |
+| Tên dành riêng | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable`, `bypass` hay `outputs` |
 
 **Màu**
 
