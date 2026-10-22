@@ -117,16 +117,23 @@ Tóm tắt `manifest.json`:
   - **Nở**: [`Manifest::with_output_count`](../../crates/gpufx-core/src/manifest.rs#L835) thay output bằng các bản sao (cùng
     `bypass`) và thay tên trong mọi danh sách `outputs`/`inputs` của pass bằng tên các bản sao, tại chỗ, rồi validate lại,
     nên runtime và graph chỉ thấy manifest có output cố định.
-  - **Giữ cả hai số**: [`Package`](../../crates/gpufx-core/src/package.rs#L70) giữ manifest như lúc viết; `with_output_count`
+  - **Giữ cả hai số**: [`Package`](../../crates/gpufx-core/src/package.rs#L17) giữ manifest như lúc viết; số bản sao
+    lưu thẳng trong package (`input_copies`, `output_copies`), không suy từ hiệu số độ dài; `with_output_count`
     và `with_input_count` nở lại từ đó và giữ nguyên số còn lại, nên node graph vừa gán input `repeat` theo tên vừa có
     `outputs=N` không mất N.
   - **Option**: [graph.rs](../../crates/gpufx-core/src/graph.rs#L1328) lấy `outputs=N` ra khỏi inline option lúc mở package
-    của node và dựng lại effect cho N (option không tới phía gọi như một param). Output pad của graph, tức `nb_outputs` của
+    của node và dựng lại effect cho N (option không tới phía gọi như một param). Lệnh runtime `node.outputs` bị
+    [`find_param`](../../crates/gpufx-core/src/graph.rs#L1958) từ chối: số pad đã chốt. Output pad của graph, tức `nb_outputs` của
     filter `gpufx`, suy ra từ effect đã nở như mọi effect.
-  - **Bind**: bản sao là output pass bình thường, bind `out_tex`, `out_tex1`...; prelude WGSL thêm `gpufx_output_count()`
-    và `gpufx_write_at(i, ...)`, một `switch` theo output của pass ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1110)).
+  - **Bind**: bản sao là output pass bình thường, bind `out_tex`, `out_tex1`...; chỉ prelude của pass ghi chúng thêm `gpufx_output_count()`
+    và `gpufx_write_at(i, ...)`, một `switch` theo output của pass, cùng `gpufx_copy_count()` và `gpufx_write_copy(j, ...)`
+    = `gpufx_write_at(first + j, ...)` với `first` là vị trí bản sao đầu trong danh sách của pass
+    ([`pass_copies`](../../crates/gpufx-core/src/runtime.rs#L1080), [prelude](../../crates/gpufx-core/src/runtime.rs#L1129)).
+    Pass khác không có gì thêm, nên source và key shader cache của chúng giữ như trước khi có tính năng này.
     `gpufx_output_size` chạy một lần cho mỗi bản sao với chỉ số output effect của nó, và luật "một pass, một kích thước"
     có sẵn áp cho các bản sao.
+  - **Kiểm lúc nạp**: `max` lớn hơn số vừa bên cạnh các output khác, và tên khác dạng `<name>d+`, bị từ chối ở
+    [`validate`](../../crates/gpufx-core/src/manifest.rs#L593); output không ghi `max` thì `parse` đặt bằng số vừa.
 - Kích thước output: mặc định bằng input đầu; shader đặt khác bằng hàm tuỳ chọn `gpufx_output_size(out_index)` của pass
   ghi output đó (chỉ đọc `params`, `gpufx_input_count()`, `gpufx_input_size(i)`). Tính một lần bằng một dispatch GPU lúc configure,
   từ giá trị param khi đó; 0 hoặc quá `max_texture_dimension_2d` của GPU là lỗi, đổi kích thước về sau thì xử lý báo lỗi. Các node graph phía sau thấy size đã lan truyền.

@@ -20,6 +20,10 @@ pub struct Package {
     /// The manifest as written, when it has a repeated input or output (see
     /// [`Package::with_input_count`], [`Package::with_output_count`]).
     template: Option<Box<Manifest>>,
+    /// Pads the repeated input expanded to (0 without one).
+    input_copies: u32,
+    /// Copies the repeated output expanded to (0 without one).
+    output_copies: u32,
     files: HashMap<String, Vec<u8>>,
 }
 
@@ -43,8 +47,10 @@ impl Package {
         let parsed = Manifest::parse(manifest_bytes)?;
         used_for::check(&parsed.id, &parsed.used_for, used_for::GPUFX)?;
         let manifest = parsed.with_input_count(None)?.with_output_count(None)?;
+        let input_copies = parsed.repeat().map_or(0, |r| r.default);
+        let output_copies = parsed.output_repeat().map_or(0, |r| r.default);
         let template = (parsed.repeat().is_some() || parsed.output_repeat().is_some()).then(|| Box::new(parsed));
-        let pkg = Package { manifest, template, files };
+        let pkg = Package { manifest, template, input_copies, output_copies, files };
         for pass in pkg.manifest.groups.iter().flat_map(|g| &g.passes) {
             pkg.file(&pass.shader)?;
         }
@@ -61,15 +67,14 @@ impl Package {
     /// The package with its repeated input expanded to `count` inputs (the number of labels a
     /// graph node reads). Fails for a package without one or a count outside its range.
     pub fn with_input_count(&self, count: u32) -> Result<Self, Error> {
-        self.expand(Some(count), self.repeated_output().map(|_| self.output_copies()))
+        self.expand(Some(count), self.has_repeated_output().then_some(self.output_copies))
     }
 
     /// The package with its repeated output expanded to `count` copies (the `outputs=N`
     /// option of a graph node), keeping its input count. Fails for a package without one,
     /// a count outside its range or more than [`crate::manifest::MAX_OUTPUTS`] outputs in all.
     pub fn with_output_count(&self, count: u32) -> Result<Self, Error> {
-        let inputs = self.has_repeated_input().then(|| (self.manifest.inputs.len() + 1 - self.template_inputs()) as u32);
-        self.expand(inputs, Some(count))
+        self.expand(self.has_repeated_input().then_some(self.input_copies), Some(count))
     }
 
     fn expand(&self, inputs: Option<u32>, outputs: Option<u32>) -> Result<Self, Error> {
@@ -77,7 +82,13 @@ impl Package {
             Some(t) => t.with_input_count(inputs)?.with_output_count(outputs)?,
             None => self.manifest.with_input_count(inputs)?.with_output_count(outputs)?,
         };
-        Ok(Package { manifest, template: self.template.clone(), files: self.files.clone() })
+        Ok(Package {
+            manifest,
+            template: self.template.clone(),
+            input_copies: inputs.unwrap_or(0),
+            output_copies: outputs.unwrap_or(0),
+            files: self.files.clone(),
+        })
     }
 
     /// The name of the repeated output as written (`part` for `part0`, `part1`...), if any.
@@ -87,10 +98,12 @@ impl Package {
 
     /// Number of copies the repeated output has (0 without one).
     pub fn output_copies(&self) -> u32 {
-        match &self.template {
-            Some(t) if self.repeated_output().is_some() => (self.manifest.outputs.len() + 1 - t.outputs.len()) as u32,
-            _ => 0,
-        }
+        self.output_copies
+    }
+
+    /// The manifest has a repeated output (see [`Package::with_output_count`]).
+    pub fn has_repeated_output(&self) -> bool {
+        self.repeated_output().is_some()
     }
 
     /// The package with the passes of manifest group `g` as its passes and no groups
@@ -99,6 +112,8 @@ impl Package {
         Package {
             manifest: self.manifest.with_group(g),
             template: self.template.as_ref().map(|t| Box::new(t.with_group(g))),
+            input_copies: self.input_copies,
+            output_copies: self.output_copies,
             files: self.files.clone(),
         }
     }

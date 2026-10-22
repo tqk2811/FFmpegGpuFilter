@@ -223,10 +223,12 @@ Xem `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 Output cuối có thể có `repeat` (`{ "default": 2, "min": 1, "max": 3 }`, cùng trường như `repeat` của input; chỉ WGSL).
 Nó nở thành các output tên `<name>0`, `<name>1`... (`part0`, `part1` với output `part`). Option node `outputs=N` chọn
 N (`graph='parts.zip=outputs=3'`, `[0]parts.zip=outputs=3[a][b][c]`); không có option thì N là `default`. Label không
-đổi N: label đặt tên pad từ đầu (`[a][b]`) hoặc theo tên (`[part1=x]`; `[part=x]` và bản sao vượt N là lỗi), bản sao
-không có label bị bỏ như mọi output. N chốt lúc dựng graph (số output pad của filter theo nó), không phải tham số shader,
+đổi N: label đặt tên pad từ đầu (`[a][b]`) hoặc theo tên (`[part1=x]`, và `[part0=x]` khi N = 1; `[part=x]` và bản sao vượt N là lỗi), bản sao
+không có label bị bỏ như mọi output. N chốt lúc dựng graph (số output pad của filter theo nó; lệnh runtime `node.outputs` là lỗi), không phải tham số shader,
 nên không param nào của package được tên `outputs`. `min <= N <= max`, và effect có tối đa 4 output SAU khi nở
-(`[{"name":"color"},{"name":"part","repeat":...}]` nhận tối đa `outputs=3`). N = 1 mà không có output nào khác thì pad
+(`[{"name":"color"},{"name":"part","repeat":...}]` nhận tối đa `outputs=3`). `max` lớn hơn số vừa (4 trừ số output khác) bị từ chối lúc nạp package; không ghi `max` thì
+nó bằng số vừa. Không tên nào khác của package (input, texture, output, texture của pass) được trông như một bản sao
+(`part0`, `part12`...). N = 1 mà không có output nào khác thì pad
 tên `default`, như mọi effect một output.
 
 - Các bản sao dùng chung mọi thứ trừ tên: `bypass`, và luật format của output (`out_format` của filter nhận một mục `|`
@@ -234,12 +236,17 @@ tên `default`, như mọi effect một output.
 - Một pass ghi mọi bản sao: `"outputs": ["part"]` trong pass nở tại chỗ thành `part0`... `partN-1`, bind theo thứ tự
   là `out_tex`, `out_tex1`... sau các output đứng trước nó (`["mask", "part"]` đặt `part0` vào `out_tex1`). Pass sau đọc
   `"part"` là đọc mọi bản sao. Sau khi nở, pass ghi tối đa 4 texture.
-- Shader ghi bản sao theo chỉ số bằng hai hàm prelude (mọi pass WGSL đều có), đánh số theo output của pass theo thứ tự đó:
+- Shader ghi bản sao theo chỉ số bằng các hàm prelude. Chỉ pass ghi output `repeat` có các hàm này (prelude của pass
+  khác giữ nguyên):
 
 ```wgsl
-fn gpufx_output_count() -> u32                       // số texture pass ghi
+fn gpufx_copy_count() -> u32                         // số bản sao (N)
+fn gpufx_write_copy(j: u32, id: vec3u, c: vec4f)     // bản sao j, bất kể pass ghi gì trước nó; j >= N thì bỏ qua
+fn gpufx_output_count() -> u32                       // số texture pass ghi, tính cả bản sao
 fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpufx_write1 (i = 1)...; i khác thì bỏ qua
 ```
+
+  Với `["mask", "part"]`, `gpufx_write_copy(j, ...)` là `gpufx_write_at(1 + j, ...)`.
 
 - `gpufx_output_size(out_index)` được gọi một lần cho mỗi output effect, tức mỗi bản sao một lần với chỉ số output effect
   của nó (bản sao j của `part` đứng sau một output cố định là chỉ số `1 + j`); các bản sao của một pass phải cùng kích thước.
@@ -483,7 +490,7 @@ giống nhau ở mọi nơi. Manifest hiện chưa kiểm giới hạn 16 lần 
 | Dispatch | Mỗi pass một lần `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)`, theo thứ tự trong manifest, tất cả trong một compute pass; `w`, `h` = kích thước của pass (`globals.size`). Shader khai báo `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); runtime không kiểm tra điều này. Thread vượt mép phải `return`: `gpufx_in_bounds(id)` |
 | Tọa độ pixel | `id.xy` của `global_invocation_id`, số nguyên, gốc ở góc trên trái, y hướng xuống; `textureLoad`/`imageStore` dùng `vec2i(x, y)` |
 | Tọa độ chuẩn hóa | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, tâm pixel, 0..1, v hướng xuống |
-| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi), `gpufx_write1`..`gpufx_write3` cho output phụ, `gpufx_output_count()` và `gpufx_write_at(i, id, color)` để ghi theo chỉ số (chỉ WGSL). Bản GLSL nhận `uvec3` |
+| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi), `gpufx_write1`..`gpufx_write3` cho output phụ, và ở pass ghi output `repeat` có `gpufx_copy_count()`, `gpufx_write_copy(j, id, color)`, `gpufx_output_count()`, `gpufx_write_at(i, id, color)` để ghi theo chỉ số (chỉ WGSL). Bản GLSL nhận `uvec3` |
 | Đạo hàm | Compute shader không có: dùng `textureSampleLevel` / `textureLod` hoặc `textureLoad` |
 | Tên dành riêng | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable`, `bypass` hay `outputs` |
 
