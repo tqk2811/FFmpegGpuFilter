@@ -201,10 +201,11 @@ passes → built-in conversion pass → copy back to RAM. libgpufx converts `rgb
 - The filter: inputs without `formats` accept these formats directly (FFmpeg converts other formats to
   one of them); inputs with `formats` receive the frame as is. Formats, matrices (FCC, SMPTE 240M,
   YCgCo...) and BT.2020 constant luminance that libgpufx does not handle are converted with `swscale` to
-  `rgba` (or `rgba64le` above 8 bits) as before; so is the output. A manifest without `output` may output
-  any of these formats (`rgba` first), so an encoder taking `yuv420p` needs no `scale` after `gpufx`.
-  Such an output may be YUV without alpha, dropping the alpha the effect writes: effects that produce alpha
-  declare `output.formats`.
+  `rgba` (or `rgba64le` above 8 bits) as before. The output is never converted by swscale: the filter outputs GPU frames
+  only (see "Formats the GPU does not convert"). A manifest without `output` may output
+  any of these formats (`rgba` first), so a CPU encoder taking `yuv420p` needs `hwdownload` after `gpufx`
+  but no `scale`. Such an output may be YUV without alpha, dropping the alpha the effect writes: effects that produce
+  alpha should declare `output.formats` (a recommendation, not checked by the code).
 - Unspecified chroma siting is centre for full range frames (JPEG/MJPEG) and left otherwise.
 - Each package compiles its `rgba8unorm` pipelines when it loads and its `rgba16float` ones when the
   first frame above 8 bits comes (that frame waits for the compile; an error names the package).
@@ -239,6 +240,235 @@ The main costs are upload/readback and color conversion on the CPU. The roadmap 
 
 In every phase, **the package format and shaders do not change**: authors never need to know whether a frame comes from
 the CPU or from CUDA.
+
+### Built-in format conversion (frame format ↔ RGBA)
+
+Effects never see the frame format. gpufx-core wraps every graph with two built-in compute stages, recorded in the same
+GPU submission as the effect passes (`run` for CPU frames, [graph.rs](../../crates/gpufx-core/src/graph.rs#L680), and `run_gpu` for GPU frames,
+[graph.rs](../../crates/gpufx-core/src/graph.rs#L847)):
+
+```mermaid
+flowchart TD
+    A["frame planes<br/>nv12, yuv420p10le, rgba64le ..."] --> B["convert in (convert_in*.wgsl)<br/>one RGBA texture per input, straight alpha"]
+    B --> C["effect passes<br/>always rgba8unorm or rgba16float, never a YUV plane"]
+    C --> D["convert out (convert_out*.wgsl)<br/>planes of the output format"]
+    D --> E["frame planes of the output"]
+```
+
+1. **Convert in**: `InputSlot::encode` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L604)) records one dispatch per
+   input that turns the planes into the RGBA texture the first effect pass samples.
+2. **Effects**: the pass textures are `rgba8unorm`, or `rgba16float` when the graph is "deep" (rule below). A
+   shader author sees the same colour texture whatever the frame was.
+3. **Convert out**: for each graph output, one dispatch per plane (buffer and image paths) or one dispatch for all
+   planes (fused YUV path) writes the planes of the output format from the RGBA result.
+
+A stage is skipped when it would only be a copy. A straight `rgba` CPU input is uploaded as `rgba8unorm` and read in
+place (`InputKey::direct`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L427), set at
+[graph.rs](../../crates/gpufx-core/src/graph.rs#L535)). A straight `rgba` Vulkan input is read in place when the graph is not
+deep and no mip chain of it is read ([graph.rs](../../crates/gpufx-core/src/graph.rs#L548)), and a straight `rgba` GPU output may
+be written by the last effect pass itself (`direct_out`, described under "Vulkan frames").
+
+What the conversion does **not** do: no transfer function (gamma/PQ/HLG) and no primaries change. Nothing in
+`gpufx-core` handles them (the frame's `ColorInfo` carries only matrix, range, chroma location and premultiplied
+flag), and the shaders only apply the matrix and the range. The numbers in the RGBA texture are the non-linear R'G'B'
+that the matrix gives, whatever the transfer is. The C layer copies primaries and transfer to the RGBA side of a
+swscale conversion so that swscale never maps them either (`set_rgba_props`,
+[vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L683)). An effect that needs linear light does the transfer itself.
+
+#### Files
+
+| File | Role |
+|------|------|
+| [convert.rs](../../crates/gpufx-core/src/convert.rs) | Rust side: `Converter` (pipelines per device, [L52](../../crates/gpufx-core/src/convert.rs#L52)), `InputSlot` (input stage, [L440](../../crates/gpufx-core/src/convert.rs#L440)), `GpuOutputSlot` (output of GPU frames, [L617](../../crates/gpufx-core/src/convert.rs#L617)), `OutputSlot` and `read_outputs` (output to a CPU readback, [L748](../../crates/gpufx-core/src/convert.rs#L748), [L875](../../crates/gpufx-core/src/convert.rs#L875)), `uniform` ([L370](../../crates/gpufx-core/src/convert.rs#L370)) |
+| [convert.wgsl](../../crates/gpufx-core/src/convert.wgsl) | Prepended to every conversion shader: the `Conv` uniform struct ([L5](../../crates/gpufx-core/src/convert.wgsl#L5)) and the helpers `code_max`, `code_scale`, `kg` |
+| [convert_in.wgsl](../../crates/gpufx-core/src/convert_in.wgsl) | `pixel(id)`: planes to straight RGBA of one pixel (range, chroma upsampling, matrix, alpha). No entry point |
+| [convert_in_plain.wgsl](../../crates/gpufx-core/src/convert_in_plain.wgsl) | Entry point, 8x8 workgroup, chroma read straight from the planes (CPU uploads) |
+| [convert_in_tiled.wgsl](../../crates/gpufx-core/src/convert_in_tiled.wgsl) | Entry point, 16x16 workgroup, chroma loaded once into workgroup memory (GPU frames) |
+| [convert_out.wgsl](../../crates/gpufx-core/src/convert_out.wgsl) | Shared by every output path: `fetch` (clamp, premultiply), `yuv`, `sample` (chroma downsampling), `encode` (range, depth, shift), `channel`. No entry point |
+| [convert_out_buffer.wgsl](../../crates/gpufx-core/src/convert_out_buffer.wgsl) | Entry point: one plane packed into `u32` words of a storage buffer (CPU readback) |
+| [convert_out_image.wgsl](../../crates/gpufx-core/src/convert_out_image.wgsl) | Entry point: one plane into a unorm storage texture (GPU frames, RGBA formats) |
+| [convert_out_fused.wgsl](../../crates/gpufx-core/src/convert_out_fused.wgsl) | Entry point: every plane of a YUV GPU frame in one dispatch |
+| [frame.rs](../../crates/gpufx-core/src/frame.rs) | `PixelFormat` and `Layout` ([L11](../../crates/gpufx-core/src/frame.rs#L11), [L110](../../crates/gpufx-core/src/frame.rs#L110)): plane kind, depth, shift, subsampling, alpha; `Matrix`, `Range`, `ChromaLocation`, `ColorInfo` |
+
+#### How the pipelines are built
+
+All shader text is assembled in Rust and compiled per device by `Converter` (created with the context in
+[runtime.rs](../../crates/gpufx-core/src/runtime.rs#L229)):
+
+- `pipeline()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L92)) concatenates `convert.wgsl` and a body (`include_str!`),
+  parses it with naga and calls `ShaderCache::compute_pipeline`. The full source text is part of the cache key
+  (`&["convert", "main", &source]`), so the on-disk cache (see "On-disk shader cache") needs no extra invalidation when
+  a `.wgsl` file changes. These pipelines are built with no package (`pkg = None`), so `gpufx pack --precompile`
+  neither warms nor stores them: they are compiled (or read from the on-disk cache) when the context creates them, or
+  on first use for the lazy ones.
+- Input ([convert.rs](../../crates/gpufx-core/src/convert.rs#L120)): `convert_in_source(deep, unorm)` generates the four plane
+  bindings `plane0..3` (bindings 2..5) and the functions `load0..3`, then appends `convert_in.wgsl`, then the plain or the
+  tiled entry point. `unorm` picks the plane texture type: `texture_2d<u32>` for CPU uploads (the load returns the stored
+  code) or `texture_2d<f32>` for GPU frames (`round(texel * 255 or 65535)` gives the code back). `deep` does a text
+  replace of `rgba16float` by `rgba8unorm` in `convert_in.wgsl`, so that file may contain the word `rgba16float` only in its
+  `dst` declaration. Four pipelines in total (CPU or GPU, 8-bit or deep). The CPU pair is built in `Converter::new`; the
+  GPU pair on the first GPU frame (`OnceLock`).
+- Output to a buffer ([convert.rs](../../crates/gpufx-core/src/convert.rs#L180)): `convert_out.wgsl` and
+  `convert_out_buffer.wgsl`, one pipeline for all formats and planes; the per-plane differences are all in the uniform.
+  It reads the RGBA with `textureLoad` on a non-filterable float texture, so `rgba8unorm` and `rgba16float` sources share it.
+- Output to plane images ([convert.rs](../../crates/gpufx-core/src/convert.rs#L236)): `convert_out_image.wgsl` with the text
+  `STORAGE_FORMAT` replaced by the WGSL storage format from `PLANE_FORMATS` ([L72](../../crates/gpufx-core/src/convert.rs#L72):
+  `r8unorm`, `rg8unorm`, `rgba8unorm` and the three 16-bit ones). One lazy pipeline per plane texture format.
+- Fused YUV output ([convert.rs](../../crates/gpufx-core/src/convert.rs#L269); `fused_source`,
+  [L283](../../crates/gpufx-core/src/convert.rs#L283)): one lazy pipeline per `PixelFormat` (array sized by `PIXEL_FORMATS`,
+  [L315](../../crates/gpufx-core/src/convert.rs#L315)). Rust generates the `dst0..` storage bindings of the format's planes and
+  two functions the shader calls: `store_luma` (plane 0, plus plane 3 for the alpha of `yuva*`) and `store_chroma`
+  (planes 1 and 2, or the two-channel plane 1 of semi-planar). Channels a plane texture has but the format does not
+  use are written as 0, alpha 1.
+- Bind groups are cached: an `InputSlot` keeps an LRU of the bind groups of the plane textures of recent GPU frames, and
+  a `GpuOutputSlot` one of recent (source, planes) pairs, so a pool of frames coming back in turn is bound once.
+
+The `Conv` uniform ([convert.rs](../../crates/gpufx-core/src/convert.rs#L370), 112 bytes) carries frame size, chroma size and
+subsampling, plane kind, alpha flag, depth, shift, range, premultiplied flag, `kr`/`kb`, chroma siting and, for
+outputs, the plane geometry and which channel (Y/R, U/G, V/B, A) each interleaved sample holds. The WGSL struct
+([convert.wgsl](../../crates/gpufx-core/src/convert.wgsl#L5)) and the Rust word list must stay in the same order; a size change
+also changes `UNIFORM_SIZE`.
+
+#### Input path
+
+Per pixel, `pixel()` in [convert_in.wgsl](../../crates/gpufx-core/src/convert_in.wgsl#L45):
+
+1. Read the stored code(s). `value()` undoes the P010 shift (`raw >> shift`).
+2. **RGBA formats** (`kind` 0): divide by `code_max()` (`rgba64le` is 16 bit).
+3. **YUV formats**: luma is normalised by range (`luma`, [L12](../../crates/gpufx-core/src/convert_in.wgsl#L12): limited
+   `(c - 16s) / 219s` with `s` = `code_scale()`, full `c / max`); chroma likewise (`chroma`,
+   [L19](../../crates/gpufx-core/src/convert_in.wgsl#L19): `(c - 128s) / 224s`, or `(c - mid) / max`). Chroma is upsampled
+   **bilinearly**: `chroma_pos` ([L37](../../crates/gpufx-core/src/convert_in.wgsl#L37)) gives the fractional chroma coordinate
+   under the pixel centre from the siting (`ChromaLocation::siting`, [frame.rs](../../crates/gpufx-core/src/frame.rs#L209)), the
+   four neighbours are mixed, and coordinates are clamped to the plane (`load_uv`,
+   [L27](../../crates/gpufx-core/src/convert_in.wgsl#L27); semi-planar reads one `rg` texel, planar two textures). Then
+   `R = Y + 2(1-kr)V`, `B = Y + 2(1-kb)U`, `G = (Y - kr R - kb B) / kg`, with `kr`/`kb` from the frame's `Matrix`
+   (`kr_kb`, [frame.rs](../../crates/gpufx-core/src/frame.rs#L173)).
+4. Alpha: `yuva*` read plane 3 (full size, divided by `code_max`); other formats give 1.
+5. The colour is clamped to 0..1 (super-white, super-black and out-of-gamut values are lost here). If the frame is
+   `premultiplied`, RGB is then divided by alpha (0 where alpha is 0), so effects always see straight alpha.
+
+The two entry points differ in how chroma is fetched. `convert_in_plain` is one invocation per pixel, each with up to
+four clamped loads of chroma. `convert_in_tiled` (GPU frames) has each 16x16 workgroup load the chroma samples it needs
+once into `uv_tile` (at most 18x18 entries; `uv_width = 15 / sub_x + 3`), waits at a barrier, then calls the same
+`pixel()`; the values are identical. `in_group()` ([convert.rs](../../crates/gpufx-core/src/convert.rs#L40)) sets the dispatch
+size and must match the `workgroup_size` of the entry point in use.
+
+CPU frames: `InputSlot::pool_keys` ([L461](../../crates/gpufx-core/src/convert.rs#L461)) lists the upload textures (one per
+plane, integer format from `plane_format`, [L356](../../crates/gpufx-core/src/convert.rs#L356)) and the RGBA target; `upload`
+([L568](../../crates/gpufx-core/src/convert.rs#L568)) writes the planes and the uniform. GPU frames: `use_gpu_frame`
+([L586](../../crates/gpufx-core/src/convert.rs#L586)) binds the frame's own plane textures and uploads only the uniform.
+Planes the format does not have are bound to a 1x1 dummy texture (`Converter::dummy`).
+
+**Deep or not** (`work_format`, [convert.rs](../../crates/gpufx-core/src/convert.rs#L22)): a format with `depth > 8` wants
+`rgba16float`. A graph is deep when any input or output frame wants it
+([graph.rs](../../crates/gpufx-core/src/graph.rs#L543)); the pass textures of the whole graph and the conversion pipelines
+follow. `rgba16float` keeps about 11 bits, so `rgba64le` in and out does not round-trip all 16 bits.
+
+#### Output paths
+
+`sample()` in [convert_out.wgsl](../../crates/gpufx-core/src/convert_out.wgsl#L22) gives the Y/U/V/A (or R/G/B/A) of one sample
+of a plane, and `encode()` ([L51](../../crates/gpufx-core/src/convert_out.wgsl#L51)) turns a 0..1 value into the stored code
+(range scaling, depth, rounding, clamp, `<< shift`). There are three ways to write it:
+
+| Path | Used for | Granularity | Result |
+|------|----------|-------------|--------|
+| Buffer (`OutputSlot`, `convert_out_buffer.wgsl`) | CPU frames (`run`) | One dispatch per plane, one invocation per output `u32` word, which packs 4 or 2 samples through `channel()` | Words in a pooled storage buffer, copied into one mappable buffer shared by all outputs; `read_outputs` copies the rows into the caller's planes |
+| Image (`GpuOutputSlot`, `convert_out_image.wgsl`) | GPU frames, RGBA formats (`rgba`, `rgba64le`) | One dispatch per plane, one invocation per sample | `textureStore` into the plane's unorm texture (code / 255 or / 65535) |
+| Fused (`GpuOutputSlot`, `convert_out_fused.wgsl`) | GPU frames, any YUV format | One dispatch for all planes, one invocation per **chroma** sample (it also writes the `sub_x * sub_y` luma samples of its block, and alpha) | `store_luma` / `store_chroma` into the plane textures |
+
+- **Chroma downsampling**: for a subsampled plane `sample()` applies a triangle filter over the pixels around the chroma
+  sample (4x4 taps, weight `max(1-d, 0)` per axis, normalised), placed by the same siting. It is the transpose of the
+  bilinear upsampling: `[1 3 3 1]` for centred siting, `[1 2 1]` for co-sited. `convert_out_fused.wgsl` computes the same
+  sum in the same order, but converts the pixels of the workgroup to YUV once into `px` (20x20 for 4:2:0), so the
+  bytes equal the buffer path's (CPU frames); `yuv_gpu_frames_match_cpu_frames_across_tiles`
+  ([tests/gpu_frames.rs](../../crates/gpufx-core/tests/gpu_frames.rs#L508)) checks GPU frames against the CPU path byte
+  for byte on every backend but Metal (fast math, one step). Luma is never filtered. Full-size chroma (4:4:4) is a plain `yuv()`.
+- **Matrix and range**: `yuv()` ([L16](../../crates/gpufx-core/src/convert_out.wgsl#L16)) is the inverse of the input
+  matrix with the `kr`/`kb` of the output frame's `ColorInfo`; `encode()` applies limited (219/224 scale plus offset) or
+  full range per channel. Alpha is always full range.
+- **Alpha**: `fetch()` ([L7](../../crates/gpufx-core/src/convert_out.wgsl#L7)) clamps to the frame and, if the output is
+  `premultiplied`, multiplies RGB by alpha before the matrix (see `ColorInfo`). Formats with an alpha channel or plane
+  (`rgba`, `rgba64le`, `yuva420p`, `yuva444p`) store alpha at full resolution, unfiltered; formats without one ignore it.
+- **Depth**: `encode()` rounds to nearest and clamps. 10-bit planar formats store the code in the low bits, P010 shifts it
+  to the high bits (`shift` = 6). Samples are 1 or 2 bytes (`bytes`); the buffer path packs them little-endian.
+- **Size limit**: `OutputSlot::new` fails if a plane needs more than `max_storage_buffer_binding_size`
+  ([convert.rs](../../crates/gpufx-core/src/convert.rs#L759)); the image paths write textures and have no such limit.
+
+#### How the output format is chosen
+
+The core does not choose; it builds the convert-out that matches the output frame it is given (`GpuOutputSlot::new` and
+`OutputSlot::new` take the format of the frame). The choice is made by the C filter:
+
+1. **Manifest**: `output.formats` lists the formats the effect may produce, in order of preference. Without it, the list
+   is every format libgpufx converts, `rgba` first ([manifest.rs](../../crates/gpufx-core/src/manifest.rs#L419)). Recommendation (not enforced
+   by the code): an effect that writes meaningful alpha should list only formats with alpha (`rgba`, `rgba64le`, `yuva*`).
+2. **Filter option `out_format`**: when set, every output must list it and libgpufx must convert it
+   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L554)), else configuration fails.
+3. **Candidate order** (`config_vulkan_output`, [vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L949); `config_d3d_output`,
+   [L1224](../../ffmpeg/vf_gpufx.c#L1224)): `out_format` if set, else the `sw_format` of the input
+   `source[k]` (`hw_in_fmt[source[k]]`) if the manifest lists it. `source[k]` comes from `gpufx_effect_output_source`
+   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L587)): the input pad whose size (and frame rate, aspect ratio) output `k` has,
+   found by following the graph from the output back through the first input of each effect; then the manifest list in order. A candidate is skipped when it
+   is not listed, libgpufx does not convert it, or the API cannot write it. With `out_format` there is no fallback: that
+   format or an error.
+4. **API limits**: Vulkan needs FFmpeg to make one-image-per-plane images with storage usage for the format
+   (`av_vkfmt_from_pixfmt`, `VK_IMAGE_USAGE_STORAGE_BIT`). D3D12 and D3D11 accept `nv12`, `p010le`, `rgba`, `rgba64le`;
+   VideoToolbox `nv12`, `p010le` (`sw_format_ok`, [vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L1101)).
+5. The format goes into the output `AVHWFramesContext`. For each frame the filter passes libgpufx the format name and the
+   `ColorInfo` built from the frame (`gpu_color_fmt`, [vf_gpufx_frames.h](../../ffmpeg/vf_gpufx_frames.h#L87)), and the core
+   builds or reuses the slot for that (format, size).
+
+So a `yuv420p10le` input of an effect that lists it comes out as `yuv420p10le`, and an effect that lists only `rgba`
+always outputs `rgba`.
+
+**What is lost going from RGBA to a format without alpha** (for example `nv12`): the alpha the effect wrote is dropped.
+It is not composited over a background, so a transparent pixel keeps whatever RGB the effect left under it (often
+black). Besides alpha: chroma resolution (4:2:0 and 4:2:2 average the pixels around each sample), limited range keeps
+219 / 224 levels, values are rounded to the depth of the format, and RGB outside the gamut of the matrix is clipped. If
+the chain is 8-bit (`rgba8unorm`) and the format is 10-bit, the extra bits only add rounding steps of 8-bit values.
+
+#### Formats the GPU does not convert (swscale)
+
+The C layer lets only formats the GPU can read through, and uses swscale for the rest:
+
+- `query_formats` ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2248)): an input without a manifest `formats` list offers only
+  formats libgpufx converts (`gpufx_format_supported`), so FFmpeg's negotiation inserts a `scale` (swscale) in front for
+  the others (`gray`, `rgb24`, `yuv411p`...). An input *with* a `formats` list offers every format swscale reads and
+  receives the frame in its own format.
+- Software frames are uploaded by `upload_input` ([L1619](../../ffmpeg/vf_gpufx.c#L1619)) into GPU frames of the format
+  chosen by `config_upload` ([L1574](../../ffmpeg/vf_gpufx.c#L1574)): the input's own format if the device takes it, else
+  `nv12` / `p010le` for 4:2:0 YUV without alpha, else `rgba` / `rgba64le` (`rgba_for`,
+  [L711](../../ffmpeg/vf_gpufx.c#L711)). When a frame is not in the upload format, or its matrix is one the GPU lacks
+  (`gpu_matrix`, [vf_gpufx_frames.h](../../ffmpeg/vf_gpufx_frames.h#L46): BT.601 family, BT.709 and BT.2020 non-constant are
+  handled; FCC, SMPTE 240M, YCgCo and BT.2020 constant luminance are not), `sws_convert`
+  ([L700](../../ffmpeg/vf_gpufx.c#L700)) converts it first: to the upload format, or to full-range RGBA when the matrix is
+  the problem. swscale keeps premultiplied alpha as it is; the GPU un-premultiplies afterwards.
+- GPU frames (Vulkan, D3D, VideoToolbox) are never converted by swscale: an unsupported `sw_format` or matrix is a
+  configuration or frame error that tells the user to convert before uploading.
+- The output has no swscale fallback: it is always a GPU frame in a format libgpufx writes (header comment of
+  [vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L10): put `hwdownload` or `gpufx_download` before CPU filters and encoders).
+
+#### Adding a pixel format
+
+1. [frame.rs](../../crates/gpufx-core/src/frame.rs): add the `PixelFormat` variant, its `NAMES` entry, raise both literal
+   `12`s (`NAMES`, `ALL`) and add a `layout()` row (kind, depth, shift, subsampling, alpha). Put the variant **last**
+   and change `PIXEL_FORMATS` in [convert.rs](../../crates/gpufx-core/src/convert.rs#L315) (`Yuva444p as usize + 1`) to the new
+   last variant. If the format is a combination of what exists (planar or semi-planar YUV or RGBA, depth up to 16,
+   subsampling 1 or 2, an optional alpha plane), `plane_dims`, `plane_texture_format`, `plane_format`, `uniform` and the
+   shaders need no change; `from_name`, `gpufx_format_supported` and the default `output.formats` follow `NAMES`.
+2. A new **layout** (packed YUV such as `yuyv422`, 3-channel RGB, subsampling 4) needs a new `PlaneKind` and edits in
+   `plane_dims` / `plane_count`; `uniform` (channel map `ch`); the `kind` comment of `convert.wgsl`; `load_uv` and `pixel`
+   of `convert_in.wgsl`; `sample` and `channel` of `convert_out.wgsl`; `fused_source`; and the tile sizes of
+   `convert_in_tiled.wgsl` and `convert_out_fused.wgsl`, which assume subsampling of at most 2. Plane textures are
+   limited to `PLANE_FORMATS` (1, 2 or 4 channels of 8 or 16 bits).
+3. [vf_gpufx.c](../../ffmpeg/vf_gpufx.c): D3D and VideoToolbox accept a format only through `sw_format_ok` (add it there and
+   to `sw_format_list`); Vulkan needs FFmpeg to give per-plane storage images for it. Check the candidates of
+   `config_upload` if the format should be uploaded as itself. `gpufx_format_supported` lets it through already.
+4. Tests: add the format to the lists in [tests/color.rs](../../crates/gpufx-core/tests/color.rs#L300) (CPU conversion) and
+   [tests/gpu_frames.rs](../../crates/gpufx-core/tests/gpu_frames.rs#L281) (GPU frames against the CPU path). The format
+   names are also listed in the text of section 6 above and in the `gpufx_format_name` comment of
+   [gpufx.h](../../crates/gpufx-ffi/include/gpufx.h#L133).
 
 ### GPU graph inside one filter (done)
 
