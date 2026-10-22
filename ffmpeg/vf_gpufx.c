@@ -970,6 +970,21 @@ static int config_vulkan(AVFilterContext *ctx)
 }
 
 /*
+ * The format output k is tried in first: out_format when given, else the format libgpufx
+ * picks for its pixel_layout from the first input's format (gray for y, yuva420p for
+ * yuva420, the input's own format when it is of that layout).
+ */
+static enum AVPixelFormat output_want(const GpufxContext *s, unsigned k)
+{
+    const char *name;
+
+    if (s->out_fmts[k] != AV_PIX_FMT_NONE)
+        return s->out_fmts[k];
+    name = gpufx_effect_output_default_format(s->fx, k, NULL, av_get_pix_fmt_name(s->hw_in_fmt[0]));
+    return name ? av_get_pix_fmt(name) : s->hw_in_fmt[s->source[k]];
+}
+
+/*
  * The output frames context is made here by gpufx alone: relabel_hold() relies on nobody
  * else setting its free / user_opaque.
  *
@@ -981,7 +996,7 @@ static int config_vulkan_output(AVFilterLink *outlink, unsigned k)
 {
     AVFilterContext *ctx = outlink->src;
     GpufxContext *s = ctx->priv;
-    const enum AVPixelFormat want = s->out_fmts[k] != AV_PIX_FMT_NONE ? s->out_fmts[k] : s->hw_in_fmt[s->source[k]];
+    const enum AVPixelFormat want = output_want(s, k);
     const uint32_t count = gpufx_effect_output_pad_format_count(s->fx, k);
 
     /* Pass -1 tries the source input's format, then each format in order. */
@@ -1256,7 +1271,7 @@ static int config_d3d_output(AVFilterLink *outlink, unsigned k)
 {
     AVFilterContext *ctx = outlink->src;
     GpufxContext *s = ctx->priv;
-    const enum AVPixelFormat want = s->out_fmts[k] != AV_PIX_FMT_NONE ? s->out_fmts[k] : s->hw_in_fmt[s->source[k]];
+    const enum AVPixelFormat want = output_want(s, k);
     const uint32_t count = gpufx_effect_output_pad_format_count(s->fx, k);
 
     /* gpufx makes the output frames context alone: relabel_hold() relies on nobody else

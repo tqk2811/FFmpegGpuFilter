@@ -12,7 +12,8 @@
   ],
   "outputs": [
     {
-      "name": "out"
+      "name": "out",
+      "pixel_layout": "rgba"
     }
   ],
   "params": [

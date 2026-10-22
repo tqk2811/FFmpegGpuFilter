@@ -14,7 +14,8 @@
   ],
   "outputs": [
     {
-      "name": "color"
+      "name": "color",
+      "pixel_layout": "rgba"
     },
     {
       "name": "matte"
