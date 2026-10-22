@@ -1134,7 +1134,7 @@ fn unescape(s: &str, item: &str) -> Result<String, Error> {
 pub type InlineOptions = Vec<(String, String)>;
 
 /// Keys an effect takes inline besides its parameters.
-const NODE_KEYS: [&str; 2] = ["enable", "bypass"];
+const NODE_KEYS: [&str; 3] = ["enable", "bypass", "outputs"];
 
 /// Splits one effect of a chain or graph node, `path=key=value:key=value`, into its path
 /// and options, without escapes and quotes. Options are separated by `:` (as in FFmpeg) or `&`
@@ -1211,8 +1211,17 @@ fn check_options(path: &str, fx: &Effect, options: &InlineOptions) -> Result<(),
         if key == "bypass" && value != "0" && value != "auto" {
             return Err(graph_err(format!("effect `{path}`: bypass={value}, bypass is 0 or auto")));
         }
+        if key == "outputs" && value.parse::<u32>().is_err() {
+            return Err(graph_err(format!("effect `{path}`: outputs={value}, outputs is the number of copies of its repeated output")));
+        }
         if !NODE_KEYS.contains(&key.as_str()) && !fx.params.defs().iter().any(|d| d.name == *key) {
-            let known: Vec<&str> = fx.params.defs().iter().map(|d| d.name.as_str()).chain(NODE_KEYS).collect();
+            let known: Vec<&str> = fx
+                .params
+                .defs()
+                .iter()
+                .map(|d| d.name.as_str())
+                .chain(NODE_KEYS.into_iter().filter(|k| *k != "outputs" || fx.package().repeated_output().is_some()))
+                .collect();
             return Err(graph_err(format!("effect `{path}` has no parameter `{key}` (keys: {})", known.join(", "))));
         }
     }
@@ -1316,6 +1325,15 @@ fn open_items(
         let (label, mut fx) = open(&path)?;
         name_positional(&path, &fx, &mut options)?;
         check_options(&path, &fx, &options)?;
+        // `outputs=N`: the copies of a repeated output, fixed when the graph is built.
+        if let Some(i) = options.iter().position(|(k, _)| k == "outputs") {
+            let (_, value) = options.remove(i);
+            let n: u32 = value.parse().map_err(|_| {
+                graph_err(format!("effect `{path}`: outputs={value}, outputs is the number of copies of its repeated output"))
+            })?;
+            let package = fx.package().with_output_count(n).map_err(|e| graph_err(format!("effect `{path}`: {e}")))?;
+            fx = Effect::new(fx.program.ctx.clone(), package)?;
+        }
         apply_constants(&mut fx, &options);
         if !opened.is_empty() && fx.input_count() != 1 {
             return Err(graph_err(format!(

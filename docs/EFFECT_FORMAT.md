@@ -74,6 +74,7 @@ Each element of `outputs` (an array; the object form of earlier versions is an e
 |-------|---------|---------|
 | `name` | (required) | The texture a pass writes (see [Several outputs](#several-outputs)), also the output pad name of an effect with several outputs |
 | `bypass` | the first input | The input this output passes when the effect is switched off (`<effect>.enable`) |
+| `repeat` | none | (last output only, WGSL only) `{ "default": 2, "min": 1, "max": 3 }`: the output stands for a variable number of pads set by the node option `outputs=N`, see [Variable number of outputs](#variable-number-of-outputs) |
 
 Pixel formats: the GPU converter reads and writes `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (and reads `yuvj420p`/`yuvj422p`/`yuvj444p`).
@@ -139,6 +140,7 @@ A pass runs at the size of the effect output it writes (see [Several outputs](#s
 unless the shader of the pass that writes that output sets another size with `gpufx_output_size` (see [Output size](#output-size)). Input/texture/param names must be valid identifiers,
 must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
+Nor `outputs`: the inline key `outputs=N` sets the copies of a repeated output.
 
 **Several outputs from one pass.** `outputs` lists up to 4 names. The first is the main output (`out_tex`, written by
 `gpufx_write`); the others are `out_tex1`, `out_tex2`, `out_tex3` (written by `gpufx_write1`..`gpufx_write3`), bound after the
@@ -186,7 +188,7 @@ Rules:
 - Omitted, `outputs` is one output named after the main output of the last pass (`[{"name": "out"}]` for a last pass
   without `outputs`), so effects with one output need not declare it.
 - Each output name is written by exactly one pass of every group; that pass need not be the last.
-- Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable` or `bypass`.
+- Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable`, `bypass` or `outputs`. Only the last output may `repeat` (see [Variable number of outputs](#variable-number-of-outputs)).
 - A pass runs at the size of the first effect output it writes, or of output 0 when it writes none (a pass making
   textures for later passes); `globals.size`, `gpufx_uv` and `gpufx_in_bounds` follow that size. The outputs one
   pass writes must have the same size (the `gpufx_output_size` of the pass gives the same size for each of them), and a texture written by several passes is written at one size.
@@ -216,6 +218,35 @@ GLSL shaders get `uint gpufx_input_count()` and `uvec2 gpufx_input_size(uint i)`
 `gpufx_output_size` (see below) `gpufx_input_size(i)` gives the size of every effect input, bound by the pass or not.
 
 See `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
+
+### Variable number of outputs
+
+The last output may have `repeat` (`{ "default": 2, "min": 1, "max": 3 }`, same fields as an input `repeat`; WGSL only).
+It expands into outputs named `<name>0`, `<name>1`... (`part0`, `part1` for an output `part`). The node option
+`outputs=N` picks N (`graph='parts.zip=outputs=3'`, `[0]parts.zip=outputs=3[a][b][c]`); without it N is `default`.
+Labels do not change N: they name the pads from the first (`[a][b]`) or by name (`[part1=x]`; `[part=x]` and a
+copy past N are errors), and copies without a label are dropped like any output. N is fixed when the graph is built
+(the filter's output pads follow it) and is no shader parameter, so no package param may be named `outputs`.
+`min <= N <= max`, and the effect has at most 4 outputs after the expansion (`[{"name":"color"},{"name":"part","repeat":...}]`
+takes `outputs=3` at most). With N = 1 and no other output the pad is `default`, as for any effect of one output.
+
+- The copies share everything but the name: `bypass`, and the format rules of the output (the filter's `out_format`
+  takes one `|` entry per expanded pad).
+- One pass writes every copy: `"outputs": ["part"]` in the pass expands in place to `part0`... `partN-1`, bound in order
+  as `out_tex`, `out_tex1`... after the outputs listed before it (`["mask", "part"]` puts `part0` on `out_tex1`). A
+  later pass reading `"part"` reads every copy. The pass may write at most 4 textures after the expansion.
+- The shader writes the copies by index with two prelude helpers (every WGSL pass has them), indexed over the outputs
+  of the pass in that order:
+
+```wgsl
+fn gpufx_output_count() -> u32                       // number of textures the pass writes
+fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpufx_write1 (i = 1)...; other i do nothing
+```
+
+- `gpufx_output_size(out_index)` is called once per effect output, so once per copy with the copy's effect output
+  index (copy j of `part` after one fixed output is index `1 + j`); the copies of one pass must get one size.
+
+The package is compiled for that count; `gpufx pack --precompile` compiles the `default` count only.
 
 ### Output size
 
@@ -454,9 +485,9 @@ runs the same everywhere. The manifest does not check the 16 reads today: going 
 | Dispatch | One `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)` per pass, in manifest order, all in one compute pass; `w`, `h` = the size of the pass (`globals.size`). The shader declares `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); the runtime does not check it. Threads past the edge must return: `gpufx_in_bounds(id)` |
 | Pixel coordinates | `id.xy` of `global_invocation_id`, integers, origin at the top-left, y down; `textureLoad`/`imageStore` use `vec2i(x, y)` |
 | Normalised coordinates | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, the pixel centre, 0..1, v down |
-| Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores), `gpufx_write1`..`gpufx_write3` for extra outputs. GLSL versions take `uvec3` |
+| Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores), `gpufx_write1`..`gpufx_write3` for extra outputs, `gpufx_output_count()` and `gpufx_write_at(i, id, color)` to write them by index (WGSL only). GLSL versions take `uvec3` |
 | Derivatives | Not available in compute shaders: use `textureSampleLevel` / `textureLod` or `textureLoad` |
-| Reserved names | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, anything starting with `gpufx`; no parameter named `enable` or `bypass` |
+| Reserved names | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, anything starting with `gpufx`; no parameter named `enable`, `bypass` or `outputs` |
 
 **Colour**
 

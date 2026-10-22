@@ -46,6 +46,13 @@ fn example(name: &str) -> PathBuf {
 const SWAP: &str = "textureLoad(src, vec2i(id.xy), 0).bgra";
 const MATTE: &str = "vec4f(vec3f(textureLoad(src, vec2i(id.xy), 0).r), 1.0)";
 
+/// Writes copy `i` of the pass outputs from BASE on as (src.r, i, 0, 1).
+const PARTS_LOOP: &str = "let r = textureLoad(src, vec2i(id.xy), 0).r;\n    for (var i = BASE; i < gpufx_output_count(); i++) { gpufx_write_at(i, id, vec4f(r, f32(i - BASE) / 255.0, 0.0, 1.0)); }";
+
+fn part(src: &[u8], i: u8) -> Vec<u8> {
+    src.chunks(4).flat_map(|p| [p[0], i, 0, 255]).collect()
+}
+
 fn wgsl(body: &str) -> String {
     format!("@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {{\n    if (!gpufx_in_bounds(id)) {{ return; }}\n    {body}\n}}\n")
 }
@@ -115,6 +122,43 @@ impl Packages {
                     format!("{}{}", wgsl("let wa = i32(textureDimensions(a).x);\n    let p = vec2i(id.xy);\n    if (f32(id.x) >= globals.size.x) { return; }\n    if (p.x < wa) { gpufx_write(id, textureLoad(a, p, 0)); } else { gpufx_write(id, textureLoad(b, vec2i(p.x - wa, p.y), 0)); }"), "fn gpufx_output_size(o: u32) -> vec2u { if (o == 0u) { return gpufx_input_size(0u); } return vec2u(gpufx_input_size(0u).x + gpufx_input_size(1u).x, gpufx_input_size(0u).y); }\n"),
                 ),
             ],
+        );
+        // A repeated output: copy i is (src.r, i, 0, 1), written in a loop.
+        pkgs.add(
+            "parts",
+            r#"{"id":"t.parts","name":"Parts","api":1,"used_for":["gpufx"],"outputs":[{"name":"part","repeat":{"default":2,"min":1,"max":3}}],
+                "groups":[{"passes":[{"shader":"p.wgsl","inputs":["src"],"outputs":["part"]}]}]}"#,
+            &[("p.wgsl", wgsl(&PARTS_LOOP.replace("BASE", "0u")))],
+        );
+        // A fixed output before the copies; each copy is half as wide (gpufx_output_size of
+        // each pad).
+        pkgs.add(
+            "halves",
+            r#"{"id":"t.halves","name":"Halves","api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"half","repeat":{"default":1,"max":4}}],
+                "groups":[{"passes":[{"shader":"c.wgsl","inputs":["src"],"outputs":["color"]},{"shader":"h.wgsl","inputs":["src"],"outputs":["half"]}]}]}"#,
+            &[
+                ("c.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});"))),
+                (
+                    "h.wgsl",
+                    format!(
+                        "{}fn gpufx_output_size(o: u32) -> vec2u {{ let s = gpufx_input_size(0u); if (o == 0u) {{ return s; }} return vec2u(s.x / 2u, s.y); }}\n",
+                        wgsl(&PARTS_LOOP.replace("BASE", "0u"))
+                    ),
+                ),
+            ],
+        );
+        // Copies of different sizes: one pass writes one size.
+        pkgs.add(
+            "uneven",
+            r#"{"id":"t.uneven","name":"Uneven","api":1,"used_for":["gpufx"],"outputs":[{"name":"part","repeat":{"default":2}}],
+                "groups":[{"passes":[{"shader":"p.wgsl","inputs":["src"],"outputs":["part"]}]}]}"#,
+            &[(
+                "p.wgsl",
+                format!(
+                    "{}fn gpufx_output_size(o: u32) -> vec2u {{ return vec2u(gpufx_input_size(0u).x - o, gpufx_input_size(0u).y); }}\n",
+                    wgsl(&PARTS_LOOP.replace("BASE", "0u"))
+                ),
+            )],
         );
         // Sized by params: the top-left `w`x`h` of the input (0 when a param is 0).
         let crop_params =
@@ -608,4 +652,70 @@ fn input_size_indices_are_effect_inputs_on_a_pass_binding_some() {
         g.process(&ins, vec![ImageMut { data: &mut out, width: W, height: H, stride: W * 4 }], &FrameInfo::new(0.0, 0)).unwrap();
         assert_eq!(&out[..4], &[wb as u8, 0, 2, 255], "{name}: input 1 is `b`, `a` is not bound");
     }
+}
+
+#[test]
+fn a_repeated_output_takes_its_count_from_the_outputs_option() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(6);
+    // Default count, then `outputs=N`: pads `part0`... written by one pass in a loop.
+    let mut g = pkgs.graph(&ctx, "parts.zip").unwrap();
+    assert_eq!(g.output_names(), ["part0", "part1"]);
+    assert!(run_graph(&mut g, &[&src]) == [part(&src, 0), part(&src, 1)]);
+    for n in 1..=3u8 {
+        let mut g = pkgs.graph(&ctx, &format!("parts.zip=outputs={n}")).unwrap();
+        // One pad is `default`, as for any effect of one output.
+        let want: Vec<String> = if n == 1 { vec!["default".into()] } else { (0..n).map(|i| format!("part{i}")).collect() };
+        assert_eq!(g.output_names(), want);
+        // Every pad has its own format list (`out_format` takes one entry per pad).
+        assert!((0..n as usize).all(|k| g.output_formats(k)[0] == "rgba"));
+        assert!(run_graph(&mut g, &[&src]) == (0..n).map(|i| part(&src, i)).collect::<Vec<_>>(), "outputs={n}");
+        // The option is the graph's, not a parameter left for the caller.
+        assert!(g.inline_options()[0].is_empty());
+    }
+    // Labels on the copies, by position or by name; an unlabelled copy is dropped.
+    let mut g = pkgs.graph(&ctx, "[0]parts.zip=outputs=3[a][b][c]").unwrap();
+    assert_eq!(g.output_names(), ["a", "b", "c"]);
+    assert!(run_graph(&mut g, &[&src])[2] == part(&src, 2));
+    let mut g = pkgs.graph(&ctx, "[0]parts.zip=outputs=3[part2=z][part0=w]").unwrap();
+    assert_eq!(g.output_names(), ["z", "w"]);
+    assert_eq!((g.output_source(0), g.output_source(1)), (Source::Node(0, 2), Source::Node(0, 0)));
+    assert!(run_graph(&mut g, &[&src]) == [part(&src, 2), part(&src, 0)]);
+    // In a chain the first copy goes on.
+    let g = pkgs.graph(&ctx, "parts.zip=outputs=2|invert.zip").unwrap();
+    assert_eq!(g.effect_inputs(1), [Source::Node(0, 0)]);
+    // After a fixed output; four outputs at most after the expansion.
+    let g = pkgs.graph(&ctx, "halves.zip=outputs=3").unwrap();
+    assert_eq!(g.output_names(), ["color", "half0", "half1", "half2"]);
+
+    let cases = [
+        ("parts.zip=outputs=4", "writes 1 to 3 copies of its output `part`, got outputs=4"),
+        ("parts.zip=outputs=0", "got outputs=0"),
+        ("parts.zip=outputs=two", "outputs=two, outputs is the number of copies"),
+        ("halves.zip=outputs=4", "1 other outputs and outputs=4 make 5 outputs, more than 4"),
+        ("invert.zip=outputs=2", "fixed number of outputs"),
+        ("[0]parts.zip[part=x]", "`parts` has no output `part` (outputs: part0, part1)"),
+        ("[0]parts.zip[part5=x]", "has no output `part5`"),
+        ("[0]parts.zip[a][b][c]", "`parts` writes 2 outputs (part0, part1), got 3 labels"),
+    ];
+    for (text, want) in cases {
+        let got = match pkgs.graph(&ctx, text) {
+            Ok(_) => panic!("`{text}` was accepted"),
+            Err(e) => e.to_string(),
+        };
+        assert!(got.contains(want), "`{text}`: {got}");
+    }
+}
+
+#[test]
+fn every_copy_of_a_repeated_output_is_sized_by_its_index() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let g = pkgs.graph(&ctx, "halves.zip=outputs=2").unwrap();
+    let sizes: Vec<(u32, u32)> = (0..3).map(|k| g.output_size(k, &[(W, H)]).unwrap()).collect();
+    assert_eq!(sizes, [(W, H), (W / 2, H), (W / 2, H)]);
+    // Copies one pass writes have one size.
+    let e = pkgs.graph(&ctx, "uneven.zip").unwrap().output_size(0, &[(W, H)]).unwrap_err().to_string();
+    assert!(e.contains("the outputs of one pass have one size"), "{e}");
 }
