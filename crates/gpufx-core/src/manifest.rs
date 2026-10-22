@@ -46,6 +46,13 @@ pub struct Manifest {
     /// Alternative pass lists, the first whose `requires` match the device runs. Required
     /// in JSON; empty once the manifest is resolved to one group (then in `passes`).
     pub groups: Vec<GroupDef>,
+    /// Pass outputs that are no effect output (textures between passes) with a
+    /// [`PixelLayout`] other than `rgba`. A pass output not listed is `rgba`.
+    #[serde(default)]
+    pub intermediates: Vec<IntermediateDef>,
+    /// The layouts of [`Manifest::off_outputs`], in the same order. Not read from JSON.
+    #[serde(skip)]
+    pub off_layouts: Vec<PixelLayout>,
     /// Optional outputs a graph node switched off (`<name>=off`, see
     /// [`Manifest::with_outputs_off`]): no longer in `outputs`, still written by their pass,
     /// into a 1x1 stand-in texture. Not read from JSON.
@@ -92,6 +99,105 @@ pub struct InputDef {
     /// `<name>1`...; a graph node sets the number by the labels it reads. See [`Manifest::with_input_count`].
     #[serde(default)]
     pub repeat: Option<RepeatRule>,
+    /// The textures the shader sees for this input (see [`PixelLayout`]).
+    #[serde(default)]
+    pub pixel_layout: PixelLayout,
+}
+
+/// The textures a shader sees for one input or output, JSON key `pixel_layout`. Not a pixel
+/// format: the formats of one kind only differ in plane packing and bit depth, the shader
+/// sees the same float textures. `rgba` (the default) is one RGBA texture; the others are
+/// planes: Y (`r`), UV (`rg`, subsampled as named, sizes rounded up) and A (`r`, full size).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PixelLayout {
+    #[default]
+    Rgba,
+    Yuv420,
+    Yuv422,
+    Yuv444,
+    Yuva420,
+    Yuva444,
+    Y,
+}
+
+/// One texture of a [`PixelLayout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plane {
+    Rgba,
+    Y,
+    Uv,
+    A,
+}
+
+impl Plane {
+    /// The suffix of the shader names of the plane (`in_<name>_<suffix>`, `gpufx_write_<suffix>`).
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Plane::Rgba => "rgba",
+            Plane::Y => "y",
+            Plane::Uv => "uv",
+            Plane::A => "a",
+        }
+    }
+
+    /// Channels of the plane texture.
+    pub fn channels(self) -> u32 {
+        match self {
+            Plane::Rgba => 4,
+            Plane::Uv => 2,
+            Plane::Y | Plane::A => 1,
+        }
+    }
+}
+
+impl PixelLayout {
+    /// The textures of the layout, in binding order.
+    pub fn planes(self) -> &'static [Plane] {
+        match self {
+            PixelLayout::Rgba => &[Plane::Rgba],
+            PixelLayout::Yuv420 | PixelLayout::Yuv422 | PixelLayout::Yuv444 => &[Plane::Y, Plane::Uv],
+            PixelLayout::Yuva420 | PixelLayout::Yuva444 => &[Plane::Y, Plane::Uv, Plane::A],
+            PixelLayout::Y => &[Plane::Y],
+        }
+    }
+
+    /// How many luma pixels one UV texel spans, (x, y); (1, 1) for a layout without UV.
+    pub fn chroma_scale(self) -> (u32, u32) {
+        match self {
+            PixelLayout::Yuv420 | PixelLayout::Yuva420 => (2, 2),
+            PixelLayout::Yuv422 => (2, 1),
+            _ => (1, 1),
+        }
+    }
+
+    /// The size of `plane` for a frame of `size` (the size of Y): UV rounds up, as FFmpeg does.
+    pub fn plane_size(self, plane: Plane, size: (u32, u32)) -> (u32, u32) {
+        if plane != Plane::Uv {
+            return size;
+        }
+        let (sx, sy) = self.chroma_scale();
+        (size.0.div_ceil(sx), size.1.div_ceil(sy))
+    }
+
+    /// The texture key of `plane` of the texture `name`: `name` itself for `rgba`, else
+    /// `<name>.<suffix>` (not an identifier, so no other name can take it).
+    pub fn plane_key(self, name: &str, plane: Plane) -> String {
+        if self == PixelLayout::Rgba {
+            name.to_string()
+        } else {
+            format!("{name}.{}", plane.suffix())
+        }
+    }
+}
+
+/// A pass output that is no effect output, with its layout (see [`Manifest::intermediates`]).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntermediateDef {
+    pub name: String,
+    #[serde(default)]
+    pub pixel_layout: PixelLayout,
 }
 
 /// How many pads a repeated input expands to.
@@ -161,6 +267,9 @@ pub struct OutputDef {
     /// no pad, no texture. See [`Manifest::with_outputs_off`].
     #[serde(default)]
     pub optional: bool,
+    /// The textures the shader writes for this output (see [`PixelLayout`]).
+    #[serde(default)]
+    pub pixel_layout: PixelLayout,
 }
 
 /// Most outputs an effect may have.
@@ -444,6 +553,7 @@ fn default_inputs() -> Vec<InputDef> {
         same_size: false,
         mipmaps: false,
         repeat: None,
+        pixel_layout: PixelLayout::Rgba,
     }]
 }
 
@@ -501,7 +611,13 @@ impl Manifest {
         if m.outputs.is_empty() {
             // One output: what the last pass writes first (every group must write it).
             let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
-            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None, repeat: None, optional: false });
+            m.outputs.push(OutputDef {
+                name: last.unwrap_or_else(|| "out".into()),
+                bypass: None,
+                repeat: None,
+                optional: false,
+                pixel_layout: PixelLayout::Rgba,
+            });
         }
         // Optional outputs may be off: the copies fit beside the others that are not.
         let fixed = m.outputs.iter().take(m.outputs.len().saturating_sub(1)).filter(|o| !o.optional).count() as u32;
@@ -743,7 +859,96 @@ impl Manifest {
                 }
             }
         }
+        self.validate_layouts()?;
         Ok(())
+    }
+
+    /// The `pixel_layout` rules: intermediates name pass outputs that are no effect output,
+    /// a pass writes at most [`MAX_PASS_OUTPUTS`] storage textures once the layouts are
+    /// expanded into planes, and planes are only for WGSL shaders.
+    fn validate_layouts(&self) -> Result<(), Error> {
+        let bad = |msg: String| Err(Error::Manifest(msg));
+        for i in &self.inputs {
+            if i.pixel_layout != PixelLayout::Rgba && (i.mipmaps || i.repeat.is_some()) {
+                return bad(format!("input `{}`: mipmaps and repeat are only for pixel_layout rgba", i.name));
+            }
+        }
+        if self.outputs.last().is_some_and(|o| o.repeat.is_some() && o.pixel_layout != PixelLayout::Rgba) {
+            return bad("a repeated output is only for pixel_layout rgba".into());
+        }
+        let lists = self.pass_lists();
+        let written = |n: &str| lists.iter().any(|(_, l)| l.iter().any(|p| p.outputs.iter().any(|o| o == n)));
+        for (k, t) in self.intermediates.iter().enumerate() {
+            let n = &t.name;
+            if self.intermediates[..k].iter().any(|x| x.name == *n) {
+                return bad(format!("intermediate `{n}` is listed twice"));
+            }
+            if self.outputs.iter().any(|o| o.name == *n) || self.off_outputs.contains(n) {
+                return bad(format!("intermediate `{n}` is an output of the effect: give its pixel_layout in `outputs`"));
+            }
+            if !self.groups.is_empty() && !written(n) {
+                return bad(format!("intermediate `{n}` is written by no pass"));
+            }
+        }
+        for (label, passes) in &lists {
+            let at = |i: usize| match label {
+                Some(g) => format!("group {g}: pass {i}"),
+                None => format!("pass {i}"),
+            };
+            for (i, pass) in passes.iter().enumerate() {
+                let planes: usize = pass.outputs.iter().map(|o| self.layout_of(o).planes().len()).sum();
+                if planes > MAX_PASS_OUTPUTS {
+                    return bad(format!(
+                        "{} writes {planes} storage textures once pixel_layout is expanded into planes, more than {MAX_PASS_OUTPUTS}",
+                        at(i)
+                    ));
+                }
+                if pass.language() == ShaderLanguage::Glsl && self.pass_has_planes(pass) {
+                    return bad(format!("{} reads or writes a pixel_layout other than rgba, which is only for WGSL shaders", at(i)));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The layout of the texture `name` a pass reads or writes: an effect input or output
+    /// (on or off), an intermediate, else `rgba` (package textures, other pass outputs).
+    pub fn layout_of(&self, name: &str) -> PixelLayout {
+        self.inputs
+            .iter()
+            .find(|i| i.name == name)
+            .map(|i| i.pixel_layout)
+            .or_else(|| self.outputs.iter().find(|o| o.name == name).map(|o| o.pixel_layout))
+            .or_else(|| self.off_outputs.iter().position(|o| o == name).and_then(|k| self.off_layouts.get(k).copied()))
+            .or_else(|| self.intermediates.iter().find(|t| t.name == name).map(|t| t.pixel_layout))
+            .unwrap_or_default()
+    }
+
+    /// Whether pass `def` reads or writes a texture of a layout other than `rgba` (its
+    /// prelude is then the plane one; see `runtime::prelude`). `def.inputs` omitted reads
+    /// every effect input.
+    pub fn pass_has_planes(&self, def: &PassDef) -> bool {
+        let planar = |n: &str| self.layout_of(n) != PixelLayout::Rgba;
+        let reads = match &def.inputs {
+            Some(v) => v.iter().any(|n| planar(n)),
+            None => self.inputs.iter().any(|i| i.pixel_layout != PixelLayout::Rgba),
+        };
+        reads || def.outputs.iter().any(|n| planar(n))
+    }
+
+    /// Whether any input, output or intermediate has a layout other than `rgba`.
+    pub fn has_planes(&self) -> bool {
+        self.inputs.iter().any(|i| i.pixel_layout != PixelLayout::Rgba)
+            || self.outputs.iter().any(|o| o.pixel_layout != PixelLayout::Rgba)
+            || self.off_layouts.iter().any(|l| *l != PixelLayout::Rgba)
+            || self.intermediates.iter().any(|t| t.pixel_layout != PixelLayout::Rgba)
+    }
+
+    /// The input textures an effect is bound with, in order: one per input, or one per plane
+    /// of an input with planes (see [`PixelLayout::plane_key`]). The input names for an
+    /// effect without planes.
+    pub fn input_keys(&self) -> Vec<String> {
+        self.inputs.iter().flat_map(|i| i.pixel_layout.planes().iter().map(|&p| i.pixel_layout.plane_key(&i.name, p))).collect()
     }
 
     /// The output whose size pass `pass` runs at: the first effect output it writes, else
@@ -969,6 +1174,7 @@ impl Manifest {
                     if optional.is_empty() { "none".to_string() } else { optional.join(", ") }
                 )));
             }
+            m.off_layouts.push(m.outputs[k].pixel_layout);
             m.outputs.remove(k);
             m.off_outputs.push(name.clone());
             m.off_indices.push(index);
@@ -1551,5 +1757,77 @@ mod tests {
             .contains("cannot read its own output `b`"));
         assert!(err(r#"{"shader":"a.wgsl","outputs":["a","out_tex1"]},{"shader":"b.wgsl"}"#).contains("not a valid identifier"));
         assert!(err(r#"{"shader":"a.wgsl","inputs":["b"],"outputs":["a","b"]},{"shader":"b.wgsl"}"#).contains("reads `b`"));
+    }
+
+    fn layouts(body: &str) -> Result<Manifest, Error> {
+        Manifest::parse(format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],{body}}}"#).as_bytes())
+    }
+
+    #[test]
+    fn pixel_layout_defaults_to_rgba_and_expands_into_planes() {
+        let m = layouts(
+            r#""inputs":[{"name":"src","pixel_layout":"yuv420"},{"name":"bg"}],
+               "outputs":[{"name":"comp","pixel_layout":"yuva420"},{"name":"matte","pixel_layout":"y"}],
+               "intermediates":[{"name":"tmp","pixel_layout":"yuv444"}],
+               "groups":[{"passes":[{"shader":"a.wgsl","outputs":["tmp"]},{"shader":"b.wgsl","inputs":["tmp","bg"],"outputs":["comp","matte"]}]}]"#,
+        )
+        .unwrap();
+        assert_eq!(m.layout_of("src"), PixelLayout::Yuv420);
+        assert_eq!(m.layout_of("bg"), PixelLayout::Rgba);
+        assert_eq!(m.layout_of("comp"), PixelLayout::Yuva420);
+        assert_eq!(m.layout_of("tmp"), PixelLayout::Yuv444);
+        assert!(m.has_planes());
+        assert_eq!(m.input_keys(), ["src.y", "src.uv", "bg"]);
+        assert_eq!(PixelLayout::Yuv420.plane_size(Plane::Uv, (5, 3)), (3, 2));
+        assert_eq!(PixelLayout::Yuv422.plane_size(Plane::Uv, (5, 3)), (3, 3));
+        assert_eq!(PixelLayout::Yuva420.plane_size(Plane::A, (5, 3)), (5, 3));
+        let g = m.with_group(0);
+        assert!(g.pass_has_planes(&g.passes[0]) && g.pass_has_planes(&g.passes[1]));
+        let plain = layouts(r#""groups":[{"passes":[{"shader":"a.wgsl"}]}]"#).unwrap();
+        assert!(!plain.has_planes() && !plain.pass_has_planes(&plain.groups[0].passes[0]));
+        assert_eq!(plain.input_keys(), ["src"]);
+        let bad = layouts(r#""inputs":[{"name":"src","pixel_layout":"nv12"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]"#);
+        assert!(bad.unwrap_err().to_string().contains("unknown variant `nv12`"));
+    }
+
+    #[test]
+    fn pixel_layout_rules_reject_bad_manifests() {
+        let err = |body: &str| layouts(body).unwrap_err().to_string();
+        // yuva420 (3 textures) and yuv420 (2) in one pass: 5 storage textures, more than 4.
+        assert!(err(r#""outputs":[{"name":"a","pixel_layout":"yuva420"},{"name":"b","pixel_layout":"yuv420"}],
+                       "groups":[{"passes":[{"shader":"a.wgsl","outputs":["a","b"]}]}]"#)
+        .contains("writes 5 storage textures"));
+        // Two plain outputs with a yuva420 one fit: 4.
+        layouts(
+            r#""outputs":[{"name":"a","pixel_layout":"yuva420"},{"name":"b"}],
+               "groups":[{"passes":[{"shader":"a.wgsl","outputs":["a","b"]}]}]"#,
+        )
+        .unwrap();
+        assert!(err(r#""outputs":[{"name":"out","pixel_layout":"yuv420"}],"groups":[{"passes":[{"shader":"a.glsl"}]}]"#)
+            .contains("only for WGSL shaders"));
+        assert!(err(r#""inputs":[{"name":"src","pixel_layout":"y"}],"groups":[{"passes":[{"shader":"a.comp"}]}]"#)
+            .contains("only for WGSL shaders"));
+        assert!(err(r#""inputs":[{"name":"src","pixel_layout":"y","mipmaps":true}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]"#)
+            .contains("only for pixel_layout rgba"));
+        assert!(err(r#""outputs":[{"name":"o","pixel_layout":"y","repeat":{"default":2}}],"groups":[{"passes":[{"shader":"a.wgsl","outputs":["o"]}]}]"#)
+            .contains("only for pixel_layout rgba"));
+        assert!(err(r#""intermediates":[{"name":"out","pixel_layout":"y"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]"#)
+            .contains("is an output of the effect"));
+        assert!(err(r#""intermediates":[{"name":"tmp","pixel_layout":"y"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]"#)
+            .contains("written by no pass"));
+        let two = r#""groups":[{"passes":[{"shader":"a.wgsl","outputs":["tmp"]},{"shader":"b.wgsl","inputs":["tmp"]}]}]"#;
+        assert!(err(&format!(r#""intermediates":[{{"name":"tmp"}},{{"name":"tmp"}}],{two}"#)).contains("listed twice"));
+    }
+
+    #[test]
+    fn an_output_switched_off_keeps_its_pixel_layout() {
+        let m = layouts(
+            r#""outputs":[{"name":"color"},{"name":"matte","optional":true,"pixel_layout":"y"}],
+               "groups":[{"passes":[{"shader":"a.wgsl","outputs":["color","matte"]}]}]"#,
+        )
+        .unwrap();
+        let off = m.with_outputs_off(&["matte".to_string()]).unwrap();
+        assert_eq!(off.layout_of("matte"), PixelLayout::Y);
+        assert!(off.has_planes());
     }
 }

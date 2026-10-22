@@ -731,6 +731,15 @@ fn desc_of(f: &Frame) -> Desc {
 /// shared buffer. Without `info` the effects are bypassed: each output is its source
 /// input pad (the pad whose size it has) converted to the output format; `inputs` may
 /// then hold only the first pads.
+/// Graphs do not carry planes yet: an effect with a `pixel_layout` other than `rgba` fails
+/// here (the conversions and pool keys for planes come with them).
+fn no_planes(effects: &[Effect]) -> Result<(), Error> {
+    match effects.iter().map(|fx| &fx.package().manifest).find(|m| m.has_planes()) {
+        Some(m) => Err(Error::Manifest(format!("effect `{}`: pixel_layout other than rgba is not supported in a graph yet", m.name))),
+        None => Ok(()),
+    }
+}
+
 pub(crate) fn run(
     effects: &mut [Effect],
     topo: &Topology,
@@ -739,6 +748,7 @@ pub(crate) fn run(
     outs: &mut [FrameMut],
     info: Option<&FrameInfo>,
 ) -> Result<(), Error> {
+    no_planes(effects)?;
     let bypass = info.is_none();
     if !bypass {
         for fx in effects.iter_mut() {
@@ -911,6 +921,7 @@ pub(crate) fn run_gpu(
     info: Option<&FrameInfo>,
     enc: &mut wgpu::CommandEncoder,
 ) -> Result<(), Error> {
+    no_planes(effects)?;
     let bypass = info.is_none();
     if !bypass {
         for fx in effects.iter_mut() {

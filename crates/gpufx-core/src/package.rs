@@ -42,7 +42,7 @@ impl Package {
         Self::from_files(read_zip(bytes)?)
     }
 
-    fn from_files(files: HashMap<String, Vec<u8>>) -> Result<Self, Error> {
+    pub(crate) fn from_files(files: HashMap<String, Vec<u8>>) -> Result<Self, Error> {
         let Some(manifest_bytes) = files.get("manifest.json") else {
             return Err(used_for::wrong_kind(&files, "manifest.json"));
         };

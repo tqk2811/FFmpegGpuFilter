@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::convert::Converter;
 use crate::frame::{Frame, FrameMut};
 use crate::graph::{run, FrameIo, Topology};
-use crate::manifest::{PassDef, ShaderLanguage};
+use crate::manifest::{PassDef, PixelLayout, Plane, ShaderLanguage};
 use crate::mips::MipGen;
 use crate::package::Package;
 use crate::params::ParamBlock;
@@ -66,6 +66,47 @@ pub(crate) fn coop_f16(adapter: &wgpu::Adapter) -> bool {
 }
 
 /// The high-performance adapter of `backend`, else its software fallback.
+/// Whether the planes of a `pixel_layout` other than `rgba` can be 16-bit floats: the
+/// storage of `r16float`/`rg16float` is an adapter specific format feature.
+fn plane_f16(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
+    device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+        && [wgpu::TextureFormat::R16Float, wgpu::TextureFormat::Rg16Float]
+            .iter()
+            .all(|&f| adapter.get_texture_format_features(f).allowed_usages.contains(wgpu::TextureUsages::STORAGE_BINDING))
+}
+
+/// The texture format of `plane` of a pass texture: `deep` picks `rgba16float` over
+/// `rgba8unorm` for `rgba`; `f16` (see [`GpuContext::plane_f16`]) 16-bit planes over 32-bit ones.
+pub(crate) fn plane_format(plane: Plane, deep: bool, f16: bool) -> wgpu::TextureFormat {
+    use wgpu::TextureFormat as F;
+    match (plane.channels(), f16) {
+        (4, _) => {
+            if deep {
+                F::Rgba16Float
+            } else {
+                F::Rgba8Unorm
+            }
+        }
+        (2, true) => F::Rg16Float,
+        (2, false) => F::Rg32Float,
+        (_, true) => F::R16Float,
+        (_, false) => F::R32Float,
+    }
+}
+
+/// The WGSL name of a storage texture format of [`plane_format`].
+fn wgsl_format(f: wgpu::TextureFormat) -> &'static str {
+    use wgpu::TextureFormat as F;
+    match f {
+        F::Rgba16Float => "rgba16float",
+        F::Rgba8Unorm => "rgba8unorm",
+        F::Rg16Float => "rg16float",
+        F::Rg32Float => "rg32float",
+        F::R16Float => "r16float",
+        _ => "r32float",
+    }
+}
+
 pub(crate) fn request_adapter(backend: Backend) -> Result<wgpu::Adapter, Error> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: backend.wgpu(),
@@ -142,6 +183,9 @@ pub struct GpuContext {
     /// The adapter lists 16x16x16 cooperative matrices with f16 A/B and an f32 accumulator,
     /// the shape of the tensor core convolutions (see `nn::kernels::coop_available`).
     pub(crate) coop_f16: bool,
+    /// The adapter can write `r16float` and `rg16float` storage textures: planes of a
+    /// `pixel_layout` other than `rgba` use them (else `r32float`/`rg32float`).
+    pub(crate) plane_f16: bool,
     /// Held while Vulkan frames stage their semaphores and submit; true once a submission
     /// failed (the device is then no longer used for Vulkan frames).
     #[cfg_attr(not(any(windows, all(unix, not(target_vendor = "apple")))), allow(dead_code))]
@@ -211,7 +255,9 @@ impl GpuContext {
         }
         let (device, queue) = open_device(adapter, label, extra)?;
         let mut ctx = Self::from_device(device, queue, adapter.get_info(), cache_dir);
-        Arc::get_mut(&mut ctx).expect("new").coop_f16 = coop_f16(adapter);
+        let c = Arc::get_mut(&mut ctx).expect("new");
+        c.coop_f16 = coop_f16(adapter);
+        c.plane_f16 = plane_f16(adapter, &c.device);
         Ok(ctx)
     }
 
@@ -237,6 +283,7 @@ impl GpuContext {
             shader_cache,
             vulkan_queue_family: None,
             coop_f16: false,
+            plane_f16: false,
             vulkan_submit: std::sync::Mutex::new(false),
             #[cfg(target_vendor = "apple")]
             videotoolbox: None,
@@ -373,6 +420,11 @@ pub(crate) struct Pass {
     /// The textures it writes: the main one at binding 2, then the extra ones bound after
     /// the inputs (see [`extra_output_binding`]).
     pub(crate) outputs: Vec<String>,
+    /// The keys of the textures bound to `inputs` and `outputs`, in binding order: the names
+    /// themselves, except for the planes of a `pixel_layout` other than `rgba`
+    /// (see [`PixelLayout::plane_key`]).
+    pub(crate) input_keys: Vec<String>,
+    pub(crate) output_keys: Vec<String>,
     /// The effect output whose size the pass runs at (see [`crate::Manifest::pass_size`]).
     pub(crate) size_of: usize,
     /// The shader defines a function named `gpufx_output_size`.
@@ -974,9 +1026,11 @@ impl Effect {
         let manifest = &program.package.manifest;
         // Frame textures are seen at level 0 only, unless the input asks for its mips.
         let level0 = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor { mip_level_count: Some(1), ..Default::default() });
+        // One texture per input, or one per plane of an input with planes (see `input_keys`).
+        let input_keys = manifest.input_keys();
         let lookup = |name: &str| -> wgpu::TextureView {
-            if let Some(i) = manifest.inputs.iter().position(|d| d.name == name) {
-                if manifest.inputs[i].mipmaps {
+            if let Some(i) = input_keys.iter().position(|k| k == name) {
+                if manifest.inputs.iter().any(|d| d.name == name && d.mipmaps) {
                     inputs[i].create_view(&Default::default())
                 } else {
                     level0(inputs[i])
@@ -992,9 +1046,19 @@ impl Effect {
             let format = if deep { wgpu::TextureFormat::Rgba16Float } else { wgpu::TextureFormat::Rgba8Unorm };
             crate::convert::texture_2d(device, "gpufx off output", 1, 1, format, wgpu::TextureUsages::STORAGE_BINDING)
         });
-        let written = |name: &str| match &off {
-            Some(t) if manifest.off_outputs.iter().any(|n| n == name) => level0(t),
-            _ => level0(&outputs[name]),
+        let f16 = program.ctx.plane_f16;
+        let written = |key: &str| {
+            let (name, plane) = key.split_once('.').unwrap_or((key, ""));
+            match &off {
+                // A plane of an output switched off: a 1x1 stand-in of its format.
+                Some(_) if !plane.is_empty() && manifest.off_outputs.iter().any(|n| n == name) => {
+                    let plane = manifest.layout_of(name).planes().iter().copied().find(|p| p.suffix() == plane).unwrap_or(Plane::Y);
+                    let format = plane_format(plane, deep, f16);
+                    level0(&crate::convert::texture_2d(device, "gpufx off output", 1, 1, format, wgpu::TextureUsages::STORAGE_BINDING))
+                }
+                Some(t) if manifest.off_outputs.iter().any(|n| n == name) => level0(t),
+                _ => level0(&outputs[key]),
+            }
         };
         let bind_groups = passes
             .iter()
@@ -1003,9 +1067,9 @@ impl Effect {
                 if !self.runs(i) {
                     return None;
                 }
-                let views: Vec<wgpu::TextureView> = pass.inputs.iter().map(|n| lookup(n)).collect();
-                let out_view = written(&pass.outputs[0]);
-                let extra_views: Vec<wgpu::TextureView> = pass.outputs[1..].iter().map(|n| written(n)).collect();
+                let views: Vec<wgpu::TextureView> = pass.input_keys.iter().map(|n| lookup(n)).collect();
+                let out_view = written(&pass.output_keys[0]);
+                let extra_views: Vec<wgpu::TextureView> = pass.output_keys[1..].iter().map(|n| written(n)).collect();
                 let mut entries = vec![
                     wgpu::BindGroupEntry { binding: 0, resource: self.globals[pass.size_of].as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 1, resource: self.params_buf.as_entire_binding() },
@@ -1020,7 +1084,7 @@ impl Effect {
                 }
                 for (k, v) in extra_views.iter().enumerate() {
                     entries.push(wgpu::BindGroupEntry {
-                        binding: extra_output_binding(pass.inputs.len(), k + 1),
+                        binding: extra_output_binding(views.len(), k + 1),
                         resource: wgpu::BindingResource::TextureView(v),
                     });
                 }
@@ -1122,7 +1186,11 @@ fn prelude(
     extra_outputs: usize,
     copies: Option<(usize, usize)>,
     deep: bool,
+    planes: Option<&PassPlanes>,
 ) -> String {
+    if let Some(planes) = planes {
+        return plane_prelude(params, inputs, arrays, copies, deep, planes);
+    }
     let mut s = String::from(
         "// ---- generated by gpufx ----\n\
          struct GpufxGlobals {\n    size: vec2f,\n    time: f32,\n    frame: u32,\n    \
@@ -1172,6 +1240,129 @@ fn prelude(
         "fn gpufx_in_bounds(id: vec3u) -> bool { return f32(id.x) < globals.size.x && f32(id.y) < globals.size.y; }\n\
          fn gpufx_uv(id: vec3u) -> vec2f { return (vec2f(id.xy) + 0.5) / globals.size; }\n\
          fn gpufx_write(id: vec3u, c: vec4f) { textureStore(out_tex, vec2i(id.xy), clamp(c, vec4f(0.0), vec4f(1.0))); }\n\
+         // ---- end of gpufx prelude ----\n",
+    );
+    s
+}
+
+/// The `pixel_layout` of each texture a pass binds, for a pass with planes (see
+/// [`crate::Manifest::pass_has_planes`]); other passes get none, so their prelude and
+/// shader cache key are as before planes existed.
+pub(crate) struct PassPlanes {
+    /// One per pass input (package textures are `rgba`).
+    pub(crate) inputs: Vec<PixelLayout>,
+    /// One per pass output.
+    pub(crate) outputs: Vec<PixelLayout>,
+    /// Planes are 16-bit floats (see [`GpuContext::plane_f16`]).
+    pub(crate) f16: bool,
+}
+
+impl PassPlanes {
+    fn of(ctx: &GpuContext, pkg: &Package, inputs: &[String], def: &PassDef) -> Option<Self> {
+        let m = &pkg.manifest;
+        m.pass_has_planes(def).then(|| PassPlanes {
+            inputs: inputs.iter().map(|n| m.layout_of(n)).collect(),
+            outputs: def.outputs.iter().map(|n| m.layout_of(n)).collect(),
+            f16: ctx.plane_f16,
+        })
+    }
+
+    /// The sampled textures, in binding order: (key, input index, plane).
+    fn textures(&self, inputs: &[String]) -> Vec<(String, usize, Plane)> {
+        inputs
+            .iter()
+            .zip(&self.inputs)
+            .enumerate()
+            .flat_map(|(i, (n, l))| l.planes().iter().map(move |&p| (l.plane_key(n, p), i, p)))
+            .collect()
+    }
+
+    /// The storage textures, in binding order (the first at binding 2): (key, output index, plane).
+    fn storage(&self, outputs: &[String]) -> Vec<(String, usize, Plane)> {
+        outputs
+            .iter()
+            .zip(&self.outputs)
+            .enumerate()
+            .flat_map(|(k, (n, l))| l.planes().iter().map(move |&p| (l.plane_key(n, p), k, p)))
+            .collect()
+    }
+}
+
+/// The prelude of a pass with planes: an `rgba` input is bound as `<name>` and an `rgba`
+/// output written with `gpufx_write{k}` as in [`prelude`]; a planar input is bound as
+/// `in_<name>_y`/`_uv`/`_a`, a planar output written with `gpufx_write{k}_y`/`_uv`/`_a(p, v)`
+/// (`p` is the texel of that plane) and `gpufx_chroma_scale{k}()` gives the luma pixels one
+/// UV texel spans. Bindings: the storage textures in order, the first at 2, the others after
+/// the sampled ones (see [`extra_output_binding`]).
+fn plane_prelude(
+    params: &ParamBlock,
+    inputs: &[String],
+    arrays: &[bool],
+    copies: Option<(usize, usize)>,
+    deep: bool,
+    planes: &PassPlanes,
+) -> String {
+    let mut s = String::from(
+        "// ---- generated by gpufx (planes) ----\n\
+         struct GpufxGlobals {\n    size: vec2f,\n    time: f32,\n    frame: u32,\n    \
+         time_int: i32,\n    time_frac: f32,\n    pixel_aspect: f32,\n    gpufx_reserved: f32,\n};\n",
+    );
+    s.push_str(&params.wgsl_struct());
+    s.push_str(&params.expr_functions(false));
+    s.push_str(
+        "@group(0) @binding(0) var<uniform> globals: GpufxGlobals;\n\
+         @group(0) @binding(1) var<uniform> params: GpufxParams;\n\
+         @group(0) @binding(3) var smp: sampler;\n",
+    );
+    let textures = planes.textures(inputs);
+    for (b, (_, i, plane)) in textures.iter().enumerate() {
+        let name = &inputs[*i];
+        let ty = if arrays[*i] { "texture_2d_array" } else { "texture_2d" };
+        let var = if *plane == Plane::Rgba { name.clone() } else { format!("in_{name}_{}", plane.suffix()) };
+        s.push_str(&format!("@group(0) @binding({}) var {var}: {ty}<f32>;\n", FIRST_TEXTURE_BINDING + b as u32));
+    }
+    let outputs: Vec<String> = (0..planes.outputs.len()).map(|k| k.to_string()).collect();
+    for (j, (_, k, plane)) in planes.storage(&outputs).iter().enumerate() {
+        let binding = if j == 0 { 2 } else { extra_output_binding(textures.len(), j) };
+        let ks = if *k == 0 { String::new() } else { k.to_string() };
+        let format = wgsl_format(plane_format(*plane, deep, planes.f16));
+        if *plane == Plane::Rgba {
+            s.push_str(&format!(
+                "@group(0) @binding({binding}) var out_tex{ks}: texture_storage_2d<{format}, write>;\n\
+                 fn gpufx_write{ks}(id: vec3u, c: vec4f) {{ textureStore(out_tex{ks}, vec2i(id.xy), clamp(c, vec4f(0.0), vec4f(1.0))); }}\n"
+            ));
+            continue;
+        }
+        let suf = plane.suffix();
+        let (ty, texel) = if *plane == Plane::Uv { ("vec2f", "vec4f(v, 0.0, 1.0)") } else { ("f32", "vec4f(v, 0.0, 0.0, 1.0)") };
+        s.push_str(&format!(
+            "@group(0) @binding({binding}) var out_tex{ks}_{suf}: texture_storage_2d<{format}, write>;\n\
+             fn gpufx_write{ks}_{suf}(p: vec2u, v: {ty}) {{ textureStore(out_tex{ks}_{suf}, vec2i(p), clamp({texel}, vec4f(0.0), vec4f(1.0))); }}\n"
+        ));
+        if *plane == Plane::Uv {
+            let (sx, sy) = planes.outputs[*k].chroma_scale();
+            s.push_str(&format!("fn gpufx_chroma_scale{ks}() -> vec2u {{ return vec2u({sx}u, {sy}u); }}\n"));
+        }
+    }
+    if let Some((first, count)) = copies {
+        // As in `prelude`; only the `rgba` outputs have a `gpufx_write{k}` (a repeated output is `rgba`).
+        s.push_str(&format!(
+            "fn gpufx_output_count() -> u32 {{ return {}u; }}\nfn gpufx_write_at(i: u32, id: vec3u, c: vec4f) {{\n    switch i {{\n",
+            planes.outputs.len()
+        ));
+        for (k, _) in planes.outputs.iter().enumerate().filter(|(_, l)| **l == PixelLayout::Rgba) {
+            let ks = if k == 0 { String::new() } else { k.to_string() };
+            s.push_str(&format!("        case {k}u: {{ gpufx_write{ks}(id, c); }}\n"));
+        }
+        s.push_str("        default: {}\n    }\n}\n");
+        s.push_str(&format!(
+            "fn gpufx_copy_count() -> u32 {{ return {count}u; }}\n\
+             fn gpufx_write_copy(j: u32, id: vec3u, c: vec4f) {{ if (j < {count}u) {{ gpufx_write_at({first}u + j, id, c); }} }}\n"
+        ));
+    }
+    s.push_str(
+        "fn gpufx_in_bounds(id: vec3u) -> bool { return f32(id.x) < globals.size.x && f32(id.y) < globals.size.y; }\n\
+         fn gpufx_uv(id: vec3u) -> vec2f { return (vec2f(id.xy) + 0.5) / globals.size; }\n\
          // ---- end of gpufx prelude ----\n",
     );
     s
@@ -1275,7 +1466,9 @@ fn input_helpers(pkg: &Package, bound: &[String], sizes_from_buffer: bool) -> St
         s.push_str(&format!("fn gpufx_input_count() -> u32 {{ return {}u; }}\n", names.len()));
         s.push_str("fn gpufx_input_size(i: u32) -> vec2u {\n    switch i {\n");
         for (k, n) in names.iter().enumerate().filter(|(_, n)| is_bound(n)) {
-            s.push_str(&format!("        case {k}u: {{ return textureDimensions({n}); }}\n"));
+            // An input with planes has the size of its Y plane.
+            let tex = if pkg.manifest.layout_of(n) == PixelLayout::Rgba { n.to_string() } else { format!("in_{n}_y") };
+            s.push_str(&format!("        case {k}u: {{ return textureDimensions({tex}); }}\n"));
         }
         s.push_str("        default: { return vec2u(0u); }\n    }\n}\n");
     }
@@ -1296,12 +1489,13 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
     };
     let arrays: Vec<bool> = inputs.iter().map(|n| pkg.manifest.textures.iter().any(|t| t.name == *n && t.is_array())).collect();
     let extra = def.outputs.len() - 1;
+    let planes = PassPlanes::of(ctx, pkg, &inputs, def);
     let (module, source) = match def.language() {
         ShaderLanguage::Wgsl => {
             let user = pkg.text(&def.shader)?;
             let source = format!(
                 "{}{}",
-                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), deep)
+                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), deep, planes.as_ref())
                     + &output_enabled(pkg, def, false)
                     + &input_helpers(pkg, &inputs, false),
                 user
@@ -1334,20 +1528,30 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
     let sizes_output = module.functions.iter().any(|(_, f)| f.name.as_deref() == Some("gpufx_output_size"));
 
     let device = &ctx.device;
+    // The bound textures, in binding order: (key, input index, plane), (key, plane).
+    let (textures, storage) = match &planes {
+        Some(p) => (p.textures(&inputs), p.storage(&def.outputs).into_iter().map(|(k, _, p)| (k, p)).collect()),
+        None => (
+            inputs.iter().enumerate().map(|(i, n)| (n.clone(), i, Plane::Rgba)).collect::<Vec<_>>(),
+            def.outputs.iter().map(|n| (n.clone(), Plane::Rgba)).collect::<Vec<_>>(),
+        ),
+    };
+    let f16 = planes.as_ref().is_some_and(|p| p.f16);
+    let storage_entry = |binding: u32, plane: Plane| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::StorageTexture {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            format: plane_format(plane, deep, f16),
+            view_dimension: wgpu::TextureViewDimension::D2,
+        },
+        count: None,
+    };
 
     let mut entries = vec![
         uniform_entry(0),
         uniform_entry(1),
-        wgpu::BindGroupLayoutEntry {
-            binding: 2,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::StorageTexture {
-                access: wgpu::StorageTextureAccess::WriteOnly,
-                format: if deep { wgpu::TextureFormat::Rgba16Float } else { wgpu::TextureFormat::Rgba8Unorm },
-                view_dimension: wgpu::TextureViewDimension::D2,
-            },
-            count: None,
-        },
+        storage_entry(2, storage[0].1),
         wgpu::BindGroupLayoutEntry {
             binding: 3,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -1355,29 +1559,21 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
             count: None,
         },
     ];
-    for (i, &array) in arrays.iter().enumerate() {
+    for (b, (_, i, plane)) in textures.iter().enumerate() {
         entries.push(wgpu::BindGroupLayoutEntry {
-            binding: FIRST_TEXTURE_BINDING + i as u32,
+            binding: FIRST_TEXTURE_BINDING + b as u32,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                view_dimension: if array { wgpu::TextureViewDimension::D2Array } else { wgpu::TextureViewDimension::D2 },
+                // 32-bit float planes cannot be filtered (no FLOAT32_FILTERABLE): textureLoad only.
+                sample_type: wgpu::TextureSampleType::Float { filterable: *plane == Plane::Rgba || f16 },
+                view_dimension: if arrays[*i] { wgpu::TextureViewDimension::D2Array } else { wgpu::TextureViewDimension::D2 },
                 multisampled: false,
             },
             count: None,
         });
     }
-    for k in 1..=extra {
-        entries.push(wgpu::BindGroupLayoutEntry {
-            binding: extra_output_binding(inputs.len(), k),
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::StorageTexture {
-                access: wgpu::StorageTextureAccess::WriteOnly,
-                format: if deep { wgpu::TextureFormat::Rgba16Float } else { wgpu::TextureFormat::Rgba8Unorm },
-                view_dimension: wgpu::TextureViewDimension::D2,
-            },
-            count: None,
-        });
+    for (j, (_, plane)) in storage.iter().enumerate().skip(1) {
+        entries.push(storage_entry(extra_output_binding(textures.len(), j), *plane));
     }
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx pass"), entries: &entries });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1398,7 +1594,18 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
         &[language, entry, format, &source],
         Some(pkg),
     );
-    Ok(Pass { pipeline, layout, inputs, outputs: def.outputs.clone(), size_of: pkg.manifest.pass_size(def), sizes_output })
+    let input_keys = textures.into_iter().map(|(k, _, _)| k).collect();
+    let output_keys = storage.into_iter().map(|(k, _)| k).collect();
+    Ok(Pass {
+        pipeline,
+        layout,
+        inputs,
+        outputs: def.outputs.clone(),
+        input_keys,
+        output_keys,
+        size_of: pkg.manifest.pass_size(def),
+        sizes_output,
+    })
 }
 
 /// The size pipeline of pass `def`: its shader with an entry point calling
@@ -1410,13 +1617,14 @@ fn compile_size_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index
     };
     let arrays: Vec<bool> = inputs.iter().map(|n| pkg.manifest.textures.iter().any(|t| t.name == *n && t.is_array())).collect();
     let extra = def.outputs.len() - 1;
+    let planes = PassPlanes::of(ctx, pkg, &inputs, def);
     let user = pkg.text(&def.shader)?;
     let shader_err = |e: String| Error::Shader(format!("{} (gpufx_output_size): {e}", def.shader));
     let (module, source, entry) = match def.language() {
         ShaderLanguage::Wgsl => {
             let source = format!(
                 "{}{}\n@compute @workgroup_size(1) fn gpufx_size_main() {{ gpufx_size_io[0] = gpufx_output_size(gpufx_size_io[0].y); }}\n",
-                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), false)
+                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), false, planes.as_ref())
                     + &output_enabled(pkg, def, false)
                     + &input_helpers(pkg, &inputs, true),
                 user
@@ -1556,7 +1764,12 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{device_limits, prelude};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use super::{device_limits, plane_format, prelude, Backend, Effect, FrameInfo, GpuContext, PassPlanes};
+    use crate::manifest::{PixelLayout, Plane};
+    use crate::package::Package;
     use crate::params::ParamBlock;
 
     #[test]
@@ -1564,13 +1777,181 @@ mod tests {
         let params = ParamBlock::new(&[]).unwrap();
         let inputs = ["src".to_string()];
         // Any other pass: its prelude, and so its shader cache key, is as before the helpers.
-        let plain = prelude(&params, &inputs, &[false], 1, None, false);
+        let plain = prelude(&params, &inputs, &[false], 1, None, false, None);
         assert!(!plain.contains("gpufx_output_count") && !plain.contains("gpufx_write_at") && !plain.contains("gpufx_copy_count"));
         // A pass `["mask", "part"]` with two copies: copy j is pass output 1 + j.
-        let copies = prelude(&params, &inputs, &[false], 2, Some((1, 2)), false);
+        let copies = prelude(&params, &inputs, &[false], 2, Some((1, 2)), false, None);
         assert!(copies.contains("fn gpufx_output_count() -> u32 { return 3u; }"), "{copies}");
         assert!(copies.contains("fn gpufx_copy_count() -> u32 { return 2u; }"), "{copies}");
         assert!(copies.contains("if (j < 2u) { gpufx_write_at(1u + j, id, c); }"), "{copies}");
+    }
+
+    fn planes(inputs: &[PixelLayout], outputs: &[PixelLayout], f16: bool) -> PassPlanes {
+        PassPlanes { inputs: inputs.to_vec(), outputs: outputs.to_vec(), f16 }
+    }
+
+    #[test]
+    fn a_pass_with_planes_binds_each_plane_and_gets_plane_write_helpers() {
+        let params = ParamBlock::new(&[]).unwrap();
+        let inputs = ["src".to_string(), "bg".to_string()];
+        let p = planes(&[PixelLayout::Yuv420, PixelLayout::Rgba], &[PixelLayout::Yuva420, PixelLayout::Y], false);
+        let s = prelude(&params, &inputs, &[false, false], 1, None, false, Some(&p));
+        // Sampled: Y and UV of `src`, then `bg` as is.
+        assert!(s.contains("@group(0) @binding(4) var in_src_y: texture_2d<f32>;"), "{s}");
+        assert!(s.contains("@group(0) @binding(5) var in_src_uv: texture_2d<f32>;"), "{s}");
+        assert!(s.contains("@group(0) @binding(6) var bg: texture_2d<f32>;"), "{s}");
+        // Storage: Y of output 0 at 2, the other planes after the 3 sampled textures.
+        assert!(s.contains("@group(0) @binding(2) var out_tex_y: texture_storage_2d<r32float, write>;"), "{s}");
+        assert!(s.contains("@group(0) @binding(7) var out_tex_uv: texture_storage_2d<rg32float, write>;"), "{s}");
+        assert!(s.contains("@group(0) @binding(8) var out_tex_a: texture_storage_2d<r32float, write>;"), "{s}");
+        assert!(s.contains("@group(0) @binding(9) var out_tex1_y: texture_storage_2d<r32float, write>;"), "{s}");
+        assert!(s.contains("fn gpufx_write_uv(p: vec2u, v: vec2f)"), "{s}");
+        assert!(s.contains("fn gpufx_write1_y(p: vec2u, v: f32)"), "{s}");
+        assert!(s.contains("fn gpufx_chroma_scale() -> vec2u { return vec2u(2u, 2u); }"), "{s}");
+        // No `out_tex` / `gpufx_write`: output 0 is planar.
+        assert!(!s.contains("var out_tex:") && !s.contains("fn gpufx_write("), "{s}");
+        let s16 =
+            prelude(&params, &inputs, &[false, false], 1, None, false, Some(&planes(&[PixelLayout::Yuv422], &[PixelLayout::Yuv422], true)));
+        assert!(s16.contains("texture_storage_2d<r16float, write>") && s16.contains("texture_storage_2d<rg16float, write>"), "{s16}");
+        assert!(s16.contains("return vec2u(2u, 1u);"), "{s16}");
+        // A pass without planes keeps the prelude it had (and so its shader cache key).
+        let plain = prelude(&params, &inputs, &[false, false], 0, None, false, None);
+        assert!(!plain.contains("planes") && plain.contains("var out_tex: texture_storage_2d<rgba8unorm, write>;"));
+    }
+
+    fn f16_bits(v: f32) -> u16 {
+        if v == 0.0 {
+            return 0;
+        }
+        let b = v.to_bits();
+        ((((b >> 23) & 0xff) as i32 - 127 + 15) as u16) << 10 | ((b >> 13) & 0x3ff) as u16
+    }
+
+    fn f16_value(h: u16) -> f32 {
+        if h & 0x7fff == 0 {
+            return 0.0;
+        }
+        f32::from_bits((((h >> 10) & 0x1f) as u32 + 127 - 15) << 23 | ((h & 0x3ff) as u32) << 13)
+    }
+
+    /// A 5x3 `yuv420` effect (UV 3x2, rounded up) inverting Y and swapping U and V, fed and
+    /// read plane by plane, with 32-bit planes and, where the adapter has them, 16-bit ones.
+    #[test]
+    fn a_yuv420_effect_reads_and_writes_its_planes() {
+        let Ok(mut ctx) = GpuContext::new(Backend::Auto) else { return };
+        let modes: Vec<bool> = if ctx.plane_f16 { vec![false, true] } else { vec![false] };
+        let manifest = br#"{"id":"t.yuv","name":"Yuv","used_for":["gpufx"],
+            "inputs":[{"name":"src","pixel_layout":"yuv420"}],
+            "outputs":[{"name":"out","pixel_layout":"yuv420"}],
+            "groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#;
+        let shader = b"@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
+            if (!gpufx_in_bounds(id)) { return; }
+            let p = id.xy;
+            gpufx_write_y(p, 1.0 - textureLoad(in_src_y, p, 0).r);
+            let s = gpufx_chroma_scale();
+            if (all(p % s == vec2u(0u))) { gpufx_write_uv(p / s, textureLoad(in_src_uv, p / s, 0).gr); }
+        }";
+        let files = HashMap::from([("manifest.json".to_string(), manifest.to_vec()), ("a.wgsl".to_string(), shader.to_vec())]);
+        let layout = PixelLayout::Yuv420;
+        let (w, h) = (5, 3);
+        let quarters = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+        let y: Vec<f32> = (0..w * h).map(|i| quarters[i as usize % 5]).collect();
+        let (cw, ch) = layout.plane_size(Plane::Uv, (w, h));
+        assert_eq!((cw, ch), (3, 2));
+        let uv: Vec<f32> = (0..cw * ch * 2).map(|i| quarters[(i as usize * 3) % 5]).collect();
+        for f16 in modes {
+            Arc::get_mut(&mut ctx).expect("only owner").plane_f16 = f16;
+            let pkg = Package::from_files(files.clone()).unwrap();
+            let mut fx = Effect::new(ctx.clone(), pkg).unwrap();
+            let device = &ctx.device;
+            let tex = |plane: Plane, size: (u32, u32), usage: wgpu::TextureUsages| {
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: plane_format(plane, false, f16),
+                    usage,
+                    view_formats: &[],
+                })
+            };
+            let encode = |v: &[f32]| -> Vec<u8> {
+                if f16 {
+                    v.iter().flat_map(|&x| f16_bits(x).to_le_bytes()).collect()
+                } else {
+                    v.iter().flat_map(|&x| x.to_le_bytes()).collect()
+                }
+            };
+            let texel = if f16 { 2 } else { 4 };
+            let upload = |t: &wgpu::Texture, v: &[f32], channels: u32| {
+                ctx.queue.write_texture(
+                    t.as_image_copy(),
+                    &encode(v),
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(t.width() * channels * texel), rows_per_image: None },
+                    t.size(),
+                );
+            };
+            let read = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+            let write = wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
+            let (in_y, in_uv) = (tex(Plane::Y, (w, h), read), tex(Plane::Uv, (cw, ch), read));
+            upload(&in_y, &y, 1);
+            upload(&in_uv, &uv, 2);
+            let (out_y, out_uv) = (tex(Plane::Y, (w, h), write), tex(Plane::Uv, (cw, ch), write));
+            let outputs = HashMap::from([("out.y".to_string(), out_y.clone()), ("out.uv".to_string(), out_uv.clone())]);
+            fx.bind(&[&in_y, &in_uv], outputs, &[(w, h)], false).unwrap();
+            let mut enc = device.create_command_encoder(&Default::default());
+            {
+                let mut cpass = enc.begin_compute_pass(&Default::default());
+                fx.encode(&mut cpass, &FrameInfo::new(0.0, 0));
+            }
+            let readback = |enc: &mut wgpu::CommandEncoder, t: &wgpu::Texture, channels: u32| {
+                let row = (t.width() * channels * texel).next_multiple_of(256);
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: (row * t.height()) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                enc.copy_texture_to_buffer(
+                    t.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &buf,
+                        layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None },
+                    },
+                    t.size(),
+                );
+                (buf, row)
+            };
+            let (buf_y, row_y) = readback(&mut enc, &out_y, 1);
+            let (buf_uv, row_uv) = readback(&mut enc, &out_uv, 2);
+            ctx.queue.submit([enc.finish()]);
+            let values = |buf: &wgpu::Buffer, row: u32, t: &wgpu::Texture, channels: u32| -> Vec<f32> {
+                buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                let data = buf.slice(..).get_mapped_range().unwrap();
+                let n = (t.width() * channels) as usize;
+                (0..t.height() as usize)
+                    .flat_map(|r| {
+                        let line = &data[r * row as usize..];
+                        (0..n)
+                            .map(|i| {
+                                if f16 {
+                                    f16_value(u16::from_le_bytes([line[i * 2], line[i * 2 + 1]]))
+                                } else {
+                                    f32::from_le_bytes(line[i * 4..i * 4 + 4].try_into().unwrap())
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            };
+            let got_y = values(&buf_y, row_y, &out_y, 1);
+            let got_uv = values(&buf_uv, row_uv, &out_uv, 2);
+            assert_eq!(got_y, y.iter().map(|v| 1.0 - v).collect::<Vec<_>>(), "Y, f16 {f16}");
+            let swapped: Vec<f32> = uv.chunks(2).flat_map(|c| [c[1], c[0]]).collect();
+            assert_eq!(got_uv, swapped, "UV, f16 {f16}");
+        }
     }
 
     #[test]
