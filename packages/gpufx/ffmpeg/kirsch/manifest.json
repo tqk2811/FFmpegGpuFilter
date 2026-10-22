@@ -14,7 +14,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/kirsch.wgsl", "inputs": ["src"], "output": ["out"] }
+        { "shader": "shaders/kirsch.wgsl", "inputs": ["src"], "outputs": ["out"] }
       ]
     }
   ]

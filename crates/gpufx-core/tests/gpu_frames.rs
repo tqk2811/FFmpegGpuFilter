@@ -370,7 +370,7 @@ impl MipPackage {
         let key = Self::key_dir(&dir);
         std::fs::remove_dir_all(&key).ok();
         std::fs::create_dir_all(&key).unwrap();
-        let manifest = r#"{"api":1,"id":"t.key","name":"Key","used_for":["gpufx"],"output":[{"name":"color"},{"name":"matte"}],"groups":[{"passes":[{"shader":"k.wgsl","inputs":["src"],"output":["color","matte"]}]}]}"#;
+        let manifest = r#"{"api":1,"id":"t.key","name":"Key","used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"matte"}],"groups":[{"passes":[{"shader":"k.wgsl","inputs":["src"],"outputs":["color","matte"]}]}]}"#;
         std::fs::write(key.join("manifest.json"), manifest).unwrap();
         let shader = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
     if (!gpufx_in_bounds(id)) { return; }

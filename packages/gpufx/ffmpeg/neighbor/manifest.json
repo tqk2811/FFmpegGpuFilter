@@ -14,7 +14,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/neighbor.wgsl", "inputs": ["src"], "output": ["out"] }
+        { "shader": "shaders/neighbor.wgsl", "inputs": ["src"], "outputs": ["out"] }
       ]
     }
   ]

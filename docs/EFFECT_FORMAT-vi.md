@@ -40,7 +40,7 @@ scripts/pack-packages.sh --check -o out my-fx    # biên dịch shader trên GPU
 | `used_for` | mảng | có | Các filter FFmpeg dùng package này: effect ghi `["gpufx"]`. Mảng rỗng hoặc tên lạ (tên hợp lệ: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) thì không load được; filter `gpufx` từ chối package mà danh sách không có `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | chuỗi | không | |
 | `inputs` | mảng | không (`[{"name":"src"}]`) | Các video input, theo thứ tự pad của filter, kèm quy tắc (xem bên dưới) |
-| `output` | mảng | không (một output mang tên output chính của pass cuối, mọi format GPU, kích thước input đầu) | Các output của effect, theo thứ tự output pad của filter, kèm quy tắc (xem bên dưới và [Nhiều output](#nhiều-output)) |
+| `outputs` | mảng | không (một output mang tên output chính của pass cuối, mọi format GPU, kích thước input đầu) | Các output của effect, theo thứ tự output pad của filter, kèm quy tắc (xem bên dưới và [Nhiều output](#nhiều-output)) |
 | `params` | mảng | không | Tham số, xem bên dưới |
 | `textures` | mảng | không | Ảnh PNG đi kèm (LUT, mask, sprite), xem [Texture](#texture) |
 | `groups` | mảng | có | Các group pass, mỗi group có pass compute và thiết bị nó cần; dùng group đầu tiên khớp thiết bị, xem [Nhóm pass và yêu cầu thiết bị](#nhóm-pass-và-yêu-cầu-thiết-bị) |
@@ -67,7 +67,7 @@ Mỗi phần tử `inputs`:
 | `mipmaps` | `false` | Texture của input có đủ chuỗi mip, sinh trên GPU mỗi frame, cho shader thu nhỏ ảnh nhiều (`textureSampleLevel(src, smp, uv, lod)`); xem [Mipmap](#mipmap) |
 | `repeat` | không có | (chỉ input cuối, chỉ WGSL) `{ "default": 2, "min": 2, "max": 16 }`: input đại diện cho số pad thay đổi được, xem [Số input thay đổi được](#số-input-thay-đổi-được) |
 
-Mỗi phần tử `output` (một mảng; dạng object của bản cũ là lỗi: `` `output` is an array: [{"name": "out", ...}] ``):
+Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là lỗi: `` `outputs` is an array: [{"name": "out", ...}] ``):
 
 | Trường | Mặc định | Ý nghĩa |
 |--------|----------|---------|
@@ -92,7 +92,7 @@ Kích thước của output không nằm trong manifest: nó đến từ một h
     "width": { "min": 64, "multiple_of": 2 }, "height": { "min": 64, "multiple_of": 2 } },
   { "name": "matte", "formats": ["gray"], "same_size": true }
 ],
-"output": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
+"outputs": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
 ```
 
 Cách áp dụng:
@@ -137,14 +137,14 @@ Mỗi phần tử `passes` (của một group):
 | `language` | theo đuôi file | `wgsl` hoặc `glsl` (`.glsl`, `.comp` là GLSL) |
 | `entry` | `main` | Hàm compute (WGSL; GLSL luôn là `main`) |
 | `inputs` | mọi input rồi mọi texture | Texture pass này đọc: tên input, texture, hoặc output của pass trước |
-| `output` | `["out"]` | Mảng 1 đến 4 tên texture pass này ghi (chuỗi đơn là lỗi). Tên đầu là output chính |
+| `outputs` | `["out"]` | Mảng 1 đến 4 tên texture pass này ghi (chuỗi đơn là lỗi). Tên đầu là output chính |
 
 Pass chạy ở kích thước của output effect mà nó ghi (xem [Nhiều output](#nhiều-output)): kích thước input đầu tiên, trừ khi shader của pass ghi output đó
 đặt kích thước khác bằng `gpufx_output_size` (xem [Kích thước output](#kích-thước-output)). Tên input/texture/param phải là định danh hợp lệ,
 không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`graph='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
 
-**Một pass ghi nhiều output.** `output` liệt kê tối đa 4 tên. Tên đầu là output chính (`out_tex`, ghi bằng `gpufx_write`); các
+**Một pass ghi nhiều output.** `outputs` liệt kê tối đa 4 tên. Tên đầu là output chính (`out_tex`, ghi bằng `gpufx_write`); các
 tên sau là `out_tex1`, `out_tex2`, `out_tex3` (ghi bằng `gpufx_write1`..`gpufx_write3`), bind sau các texture input (xem bảng
 binding). Chúng cùng format và kích thước với output chính, và các pass sau đọc chúng theo tên. Các tên trong một mảng không được
 trùng nhau. Mọi texture một pass ghi phải được pass sau đọc hoặc là output của effect
@@ -152,8 +152,8 @@ trùng nhau. Mọi texture một pass ghi phải được pass sau đọc hoặc
 
 ```json
 "passes": [
-  { "shader": "shaders/split.wgsl", "inputs": ["src"], "output": ["base", "detail"] },
-  { "shader": "shaders/merge.wgsl", "inputs": ["base", "detail"], "output": ["out"] }
+  { "shader": "shaders/split.wgsl", "inputs": ["src"], "outputs": ["base", "detail"] },
+  { "shader": "shaders/merge.wgsl", "inputs": ["base", "detail"], "outputs": ["out"] }
 ]
 ```
 
@@ -171,24 +171,24 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
 ### Nhiều output
 
-`output` liệt kê 1 đến 4 output. Mỗi output là texture cùng tên do một pass ghi, nên một effect có thể cho ảnh màu và
+`outputs` liệt kê 1 đến 4 output. Mỗi output là texture cùng tên do một pass ghi, nên một effect có thể cho ảnh màu và
 matte từ cùng một dispatch, hoặc lấy matte từ một pass sớm:
 
 ```json
 "inputs": [{ "name": "src", "formats": ["rgba"] }],
-"output": [
+"outputs": [
   { "name": "color", "formats": ["rgba", "nv12"] },
   { "name": "matte", "formats": ["gray", "rgba"] }
 ],
 "groups": [{ "passes": [
-  { "shader": "key.wgsl", "inputs": ["src"], "output": ["color", "matte"] }
+  { "shader": "key.wgsl", "inputs": ["src"], "outputs": ["color", "matte"] }
 ]}]
 ```
 
 Luật:
 
-- Bỏ trống thì `output` là một output mang tên output chính của pass cuối (`[{"name": "out"}]` khi pass cuối không ghi
-  `output`), nên effect một output không cần khai báo.
+- Bỏ trống thì `outputs` là một output mang tên output chính của pass cuối (`[{"name": "out"}]` khi pass cuối không ghi
+  `outputs`), nên effect một output không cần khai báo.
 - Mỗi tên output do đúng một pass của mỗi group ghi; pass đó không nhất thiết là pass cuối.
 - Tên output là định danh, không trùng nhau, không trùng input, texture, param, và không phải `enable` hay `bypass`.
 - Pass chạy ở kích thước của output effect đầu tiên nó ghi, hoặc của output 0 khi nó không ghi output nào (pass làm
@@ -221,7 +221,7 @@ Xem `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 ### Kích thước output
 
 Mặc định output có kích thước input đầu. Shader đặt kích thước khác bằng cách định nghĩa, trong shader của pass ghi output đó, một hàm
-(`out_index` là chỉ số của output trong mảng `output` của manifest):
+(`out_index` là chỉ số của output trong mảng `outputs` của manifest):
 
 ```wgsl
 fn gpufx_output_size(out_index: u32) -> vec2u        // WGSL
@@ -259,7 +259,7 @@ Ví dụ: `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl` (các input cạnh 
 | `passes` | | Các pass của group này (không rỗng), như mô tả ở trên |
 
 Group **đầu tiên** có `requires` khớp thiết bị sẽ được dùng; nên đặt group cụ thể nhất lên đầu và group chung ở cuối. Mọi group
-phải ghi đủ mọi output của effect (các texture có tên trong `output`). `inputs`, `output`, `params` và `textures` dùng chung cho mọi group, nên các group là một effect với một bộ
+phải ghi đủ mọi output của effect (các texture có tên trong `outputs`). `inputs`, `outputs`, `params` và `textures` dùng chung cho mọi group, nên các group là một effect với một bộ
 tham số; chỉ phần pass khác nhau, và số pass của các group có thể khác nhau. `passes` ở cấp trên cùng của manifest cũ đã bị bỏ: bọc các pass vào một group.
 Group dùng được với mọi giá trị `api`.
 
@@ -289,21 +289,21 @@ Các khoá của `requires` (bỏ qua = `"*"`):
     {
       "name": "dx12",
       "requires": { "os": ["windows"], "backend": ["d3d12"] },
-      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": ["out"] }]
+      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "outputs": ["out"] }]
     },
     {
       "name": "tensor-core",
       "requires": { "backend": ["vulkan"], "vendor": ["nvidia"], "features": ["cooperative-matrix-f16"] },
       "passes": [
-        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": ["tmp"] },
-        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": ["out"] }
+        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "outputs": ["tmp"] },
+        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "outputs": ["out"] }
       ]
     },
     {
       "name": "generic",
       "passes": [
-        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": ["tmp"] },
-        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": ["out"] }
+        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "outputs": ["tmp"] },
+        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "outputs": ["out"] }
       ]
     }
   ]

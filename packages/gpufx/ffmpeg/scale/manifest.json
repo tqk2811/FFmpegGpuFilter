@@ -28,7 +28,7 @@
       "description": "Output height; 0 = the input's, -n = from the width keeping the aspect ratio, a multiple of n"
     }
   ],
-  "output": [
+  "outputs": [
     {
       "name": "out"
     }

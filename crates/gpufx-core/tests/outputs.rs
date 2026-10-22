@@ -60,25 +60,25 @@ impl Packages {
         let dir = std::env::temp_dir().join(format!("gpufx-outputs-{}-{n}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         let pkgs = Packages(dir);
-        let head = r#""api":1,"used_for":["gpufx"],"output":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"]}]"#;
+        let head = r#""api":1,"used_for":["gpufx"],"outputs":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"]}]"#;
         // One pass writes both.
         pkgs.add(
             "key",
-            &format!(r#"{{"id":"t.key","name":"Key",{head},"groups":[{{"passes":[{{"shader":"k.wgsl","inputs":["src"],"output":["color","matte"]}}]}}]}}"#),
+            &format!(r#"{{"id":"t.key","name":"Key",{head},"groups":[{{"passes":[{{"shader":"k.wgsl","inputs":["src"],"outputs":["color","matte"]}}]}}]}}"#),
             &[("k.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});\n    gpufx_write1(id, {MATTE});")))],
         );
         // The same in GLSL.
         let glsl = "#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\nvoid main() {\n    uvec3 id = gl_GlobalInvocationID;\n    if (!gpufx_in_bounds(id)) { return; }\n    vec4 c = texelFetch(sampler2D(src, smp), ivec2(id.xy), 0);\n    gpufx_write(id, c.bgra);\n    gpufx_write1(id, vec4(vec3(c.r), 1.0));\n}\n";
         pkgs.add(
             "keyglsl",
-            &format!(r#"{{"id":"t.keyglsl","name":"Key GLSL",{head},"groups":[{{"passes":[{{"shader":"k.glsl","inputs":["src"],"output":["color","matte"]}}]}}]}}"#),
+            &format!(r#"{{"id":"t.keyglsl","name":"Key GLSL",{head},"groups":[{{"passes":[{{"shader":"k.glsl","inputs":["src"],"outputs":["color","matte"]}}]}}]}}"#),
             &[("k.glsl", glsl.to_string())],
         );
         // The matte from the first pass, which also makes a texture for the second.
         pkgs.add(
             "keymid",
             &format!(
-                r#"{{"id":"t.keymid","name":"Key mid",{head},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["src"],"output":["matte","tmp"]}},{{"shader":"b.wgsl","inputs":["tmp"],"output":["color"]}}]}}]}}"#
+                r#"{{"id":"t.keymid","name":"Key mid",{head},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["src"],"outputs":["matte","tmp"]}},{{"shader":"b.wgsl","inputs":["tmp"],"outputs":["color"]}}]}}]}}"#
             ),
             &[
                 ("a.wgsl", wgsl(&format!("gpufx_write(id, {MATTE});\n    gpufx_write1(id, textureLoad(src, vec2i(id.xy), 0));"))),
@@ -89,7 +89,7 @@ impl Packages {
         pkgs.add(
             "keysep",
             &format!(
-                r#"{{"id":"t.keysep","name":"Key sep",{head},"groups":[{{"passes":[{{"shader":"c.wgsl","inputs":["src"],"output":["color"]}},{{"shader":"m.wgsl","inputs":["src"],"output":["matte"]}}]}}]}}"#
+                r#"{{"id":"t.keysep","name":"Key sep",{head},"groups":[{{"passes":[{{"shader":"c.wgsl","inputs":["src"],"outputs":["color"]}},{{"shader":"m.wgsl","inputs":["src"],"outputs":["matte"]}}]}}]}}"#
             ),
             &[("m.wgsl", wgsl(&format!("gpufx_write(id, {MATTE});"))), ("c.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});")))],
         );
@@ -97,8 +97,8 @@ impl Packages {
         pkgs.add(
             "key2",
             r#"{"id":"t.key2","name":"Key 2","api":1,"used_for":["gpufx"],"inputs":[{"name":"src"},{"name":"bg","same_size":true}],
-                "output":[{"name":"color"},{"name":"matte","bypass":"bg"}],
-                "groups":[{"passes":[{"shader":"k.wgsl","inputs":["src","bg"],"output":["color","matte"]}]}]}"#,
+                "outputs":[{"name":"color"},{"name":"matte","bypass":"bg"}],
+                "groups":[{"passes":[{"shader":"k.wgsl","inputs":["src","bg"],"outputs":["color","matte"]}]}]}"#,
             &[("k.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});\n    gpufx_write1(id, textureLoad(bg, vec2i(id.xy), 0).bgra);")))],
         );
         // Outputs of different sizes: `color` the first input swapped, `side` both inputs
@@ -106,8 +106,8 @@ impl Packages {
         pkgs.add(
             "stk",
             r#"{"id":"t.stk","name":"Stack","api":1,"used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"b"}],
-                "output":[{"name":"color"},{"name":"side"}],
-                "groups":[{"passes":[{"shader":"c.wgsl","inputs":["a"],"output":["color"]},{"shader":"s.wgsl","inputs":["a","b"],"output":["side"]}]}]}"#,
+                "outputs":[{"name":"color"},{"name":"side"}],
+                "groups":[{"passes":[{"shader":"c.wgsl","inputs":["a"],"outputs":["color"]},{"shader":"s.wgsl","inputs":["a","b"],"outputs":["side"]}]}]}"#,
             &[
                 ("c.wgsl", wgsl("gpufx_write(id, textureLoad(a, vec2i(id.xy), 0).bgra);")),
                 (

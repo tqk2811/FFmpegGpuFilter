@@ -16,7 +16,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/deband.wgsl", "inputs": ["src"], "output": ["out"] }
+        { "shader": "shaders/deband.wgsl", "inputs": ["src"], "outputs": ["out"] }
       ]
     }
   ]

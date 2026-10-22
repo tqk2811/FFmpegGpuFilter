@@ -83,8 +83,8 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": ["tmp"] },
-        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": ["out"] }
+        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "outputs": ["tmp"] },
+        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "outputs": ["out"] }
       ]
     }
   ]
@@ -202,7 +202,7 @@ passes → built-in conversion pass → copy back to RAM. libgpufx converts `rgb
   one of them); inputs with `formats` receive the frame as is. Formats, matrices (FCC, SMPTE 240M,
   YCgCo...) and BT.2020 constant luminance that libgpufx does not handle are converted with `swscale` to
   `rgba` (or `rgba64le` above 8 bits) as before. The output is never converted by swscale: the filter outputs GPU frames
-  only (see "Formats the GPU does not convert"). A manifest without `output` may output
+  only (see "Formats the GPU does not convert"). A manifest without `outputs` may output
   any of these formats (`rgba` first), so a CPU encoder taking `yuv420p` needs `hwdownload` after `gpufx`
   but no `scale`. Such an output may be YUV without alpha, dropping the alpha the effect writes: effects that produce
   alpha should declare `output.formats` (a recommendation, not checked by the code).
@@ -498,7 +498,7 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
   label shows up as an extra output pad, which FFmpeg reports as unconnected.
 - A node is `split` (one label in, any number out), `null` (one in, one out), or packages chained with
   `|` as in `graph=`, which take as many labels as the first package has inputs. An effect may have several
-  outputs (manifest `output` array): labels after it name them by position or as `[name=label]`, the first
+  outputs (manifest `outputs` array): labels after it name them by position or as `[name=label]`, the first
   unlabelled one goes on along the chain, a last effect without labels writes all of them, other unlabelled
   outputs are dropped with the passes only they need. In the engine an edge is `Source::Node(effect, output)`;
   each output has its own texture, size, formats, bypass input and in-place frame.

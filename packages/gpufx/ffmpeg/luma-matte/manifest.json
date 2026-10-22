@@ -23,7 +23,7 @@
       ]
     }
   ],
-  "output": [
+  "outputs": [
     {
       "name": "color",
       "formats": [
@@ -75,7 +75,7 @@
           "inputs": [
             "src"
           ],
-          "output": [
+          "outputs": [
             "color",
             "matte"
           ]

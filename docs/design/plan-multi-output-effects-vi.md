@@ -29,12 +29,12 @@ Số dòng dưới đây đo trên working tree ngày 2026-10-22 (đang có sử
 ```json
 {
   "inputs": [{ "name": "src", "formats": ["rgba"] }],
-  "output": [
+  "outputs": [
     { "name": "color", "formats": ["rgba", "nv12"] },
     { "name": "matte", "formats": ["gray", "rgba"] }
   ],
   "groups": [{ "passes": [
-    { "shader": "key.wgsl", "inputs": ["src"], "output": ["color", "matte"] }
+    { "shader": "key.wgsl", "inputs": ["src"], "outputs": ["color", "matte"] }
   ]}]
 }
 ```
@@ -53,7 +53,7 @@ Mỗi phần tử:
 1. **`output` chỉ nhận mảng**, 1..4 phần tử (khớp giới hạn storage texture của pass cuối cùng; xem câu hỏi Q3). Dạng object cũ bị từ chối với thông báo rõ ("`output` is an array: `[{\"name\":\"out\", ...}]`").
 2. **Output effect = texture pass có cùng tên.** `output[k].name` phải là output của ĐÚNG MỘT pass trong MỖI group (mọi group phải sinh đủ các output). Không bắt buộc là pass cuối: một output có thể lấy từ pass giữa (vd matte tính sớm). Do đó **bỏ luật "pass cuối chỉ có một output"** của plan multi-output-passes, thay bằng: mọi output phụ của mọi pass phải được pass sau đọc HOẶC là output của effect (không thì lỗi "written but never used").
    - Mặc định `[{"name":"out"}]` + pass bỏ trống `output` = `["out"]` giữ nguyên hành vi effect một output hiện nay.
-   - Trường hợp cũ `passes.last().output()` là output effect: sau đổi thì manifest cũ có pass cuối tên khác `out` (vd `"output": ["tmp"]` ở pass cuối) phải được chuyển, HOẶC giữ quy ước: nếu `output` effect bị bỏ trống thì tên mặc định là `output[0]` của pass cuối. Đề xuất cách sau (ít phải sửa package, xem Q1).
+   - Trường hợp cũ `passes.last().output()` là output effect: sau đổi thì manifest cũ có pass cuối tên khác `out` (vd `"outputs": ["tmp"]` ở pass cuối) phải được chuyển, HOẶC giữ quy ước: nếu `output` effect bị bỏ trống thì tên mặc định là `output[0]` của pass cuối. Đề xuất cách sau (ít phải sửa package, xem Q1).
 3. **Tên output pad**:
    - Effect đơn có 1 output: pad vẫn tên `default` (giữ lệnh FFmpeg cũ, `[out]` của filtergraph không đổi).
    - Effect đơn có nhiều output: pad tên đúng `output[k].name` (`color`, `matte`), thứ tự như manifest.
@@ -122,7 +122,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
   - `bypass` phải là tên input.
   - Bỏ luật "pass cuối chỉ một output" (do plan trước thêm), thay bằng luật output không ai dùng.
 - Dòng 732 (`match self.output.size`) và 796-810 (`output_size`, `check_output_format`): nhận chỉ số output `k`; thêm helper `fn output_size(&self, k, sizes)` và `fn output_names()`.
-- `mod tests` (~880-950): sửa các bài dùng `"output":{...}` (dòng 884, 932) sang mảng; thêm bài: hai output, tên không phải output pass nào, trùng tên, size khác nhau, `bypass` sai tên, dạng object bị từ chối, output lấy từ pass giữa.
+- `mod tests` (~880-950): sửa các bài dùng `"outputs":{...}` (dòng 884, 932) sang mảng; thêm bài: hai output, tên không phải output pass nào, trùng tên, size khác nhau, `bypass` sai tên, dạng object bị từ chối, output lấy từ pass giữa.
 
 ### crates/gpufx-core/src/runtime.rs
 - `Program`/`Effect`: thêm `fn output_textures(&self) -> &[String]` (tên texture của từng output effect) và đổi `output()` (dòng ~782) thành `output(k)`; `rebind(inputs, output: Option<&Texture>)` (dòng 765) thành nhận `&[Option<&Texture>]` cho từng output (direct-output theo từng output).
@@ -164,7 +164,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 - `ffmpeg/vf_gpufx_ai_*.c`: không đụng.
 
 ### Package và tài liệu
-- `packages/gpufx/**/manifest.json` (~95 file có `"output"` cấp effect, trong đó `ffmpeg/hstack`, `ffmpeg/vstack` (nay dùng `gpufx_output_size` thay `size`), `ffmpeg/monochrome` có `formats`): chuyển `"output": {...}` → `"output": [{"name": "<tên output pass cuối>", ...}]` bằng script (Python `json` sẽ đổi format/line ending → dùng regex có kiểm CRLF, hoặc script đọc/ghi giữ nguyên byte ngoài khối `output`). Chú ý không nhầm với `passes[i].output` (đã là mảng chuỗi sau plan trước).
+- `packages/gpufx/**/manifest.json` (~95 file có `"output"` cấp effect, trong đó `ffmpeg/hstack`, `ffmpeg/vstack` (nay dùng `gpufx_output_size` thay `size`), `ffmpeg/monochrome` có `formats`): chuyển `"outputs": {...}` → `"outputs": [{"name": "<tên output pass cuối>", ...}]` bằng script (Python `json` sẽ đổi format/line ending → dùng regex có kiểm CRLF, hoặc script đọc/ghi giữ nguyên byte ngoài khối `output`). Chú ý không nhầm với `passes[i].output` (đã là mảng chuỗi sau plan trước).
 - Một package mẫu mới (vd `packages/gpufx/ffmpeg/alphaextract` hoặc `chromakey-matte`) xuất `color` + `matte` để test thật bằng ffmpeg.
 - `docs/EFFECT_FORMAT.md` + `docs/EFFECT_FORMAT-vi.md`: mục `output` cấp effect (bảng trường, mặc định, ví dụ), luật "output = texture pass", bypass theo output, tên pad; phần graph: node ghi nhiều label. Sửa cả hai bản cho khớp.
 - `docs/design/DESIGN.md` + `-vi.md`: đoạn mô tả Topology/Source và pad của filter.

@@ -40,7 +40,7 @@ scripts/pack-packages.sh --check -o out my-fx    # compile the shaders on the GP
 | `used_for` | array | yes | The FFmpeg filters the package is for: `["gpufx"]` for an effect. An empty list or an unknown name (known: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) fails to load; the `gpufx` filter refuses a package whose list lacks `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | string | no | |
 | `inputs` | array | no (`[{"name":"src"}]`) | The video inputs, in the filter's pad order, with their rules (see below) |
-| `output` | array | no (one output named after the main output of the last pass, every GPU format, the size of the first input) | The outputs of the effect, in the filter's pad order, with their rules (see below and [Several outputs](#several-outputs)) |
+| `outputs` | array | no (one output named after the main output of the last pass, every GPU format, the size of the first input) | The outputs of the effect, in the filter's pad order, with their rules (see below and [Several outputs](#several-outputs)) |
 | `params` | array | no | Parameters, see below |
 | `textures` | array | no | Bundled PNG images (LUT, mask, sprites), see [Textures](#textures) |
 | `groups` | array | yes | Pass groups, each with its compute passes and the devices it needs; the first group matching the device is used, see [Pass groups and device requirements](#pass-groups-and-device-requirements) |
@@ -67,7 +67,7 @@ Each element of `inputs`:
 | `mipmaps` | `false` | The input texture gets a full mip chain, made on the GPU every frame, for shaders that shrink it a lot (`textureSampleLevel(src, smp, uv, lod)`); see [Mipmaps](#mipmaps) |
 | `repeat` | none | (last input only, WGSL only) `{ "default": 2, "min": 2, "max": 16 }`: the input stands for a variable number of pads, see [Variable number of inputs](#variable-number-of-inputs) |
 
-Each element of `output` (an array; the object form of earlier versions is an error: `` `output` is an array: [{"name": "out", ...}] ``):
+Each element of `outputs` (an array; the object form of earlier versions is an error: `` `outputs` is an array: [{"name": "out", ...}] ``):
 
 | Field | Default | Meaning |
 |-------|---------|---------|
@@ -92,7 +92,7 @@ The size of an output is not in the manifest: it comes from an optional shader f
     "width": { "min": 64, "multiple_of": 2 }, "height": { "min": 64, "multiple_of": 2 } },
   { "name": "matte", "formats": ["gray"], "same_size": true }
 ],
-"output": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
+"outputs": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
 ```
 
 How the rules apply:
@@ -138,14 +138,14 @@ Each element of `passes` (of a group):
 | `language` | from the file extension | `wgsl` or `glsl` (`.glsl` and `.comp` are GLSL) |
 | `entry` | `main` | The compute function (WGSL; GLSL is always `main`) |
 | `inputs` | every input, then every texture | Textures this pass reads: input names, textures, or the output of a previous pass |
-| `output` | `["out"]` | Array of 1 to 4 names of the textures this pass writes (a plain string is an error). The first is the main output |
+| `outputs` | `["out"]` | Array of 1 to 4 names of the textures this pass writes (a plain string is an error). The first is the main output |
 
 A pass runs at the size of the effect output it writes (see [Several outputs](#several-outputs)), the size of the first input
 unless the shader of the pass that writes that output sets another size with `gpufx_output_size` (see [Output size](#output-size)). Input/texture/param names must be valid identifiers,
 must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
 
-**Several outputs from one pass.** `output` lists up to 4 names. The first is the main output (`out_tex`, written by
+**Several outputs from one pass.** `outputs` lists up to 4 names. The first is the main output (`out_tex`, written by
 `gpufx_write`); the others are `out_tex1`, `out_tex2`, `out_tex3` (written by `gpufx_write1`..`gpufx_write3`), bound after the
 input textures (see the binding table). They have the format and size of the main output, and later passes read them by name.
 Names in one array must differ. Every texture a pass writes must be read by a later pass or be an output of the effect
@@ -153,8 +153,8 @@ Names in one array must differ. Every texture a pass writes must be read by a la
 
 ```json
 "passes": [
-  { "shader": "shaders/split.wgsl", "inputs": ["src"], "output": ["base", "detail"] },
-  { "shader": "shaders/merge.wgsl", "inputs": ["base", "detail"], "output": ["out"] }
+  { "shader": "shaders/split.wgsl", "inputs": ["src"], "outputs": ["base", "detail"] },
+  { "shader": "shaders/merge.wgsl", "inputs": ["base", "detail"], "outputs": ["out"] }
 ]
 ```
 
@@ -172,24 +172,24 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
 ### Several outputs
 
-`output` lists 1 to 4 outputs. Each one is the texture of the same name a pass writes, so an effect can give a color
+`outputs` lists 1 to 4 outputs. Each one is the texture of the same name a pass writes, so an effect can give a color
 image and a matte from one dispatch, or the matte from an early pass:
 
 ```json
 "inputs": [{ "name": "src", "formats": ["rgba"] }],
-"output": [
+"outputs": [
   { "name": "color", "formats": ["rgba", "nv12"] },
   { "name": "matte", "formats": ["gray", "rgba"] }
 ],
 "groups": [{ "passes": [
-  { "shader": "key.wgsl", "inputs": ["src"], "output": ["color", "matte"] }
+  { "shader": "key.wgsl", "inputs": ["src"], "outputs": ["color", "matte"] }
 ]}]
 ```
 
 Rules:
 
-- Omitted, `output` is one output named after the main output of the last pass (`[{"name": "out"}]` for a last pass
-  without `output`), so effects with one output need not declare it.
+- Omitted, `outputs` is one output named after the main output of the last pass (`[{"name": "out"}]` for a last pass
+  without `outputs`), so effects with one output need not declare it.
 - Each output name is written by exactly one pass of every group; that pass need not be the last.
 - Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable` or `bypass`.
 - A pass runs at the size of the first effect output it writes, or of output 0 when it writes none (a pass making
@@ -222,7 +222,7 @@ See `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 ### Output size
 
 By default an output has the size of the first input. A shader can give another size by defining, in the shader of the pass
-that writes that output, a function (`out_index` is the index of the output in the manifest `output` array):
+that writes that output, a function (`out_index` is the index of the output in the manifest `outputs` array):
 
 ```wgsl
 fn gpufx_output_size(out_index: u32) -> vec2u        // WGSL
@@ -260,7 +260,7 @@ Examples: `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl` (the inputs side by
 | `passes` | | The passes of this group (not empty), as described above |
 
 The **first** group whose `requires` match the device is used; put the most specific group first and a
-generic one last. Every group must write every output of the effect (the textures named in `output`). `inputs`, `output`, `params` and `textures` are shared by every
+generic one last. Every group must write every output of the effect (the textures named in `outputs`). `inputs`, `outputs`, `params` and `textures` are shared by every
 group, so all groups are one effect with one set of parameters; only the passes differ, and groups may have different
 numbers of passes. The top-level `passes` of older manifests is gone: wrap the passes in one group. Groups work with any `api` value.
 
@@ -290,21 +290,21 @@ numbers of passes. The top-level `passes` of older manifests is gone: wrap the p
     {
       "name": "dx12",
       "requires": { "os": ["windows"], "backend": ["d3d12"] },
-      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": ["out"] }]
+      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "outputs": ["out"] }]
     },
     {
       "name": "tensor-core",
       "requires": { "backend": ["vulkan"], "vendor": ["nvidia"], "features": ["cooperative-matrix-f16"] },
       "passes": [
-        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": ["tmp"] },
-        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": ["out"] }
+        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "outputs": ["tmp"] },
+        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "outputs": ["out"] }
       ]
     },
     {
       "name": "generic",
       "passes": [
-        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": ["tmp"] },
-        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": ["out"] }
+        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "outputs": ["tmp"] },
+        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "outputs": ["out"] }
       ]
     }
   ]

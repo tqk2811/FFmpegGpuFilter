@@ -27,10 +27,10 @@ pub struct Manifest {
     /// Video inputs of the effect, in pad order. Defaults to a single `src` input.
     #[serde(default = "default_inputs")]
     pub inputs: Vec<InputDef>,
-    /// Outputs of the effect, in pad order, JSON key `output` (an array). Each is the
+    /// Outputs of the effect, in pad order, JSON key `outputs` (an array). Each is the
     /// texture of the same name a pass writes. Omitted: one output named after the main
     /// output of the last pass (filled in by [`Manifest::parse`]).
-    #[serde(default, rename = "output", deserialize_with = "outputs_array")]
+    #[serde(default, rename = "outputs", deserialize_with = "outputs_array")]
     pub outputs: Vec<OutputDef>,
     /// User tunable parameters, exposed to shaders as the `params` uniform struct.
     #[serde(default)]
@@ -156,16 +156,16 @@ pub struct OutputDef {
 /// Most outputs an effect may have.
 pub const MAX_OUTPUTS: usize = 4;
 
-/// `output` as an array, with a clear message for the object form of earlier versions.
+/// `outputs` as an array, with a clear message for the object form of earlier versions.
 fn outputs_array<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<OutputDef>, D::Error> {
     use serde::de::Error as _;
     let v = serde_json::Value::deserialize(d)?;
     if v.is_object() {
-        return Err(D::Error::custom(r#"`output` is an array: [{"name": "out", ...}]"#));
+        return Err(D::Error::custom(r#"`outputs` is an array: [{"name": "out", ...}]"#));
     }
     let outputs: Vec<OutputDef> = serde_json::from_value(v).map_err(D::Error::custom)?;
     if outputs.is_empty() {
-        return Err(D::Error::custom(format!("an effect has 1 to {MAX_OUTPUTS} outputs, not 0 (omit `output` for one)")));
+        return Err(D::Error::custom(format!("an effect has 1 to {MAX_OUTPUTS} outputs, not 0 (omit `outputs` for one)")));
     }
     Ok(outputs)
 }
@@ -356,10 +356,10 @@ pub struct PassDef {
     /// Defaults to all effect inputs followed by all package textures.
     #[serde(default)]
     pub inputs: Option<Vec<String>>,
-    /// Names of the textures this pass writes, JSON key `output`: an array of 1 to
+    /// Names of the textures this pass writes, JSON key `outputs`: an array of 1 to
     /// [`MAX_PASS_OUTPUTS`] names. Defaults to `["out"]`. The first is the main output
     /// (`out_tex`); the others are `out_tex1`.., bound after the input textures.
-    #[serde(default = "default_output", rename = "output")]
+    #[serde(default = "default_output", rename = "outputs")]
     pub outputs: Vec<String>,
 }
 
@@ -915,7 +915,7 @@ mod tests {
         let m = manifest(
             r#"[{"name":"a","formats":["yuv420p","rgba"],"width":{"min":16,"max":64,"multiple_of":2}},
                 {"name":"b","same_size":true}]"#,
-            r#","output":[{"name":"out","formats":["yuv420p"]}]"#,
+            r#","outputs":[{"name":"out","formats":["yuv420p"]}]"#,
         )
         .unwrap();
         m.check_inputs(&[info("rgba", 32, 9), info("gray", 32, 9)]).unwrap();
@@ -939,7 +939,7 @@ mod tests {
         assert!(manifest(r#"[{"name":"a","width":{"min":10,"max":5}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","height":{"multiple_of":0}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","same_size":true}]"#, "").is_err());
-        assert!(manifest(r#"[{"name":"a"}]"#, r#","output":[{"name":"out","formats":[]}]"#).is_err());
+        assert!(manifest(r#"[{"name":"a"}]"#, r#","outputs":[{"name":"out","formats":[]}]"#).is_err());
     }
 
     #[test]
@@ -1050,7 +1050,7 @@ mod tests {
         Target { os: "windows", backend, vendor, name: name.into(), features, coop_f16: false, is_noop: false }
     }
 
-    const FAST: &str = r#"{"name":"fast","requires":{"backend":["d3d12"],"features":["shader-f16"]},"passes":[{"shader":"d3d12/a.wgsl","output":["x"]},{"shader":"b.wgsl","inputs":["x"]}]}"#;
+    const FAST: &str = r#"{"name":"fast","requires":{"backend":["d3d12"],"features":["shader-f16"]},"passes":[{"shader":"d3d12/a.wgsl","outputs":["x"]},{"shader":"b.wgsl","inputs":["x"]}]}"#;
 
     #[test]
     fn groups_resolve_to_the_first_match() {
@@ -1181,48 +1181,48 @@ mod tests {
             .map_err(|e| e.to_string())
         };
         // Omitted: one output named after the main output of the last pass.
-        let m = parse("", r#"{"shader":"a.wgsl","output":["tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"output":["res"]}"#).unwrap();
+        let m = parse("", r#"{"shader":"a.wgsl","outputs":["tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"outputs":["res"]}"#).unwrap();
         assert_eq!(m.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["res"]);
         // Two outputs, one written by a middle pass, with their own formats, sizes and bypass.
-        let two = r#","output":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"],"bypass":"bg"}]"#;
-        let m =
-            parse(two, r#"{"shader":"a.wgsl","output":["matte","tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"output":["color"]}"#).unwrap();
+        let two = r#","outputs":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"],"bypass":"bg"}]"#;
+        let m = parse(two, r#"{"shader":"a.wgsl","outputs":["matte","tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"outputs":["color"]}"#)
+            .unwrap();
         assert_eq!(m.output_index("matte"), Some(1));
         assert_eq!((m.output_bypass(0), m.output_bypass(1)), (0, 1));
         assert_eq!(m.pass_size(&m.groups[0].passes[0]), 1);
         assert_eq!(m.pass_size(&m.groups[0].passes[1]), 0);
         m.check_output_format(1, "gray").unwrap();
         assert!(m.check_output_format(0, "gray").unwrap_err().to_string().contains("output `color` of `X`"));
-        let both = r#","output":[{"name":"color"},{"name":"matte"}]"#;
-        parse(both, r#"{"shader":"a.wgsl","output":["color","matte"]}"#).unwrap();
+        let both = r#","outputs":[{"name":"color"},{"name":"matte"}]"#;
+        parse(both, r#"{"shader":"a.wgsl","outputs":["color","matte"]}"#).unwrap();
         let err = |extra: &str, passes: &str| parse(extra, passes).unwrap_err();
-        let one = r#"{"shader":"a.wgsl","output":["color","matte"]}"#;
-        assert!(err(r#","output":{"formats":["rgba"]}"#, one).contains(r#"`output` is an array: [{"name": "out", ...}]"#));
-        assert!(err(r#","output":[]"#, one).contains("1 to 4 outputs, not 0"));
-        let five = r#","output":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"}]"#;
+        let one = r#"{"shader":"a.wgsl","outputs":["color","matte"]}"#;
+        assert!(err(r#","outputs":{"formats":["rgba"]}"#, one).contains(r#"`outputs` is an array: [{"name": "out", ...}]"#));
+        assert!(err(r#","outputs":[]"#, one).contains("1 to 4 outputs, not 0"));
+        let five = r#","outputs":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"}]"#;
         assert!(err(five, one).contains("1 to 4 outputs, not 5"));
-        assert!(err(r#","output":[{"name":"color"},{"name":"color"}]"#, one).contains("duplicate output name `color`"));
-        assert!(err(r#","output":[{"name":"color"},{"name":"bg"}]"#, one).contains("shadows an input"));
-        assert!(err(r#","output":[{"name":"enable"}]"#, one).contains("reserved"));
-        assert!(err(r#","output":[{"formats":["rgba"]}]"#, one).contains("missing field `name`"));
-        assert!(err(r#","output":[{"name":"color","bypass":"nope"}]"#, one).contains("bypass `nope` is not an input"));
-        assert!(err(r#","output":[{"name":"color","formats":[]}]"#, one).contains("at least one pixel format"));
-        assert!(err(r#","output":[{"name":"color"},{"name":"other"}]"#, r#"{"shader":"a.wgsl","output":["color"]}"#)
+        assert!(err(r#","outputs":[{"name":"color"},{"name":"color"}]"#, one).contains("duplicate output name `color`"));
+        assert!(err(r#","outputs":[{"name":"color"},{"name":"bg"}]"#, one).contains("shadows an input"));
+        assert!(err(r#","outputs":[{"name":"enable"}]"#, one).contains("reserved"));
+        assert!(err(r#","outputs":[{"formats":["rgba"]}]"#, one).contains("missing field `name`"));
+        assert!(err(r#","outputs":[{"name":"color","bypass":"nope"}]"#, one).contains("bypass `nope` is not an input"));
+        assert!(err(r#","outputs":[{"name":"color","formats":[]}]"#, one).contains("at least one pixel format"));
+        assert!(err(r#","outputs":[{"name":"color"},{"name":"other"}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#)
             .contains("output `other`: no pass writes it"));
-        let twice = r#"{"shader":"a.wgsl","output":["color"]},{"shader":"b.wgsl","inputs":["src"],"output":["color","matte"]}"#;
+        let twice = r#"{"shader":"a.wgsl","outputs":["color"]},{"shader":"b.wgsl","inputs":["src"],"outputs":["color","matte"]}"#;
         assert!(err(both, twice).contains("output `color`: passes [0, 1] write it"));
         // A texture nobody reads and that is no output is a mistake.
-        assert!(err(r#","output":[{"name":"color"}]"#, one).contains("writes `matte`, which no later pass reads"));
+        assert!(err(r#","outputs":[{"name":"color"}]"#, one).contains("writes `matte`, which no later pass reads"));
         // The size is the shader's business now.
-        assert!(err(r#","output":[{"name":"color","size":"hstack"}]"#, one).contains("unknown field `size`"));
+        assert!(err(r#","outputs":[{"name":"color","size":"hstack"}]"#, one).contains("unknown field `size`"));
         // The output is named like a param: `<output>=off` would be ambiguous.
         let param = Manifest::parse(
-            br#"{"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"color","type":"float"}],"output":[{"name":"color"}],"groups":[{"passes":[{"shader":"a.wgsl","output":["color"]}]}]}"#,
+            br#"{"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"color","type":"float"}],"outputs":[{"name":"color"}],"groups":[{"passes":[{"shader":"a.wgsl","outputs":["color"]}]}]}"#,
         );
         assert!(param.unwrap_err().to_string().contains("has the name of a param"));
         // Every group writes every output.
         let groups = Manifest::parse(
-            br#"{"id":"t.x","name":"X","used_for":["gpufx"],"output":[{"name":"color"},{"name":"matte"}],"groups":[{"name":"fast","passes":[{"shader":"a.wgsl","output":["color","matte"]}]},{"name":"slow","passes":[{"shader":"b.wgsl","output":["color"]}]}]}"#,
+            br#"{"id":"t.x","name":"X","used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"matte"}],"groups":[{"name":"fast","passes":[{"shader":"a.wgsl","outputs":["color","matte"]}]},{"name":"slow","passes":[{"shader":"b.wgsl","outputs":["color"]}]}]}"#,
         );
         assert!(groups.unwrap_err().to_string().contains("group slow: output `matte`: no pass writes it"));
     }
@@ -1237,21 +1237,21 @@ mod tests {
         // Omitted: `["out"]`.
         assert_eq!(parse(r#"{"shader":"a.wgsl"}"#).unwrap()[0].outputs, ["out"]);
         // A later pass reads the extra output like any other.
-        let passes = parse(r#"{"shader":"a.wgsl","output":["a","b"]},{"shader":"b.wgsl","inputs":["a","b"],"output":["out"]}"#).unwrap();
+        let passes = parse(r#"{"shader":"a.wgsl","outputs":["a","b"]},{"shader":"b.wgsl","inputs":["a","b"],"outputs":["out"]}"#).unwrap();
         assert_eq!(passes[0].outputs, ["a", "b"]);
         assert_eq!(passes[0].output(), "a");
         assert_eq!(passes[1].output(), "out");
         // The string form is gone.
         assert!(parse(r#"{"shader":"a.wgsl","output":"out"}"#).is_err());
         let err = |passes: &str| parse(passes).unwrap_err();
-        assert!(err(r#"{"shader":"a.wgsl","output":[]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 0"));
-        assert!(err(r#"{"shader":"a.wgsl","output":["a","b","c","d","e"]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 5"));
-        assert!(err(r#"{"shader":"a.wgsl","output":["a","a"]},{"shader":"b.wgsl"}"#).contains("writes `a` twice"));
-        assert!(err(r#"{"shader":"a.wgsl","output":["out","b"]}"#).contains("writes `b`, which no later pass reads and is no output"));
-        assert!(err(r#"{"shader":"a.wgsl","output":["a","src"]},{"shader":"b.wgsl"}"#).contains("shadows an input"));
-        assert!(err(r#"{"shader":"a.wgsl","inputs":["src"],"output":["a","b"]},{"shader":"b.wgsl","inputs":["b"],"output":["x","b"]},{"shader":"c.wgsl"}"#)
+        assert!(err(r#"{"shader":"a.wgsl","outputs":[]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 0"));
+        assert!(err(r#"{"shader":"a.wgsl","outputs":["a","b","c","d","e"]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 5"));
+        assert!(err(r#"{"shader":"a.wgsl","outputs":["a","a"]},{"shader":"b.wgsl"}"#).contains("writes `a` twice"));
+        assert!(err(r#"{"shader":"a.wgsl","outputs":["out","b"]}"#).contains("writes `b`, which no later pass reads and is no output"));
+        assert!(err(r#"{"shader":"a.wgsl","outputs":["a","src"]},{"shader":"b.wgsl"}"#).contains("shadows an input"));
+        assert!(err(r#"{"shader":"a.wgsl","inputs":["src"],"outputs":["a","b"]},{"shader":"b.wgsl","inputs":["b"],"outputs":["x","b"]},{"shader":"c.wgsl"}"#)
             .contains("cannot read its own output `b`"));
-        assert!(err(r#"{"shader":"a.wgsl","output":["a","out_tex1"]},{"shader":"b.wgsl"}"#).contains("not a valid identifier"));
-        assert!(err(r#"{"shader":"a.wgsl","inputs":["b"],"output":["a","b"]},{"shader":"b.wgsl"}"#).contains("reads `b`"));
+        assert!(err(r#"{"shader":"a.wgsl","outputs":["a","out_tex1"]},{"shader":"b.wgsl"}"#).contains("not a valid identifier"));
+        assert!(err(r#"{"shader":"a.wgsl","inputs":["b"],"outputs":["a","b"]},{"shader":"b.wgsl"}"#).contains("reads `b`"));
     }
 }
