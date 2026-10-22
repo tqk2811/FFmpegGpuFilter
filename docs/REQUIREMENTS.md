@@ -14,7 +14,7 @@ families come from public vendor/Microsoft tables, not from tests here.
 | Resource binding tier | Tier 2 (Tier 1 adapters are skipped) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:243-251` |
 | Shader model | 5.1 (higher used when present) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:345-385` |
 | D3D11 frames | Windows 10 1703+ (`ID3D11Device5`, D3D11.4 shared fences) | `crates/gpufx-core/src/d3d12.rs:191-218` |
-| `dxcompiler.dll` | Optional: only the D3D12 DXIL shader cache | [DESIGN.md](design/DESIGN.md) (shader cache, D3D12) |
+| `dxcompiler.dll` | Optional: only the D3D12 DXIL shader cache | [Architecture](architecture/README.md) (shader cache, D3D12) |
 
 Example GPUs meeting FL 11_0 + tier 2 (from public D3D12 tier tables, *not verified* on hardware except the
 NVIDIA RTX 4060 and Intel UHD of the tests): NVIDIA Kepler (GTX 600/700) and later, AMD GCN (HD 7000) and later,
@@ -43,7 +43,7 @@ run on lavapipe; real GPUs on Linux are *not verified*.
 | Requirement | Minimum | Source |
 | --- | --- | --- |
 | VideoToolbox frames | Apple silicon (unified memory) | `crates/gpufx-core/src/videotoolbox.rs:118-124` |
-| VideoToolbox formats | nv12, p010le | [DESIGN.md](design/DESIGN.md) (VideoToolbox frames) |
+| VideoToolbox formats | nv12, p010le | [Architecture](architecture/README.md) (VideoToolbox frames) |
 | macOS version | 11.0 on Apple silicon (Rust `aarch64-apple-darwin` minimum); wgpu Metal minimum *not verified* | Rust platform support doc |
 | Metal GPU family | *not verified* (wgpu checks families only for optional features: `wgpu-hal-30.0.1/src/metal/adapter.rs:650-741`) | |
 

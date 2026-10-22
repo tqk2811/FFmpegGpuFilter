@@ -34,7 +34,7 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
   Đã chạy trên NVIDIA RTX 4060 Laptop và Intel UHD Graphics (Windows 11); CI chỉ build.
 - Cache shader trên đĩa (tuỳ chọn): `GPUFX_SHADER_CACHE=<thư mục>` (pipeline cache của Vulkan; DXIL của D3D12 khi
   tìm thấy `dxcompiler.dll` trên đường tìm DLL). `gpufx pack --precompile` gói sẵn shader D3D12 vào gói, chỉ dùng khi
-  `GPUFX_TRUST_PRECOMPILED=1` (xem [thiết kế](docs/design/DESIGN-vi.md)).
+  `GPUFX_TRUST_PRECOMPILED=1` (xem [kiến trúc](docs/architecture/README-vi.md)).
 
 ```sh
 # gpufx trả ra frame GPU: đưa cho nó một device (frame CPU ở input nó tự upload) và
@@ -73,7 +73,7 @@ parameter vừa cho theo vị trí vừa cho theo tên là lỗi "given twice".
   hay không là tuỳ effect: README của từng effect ghi rõ với mỗi tham số là alpha bị bỏ qua, dùng làm độ đậm, hay
   được ghi ra đầu ra.
 - `sendcmd` là lệnh lúc chạy, không phải option của filter: `sendcmd=c='0.5 gpufx@g params gb.strength=0.2'` đặt
-  các cặp `node.name=value` (cách nhau bởi `|`) trong khi stream đang chạy; xem [tham chiếu filter](docs/design/filters/gpufx-vi.md).
+  các cặp `node.name=value` (cách nhau bởi `|`) trong khi stream đang chạy; xem [tham chiếu filter](docs/architecture/filters/gpufx-vi.md).
 
 ```sh
 # một chuỗi: gpufx đầu tiên upload, mọi hiệu ứng chạy trên device Vulkan của FFmpeg, download một lần
@@ -110,7 +110,7 @@ filter chạy trên frame VideoToolbox (nv12, p010le) qua Metal, ví dụ
 `-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12"`;
 đường này chưa chạy trên máy Mac nào (xem bên dưới).
 
-Tài liệu: [thiết kế](docs/design/DESIGN-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)
+Tài liệu: [kiến trúc](docs/architecture/README-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)
 
 ## Nội suy khung hình (`gpufx_ai_framerate`)
 

@@ -1,4 +1,4 @@
-English: [DESIGN.md](DESIGN.md)
+English: [README.md](README.md)
 
 # Thiết kế: FFmpegGpuFilter (gpufx)
 
@@ -184,7 +184,7 @@ tạo graph thay vì chạy sai.
 
 ## 5. Filter FFmpeg `gpufx`
 
-Tham chiếu đầy đủ (cú pháp, option, lệnh runtime, ví dụ): [design/filters/gpufx-vi.md](filters/gpufx-vi.md).
+Tham chiếu đầy đủ (cú pháp, option, lệnh runtime, ví dụ): [filters/gpufx-vi.md](filters/gpufx-vi.md).
 Các filter khác: [gpufx_upload / gpufx_download](filters/gpufx_transfer-vi.md),
 [gpufx_ai_framerate](filters/gpufx_ai_framerate-vi.md), [gpufx_ai_upscale](filters/gpufx_ai_upscale-vi.md).
 
@@ -535,7 +535,7 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
 - `graph='a.zip|b.zip'` là đồ thị thẳng: `EffectGraph::parse` dựng nó, và một hiệu ứng đơn cũng chạy
   qua cùng đoạn mã. `graph` là option duy nhất của filter.
 - Tham số viết inline sau từng gói của một nút (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`, xem "Tham số
-  inline" trong [design/filters/gpufx-vi.md](filters/gpufx-vi.md)), nên ví dụ graph có giá trị là
+  inline" trong [filters/gpufx-vi.md](filters/gpufx-vi.md)), nên ví dụ graph có giá trị là
   `graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=clip((t-1)/1.5\,0\,1)&enable=between(t\,1\,3)&bypass=auto[x]'`.
   `sendcmd` gọi giá trị lúc chạy bằng `nút.tên=value` trên mọi gói của đồ thị theo thứ tự câu (label gói, chỉ số
   từ 0, tên trơn, hoặc nhãn output của nút: `ba.radius`; `gb.strength` tìm hiệu ứng duy nhất trong
@@ -650,7 +650,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 ### Filter truyền frame `gpufx_upload` / `gpufx_download` (Vulkan)
 
-Cách dùng và option: [design/filters/gpufx_transfer-vi.md](filters/gpufx_transfer-vi.md).
+Cách dùng và option: [filters/gpufx_transfer-vi.md](filters/gpufx_transfer-vi.md).
 
 Thay thẳng cho `hwupload` / `hwdownload` trên device Vulkan (`ffmpeg/vf_gpufx_transfer.c`, C thuần dùng
 helper Vulkan nội bộ của FFmpeg `libavutil/vulkan.h`, không cần libgpufx). Lý do: trên NVIDIA, FFmpeg 9.0
@@ -795,7 +795,7 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
 
 ### Nội suy khung hình `gpufx_ai_framerate` (RIFE, gói gpufx-nn)
 
-Cách dùng và option: [design/filters/gpufx_ai_framerate-vi.md](filters/gpufx_ai_framerate-vi.md).
+Cách dùng và option: [filters/gpufx_ai_framerate-vi.md](filters/gpufx_ai_framerate-vi.md).
 
 Filter `gpufx_ai_framerate` (`ffmpeg/vf_gpufx_ai_framerate.c`) tăng frame rate bằng một mạng nơ-ron do libgpufx chạy
 trên cùng loại frame GPU và device như `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). Model là gói gpufx-nn
