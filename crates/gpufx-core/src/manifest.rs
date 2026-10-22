@@ -1293,7 +1293,7 @@ mod tests {
         assert_eq!(m.outputs[0].name, "out");
         m.check_output_format(0, "yuv420p").unwrap();
         m.check_output_format(0, "p010le").unwrap();
-        assert!(m.check_output_format(0, "gray").is_err());
+        assert!(m.check_output_format(0, "gray16le").is_err());
     }
 
     #[test]
@@ -1307,7 +1307,7 @@ mod tests {
         m.check_inputs(&[info("rgba", 32, 9), info("nv12", 32, 9)]).unwrap();
         let err = |s: &[StreamInfo]| m.check_inputs(s).unwrap_err().to_string();
         // Every format the GPU converts is accepted, no other.
-        assert!(err(&[info("gray", 32, 9), info("rgba", 32, 9)]).contains("pixel format `gray` is not converted on the GPU"));
+        assert!(err(&[info("gray16le", 32, 9), info("rgba", 32, 9)]).contains("pixel format `gray16le` is not converted on the GPU"));
         assert!(err(&[info("rgba", 8, 9), info("rgba", 8, 9)]).contains("below the minimum 16"));
         assert!(err(&[info("rgba", 66, 9), info("rgba", 66, 9)]).contains("above the maximum 64"));
         assert!(err(&[info("rgba", 33, 9), info("rgba", 33, 9)]).contains("not a multiple of 2"));
@@ -1697,7 +1697,7 @@ mod tests {
         assert_eq!(m.pass_size(&m.groups[0].passes[0]), 1);
         assert_eq!(m.pass_size(&m.groups[0].passes[1]), 0);
         m.check_output_format(1, "nv12").unwrap();
-        assert!(m.check_output_format(0, "gray").unwrap_err().to_string().contains("output `color` of `X`"));
+        assert!(m.check_output_format(0, "gray16le").unwrap_err().to_string().contains("output `color` of `X`"));
         let both = r#","outputs":[{"name":"color"},{"name":"matte"}]"#;
         parse(both, r#"{"shader":"a.wgsl","outputs":["color","matte"]}"#).unwrap();
         let err = |extra: &str, passes: &str| parse(extra, passes).unwrap_err();

@@ -590,6 +590,25 @@ pub unsafe extern "C" fn gpufx_effect_output_pad_format(fx: *const GpufxEffect, 
         .map_or(ptr::null(), |s| s.as_ptr())
 }
 
+/// The pixel format output `output` is written in: `out_format` when not NULL, else
+/// `first_input` when of the output's `pixel_layout`, else that layout's default (see
+/// `EffectGraph::output_default_format`). NULL with gpufx_last_error() for an unknown format.
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_effect_output_default_format(
+    fx: *const GpufxEffect,
+    output: u32,
+    out_format: *const c_char,
+    first_input: *const c_char,
+) -> *const c_char {
+    guard(ptr::null(), || {
+        let fx = fx.as_ref().ok_or("effect is NULL")?;
+        let text = |p: *const c_char| if p.is_null() { None } else { CStr::from_ptr(p).to_str().ok() };
+        let f = fx.graph.output_default_format(output as usize, text(out_format), text(first_input)).map_err(|e| e.to_string())?;
+        let i = PixelFormat::ALL.iter().position(|&a| a == f).expect("a listed format");
+        Ok(format_names()[i].as_ptr())
+    })
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn gpufx_effect_check_inputs(fx: *const GpufxEffect, streams: *const GpufxStreamInfo, count: u32) -> c_int {
     guard(-1, || {
@@ -1633,7 +1652,7 @@ mod tests {
         assert!(!fx.is_null());
         assert!(unsafe { gpufx_format_supported(c"p010le".as_ptr()) } == 1);
         assert!(unsafe { gpufx_format_supported(c"yuvj420p".as_ptr()) } == 1);
-        assert!(unsafe { gpufx_format_supported(c"gray".as_ptr()) } == 0);
+        assert!(unsafe { gpufx_format_supported(c"gray16le".as_ptr()) } == 0);
         let names: Vec<String> =
             (0..gpufx_format_count()).map(|i| unsafe { CStr::from_ptr(gpufx_format_name(i)) }.to_str().unwrap().into()).collect();
         assert!(names.contains(&"nv12".to_string()) && names.contains(&"yuv420p10le".to_string()), "{names:?}");

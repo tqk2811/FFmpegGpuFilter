@@ -9,7 +9,7 @@ struct Conv {
     cheight: u32,
     sub_x: u32,           // chroma subsampling factors, 1 or 2
     sub_y: u32,
-    kind: u32,            // 0 RGBA, 1 Y + interleaved UV, 2 Y, U, V planes
+    kind: u32,            // 0 RGBA, 1 Y + interleaved UV, 2 Y, U, V planes, 3 Y alone
     alpha: u32,           // 1: plane 3 holds alpha
     depth: u32,           // bits of a sample value
     shift: u32,           // values are stored << shift (P010)

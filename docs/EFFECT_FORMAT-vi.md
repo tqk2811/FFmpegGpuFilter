@@ -305,7 +305,7 @@ float.
 | `rgba` (mặc định) | 1: RGBA | `rgba`, `rgba64le`, ... |
 | `yuv420` / `yuv422` / `yuv444` | 2: Y, UV | `nv12`, `yuv420p`, `p010le`, `yuv420p10le` / `yuv422p*` / `yuv444p*` |
 | `yuva420` / `yuva444` | 3: Y, UV, A | `yuva420p` / `yuva444p` |
-| `y` | 1: Y | `gray*` |
+| `y` | 1: Y | `gray` |
 
 Tên trong shader (WGSL), với input `src` và output k (output 0 không có số, như `gpufx_write`/`gpufx_write1`):
 
@@ -339,6 +339,18 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   output `rgba`, không kèm được một output `yuv420`.
 - Plane chỉ dùng cho WGSL (pass GLSL không đọc hay ghi được), không dùng cho input có `mipmaps` hay `repeat`, và không
   dùng cho output lặp.
+- **Giá trị**: plane Y, U, V giữ mã lưu trữ của frame theo thang 8 bit, mã / (255 * 2^(bits - 8)): mã / 255 ở 8 bit,
+  mã / 1020 ở 10 bit, nên màu đen limited range là 16/255 ở mọi độ sâu (trắng full range 10 bit, 1023, đọc ra 1.003).
+  Mã theo matrix và range của frame input đầu. A là mã / (2^bits - 1), alpha thẳng (không premultiply). Mã P010 được
+  dịch xuống trước.
+- **Frame vào**: input pad chỉ được đọc bởi các input có plane, từ frame cùng loại (bảng trên), được nạp thẳng vào
+  plane, không qua RGBA; input khác layout có plane đọc một convert plane sang plane. Frame GPU `nv12` và `gray` 8 bit
+  được đọc tại chỗ. Pad còn được đọc dạng `rgba`, qua `mipmaps` hay thẳng bởi output của graph, có alpha premultiply,
+  hoặc khi filter bị bypass thì đi qua RGBA.
+- **Frame ra**: output có plane được ghi thẳng vào frame cùng loại (`yuv420` vào `nv12`, `y` vào `gray`, `yuva420` vào
+  `yuva420p` giữ alpha); format khác (`out_format=rgba`) đi qua RGBA. Không chỉ định format thì output lấy
+  `out_format`, không có thì format của input đầu nếu cùng loại, không nữa thì `nv12` (`yuv420`), `yuv422p`, `yuv444p`,
+  `yuva420p`, `yuva444p` hoặc `gray` (`y`). Frame ra giữ matrix và range của input đầu.
 
 ### Kích thước output
 

@@ -267,7 +267,8 @@ impl InterpFrames {
                 return Err(Error::Frame(format!("output {k} is {}x{}, the input {w}x{h}", out.width, out.height)));
             }
         }
-        let key = InputKey { format: input.format, width: w, height: h, direct: false, gpu: true };
+        let key =
+            InputKey { format: input.format, width: w, height: h, direct: false, gpu: true, layout: crate::manifest::PixelLayout::Rgba };
         if self.key != Some(key) {
             // A new size or format: a new pair of source frames (another format of the same size could keep the
             // previous frame, but streams do not change format midway).
@@ -275,7 +276,7 @@ impl InterpFrames {
                 .map(|_| {
                     let tex = texture(device, w, h, "gpufx nn source frame");
                     let view = tex.create_view(&Default::default());
-                    Source { slot: InputSlot::new(device, conv, key, false, vec![tex], None), view }
+                    Source { slot: InputSlot::new(device, conv, key, false, false, vec![tex], &[]), view }
                 })
                 .collect();
             self.between.clear();
@@ -523,11 +524,12 @@ impl UpscaleFrames {
             )));
         }
         let (ow, oh) = (out.width, out.height);
-        let key = InputKey { format: input.format, width: w, height: h, direct: false, gpu: true };
+        let key =
+            InputKey { format: input.format, width: w, height: h, direct: false, gpu: true, layout: crate::manifest::PixelLayout::Rgba };
         if self.key != Some(key) {
             let tex = texture(device, w, h, "gpufx nn upscale source");
             let view = tex.create_view(&Default::default());
-            self.source = Some(Source { slot: InputSlot::new(device, conv, key, false, vec![tex], None), view });
+            self.source = Some(Source { slot: InputSlot::new(device, conv, key, false, false, vec![tex], &[]), view });
             self.key = Some(key);
         }
         if self.target.as_ref().is_none_or(|t| (t.w, t.h) != (ow, oh)) {

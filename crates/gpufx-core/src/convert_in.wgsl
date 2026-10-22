@@ -25,6 +25,10 @@ fn chroma(c: f32) -> f32 {
 
 // U and V values of chroma sample p, clamped to the plane.
 fn load_uv(p: vec2i) -> vec2f {
+    if (cv.kind == 3u) {
+        // Gray: neutral chroma, the code of no colour in either range.
+        return vec2f(128.0 * code_scale());
+    }
     let q = clamp(p, vec2i(0), vec2i(i32(cv.cwidth) - 1, i32(cv.cheight) - 1));
     if (cv.kind == 1u) {
         let t = load1(q);

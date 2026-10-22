@@ -308,7 +308,7 @@ same float textures.
 | `rgba` (default) | 1: RGBA | `rgba`, `rgba64le`, ... |
 | `yuv420` / `yuv422` / `yuv444` | 2: Y, UV | `nv12`, `yuv420p`, `p010le`, `yuv420p10le` / `yuv422p*` / `yuv444p*` |
 | `yuva420` / `yuva444` | 3: Y, UV, A | `yuva420p` / `yuva444p` |
-| `y` | 1: Y | `gray*` |
+| `y` | 1: Y | `gray` |
 
 Shader names (WGSL), for an input `src` and output k (no number for output 0, as `gpufx_write`/`gpufx_write1`):
 
@@ -342,6 +342,19 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   with one `rgba` output, not with a `yuv420` one.
 - Planes are WGSL only (a GLSL pass may not read or write them), and are not for an input with `mipmaps` or `repeat` nor
   a repeated output.
+- **Values**: a Y, U or V plane holds the stored code of the frame on the 8-bit scale, code / (255 * 2^(bits - 8)): code / 255
+  at 8 bits, code / 1020 at 10 bits, so limited range black is 16/255 at any depth (full range 10-bit white, 1023,
+  reads 1.003). The codes are in the matrix and range of the first input frame. A is code / (2^bits - 1), straight
+  (not premultiplied). P010 codes are shifted down first.
+- **Frames in**: an input pad read only by inputs with planes, from a frame of the same kind (table above), is loaded
+  straight into planes, no RGBA in between; an input of another layout with planes reads one plane to plane convert.
+  8-bit `nv12` and `gray` GPU frames are read in place. A pad also read as `rgba`, through `mipmaps` or by a graph
+  output directly, with premultiplied alpha, or while the filter is bypassed goes through RGBA.
+- **Frames out**: an output with planes is written straight into a frame of the same kind (`yuv420` into `nv12`, `y`
+  into `gray`, `yuva420` into `yuva420p` with its alpha); any other format (`out_format=rgba`) goes through RGBA.
+  With no format given the output takes `out_format`, else the first input's format when of the same kind, else
+  `nv12` (`yuv420`), `yuv422p`, `yuv444p`, `yuva420p`, `yuva444p` or `gray` (`y`). Output frames keep the matrix and
+  range of the first input.
 
 ### Output size
 
