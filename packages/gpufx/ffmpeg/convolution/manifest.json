@@ -22,7 +22,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/convolution.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/convolution.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]

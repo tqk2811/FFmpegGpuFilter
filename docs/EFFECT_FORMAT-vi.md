@@ -140,11 +140,35 @@ Mỗi phần tử `passes` (của một group):
 | `language` | theo đuôi file | `wgsl` hoặc `glsl` (`.glsl`, `.comp` là GLSL) |
 | `entry` | `main` | Hàm compute (WGSL; GLSL luôn là `main`) |
 | `inputs` | mọi input rồi mọi texture | Texture pass này đọc: tên input, texture, hoặc output của pass trước |
-| `output` | `out` | Tên texture pass này ghi. Pass cuối là kết quả |
+| `output` | `["out"]` | Mảng 1 đến 4 tên texture pass này ghi (chuỗi đơn là lỗi). Tên đầu là output chính; pass cuối ghi một tên, là kết quả |
 
 Output có kích thước bằng input đầu tiên, trừ khi `output.size` quy định khác. Tên input/texture/param phải là định danh hợp lệ,
-không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `smp`.
+không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`graph='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
+
+**Một pass ghi nhiều output.** `output` liệt kê tối đa 4 tên. Tên đầu là output chính (`out_tex`, ghi bằng `gpufx_write`); các
+tên sau là `out_tex1`, `out_tex2`, `out_tex3` (ghi bằng `gpufx_write1`..`gpufx_write3`), bind sau các texture input (xem bảng
+binding). Chúng cùng format và kích thước với output chính, và các pass sau đọc chúng theo tên. Các tên trong một mảng không được
+trùng nhau, và pass cuối chỉ ghi đúng một output (kết quả):
+
+```json
+"passes": [
+  { "shader": "shaders/split.wgsl", "inputs": ["src"], "output": ["base", "detail"] },
+  { "shader": "shaders/merge.wgsl", "inputs": ["base", "detail"], "output": ["out"] }
+]
+```
+
+```wgsl
+// shaders/split.wgsl: một input, nên out_tex1 ở binding 5
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    let c = textureSampleLevel(src, smp, gpufx_uv(id), 2.0);
+    let full = textureLoad(src, vec2i(id.xy), 0);
+    gpufx_write(id, c);                                       // base
+    gpufx_write1(id, vec4f(full.rgb - c.rgb + 0.5, full.a)); // detail
+}
+```
 
 ### Số input thay đổi được
 
@@ -209,21 +233,21 @@ Các khoá của `requires` (bỏ qua = `"*"`):
     {
       "name": "dx12",
       "requires": { "os": ["windows"], "backend": ["d3d12"] },
-      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": "out" }]
+      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": ["out"] }]
     },
     {
       "name": "tensor-core",
       "requires": { "backend": ["vulkan"], "vendor": ["nvidia"], "features": ["cooperative-matrix-f16"] },
       "passes": [
-        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": "out" }
+        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": ["tmp"] },
+        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": ["out"] }
       ]
     },
     {
       "name": "generic",
       "passes": [
-        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": "out" }
+        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": ["tmp"] },
+        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": ["out"] }
       ]
     }
   ]
@@ -353,10 +377,11 @@ Size struct làm tròn lên bội của 16 byte. Không có uniform parameter n�
 | 2 | `out_tex` | storage texture 2D chỉ ghi | Output của pass. `rgba8unorm` (`rgba8` trong GLSL), hoặc `rgba16float` (`rgba16f`) khi một input hoặc output của chuỗi quá 8 bit |
 | 3 | `smp` | sampler filtering | Linear, clamp ở mép, linear giữa các mip level; trong GLSL là `sampler` riêng (dùng `sampler2D(tex, smp)`) |
 | 4 + i | tên thứ i trong `inputs` của pass | texture đọc, float, filterable | `texture_2d<f32>` (`texture2D`), hoặc `texture_2d_array<f32>` (`texture2DArray`) với texture của package có `layers`/`grid`. Manifest không có `inputs` thì danh sách là mọi input của manifest, rồi mọi texture của package |
+| 4 + n + k − 1 | `out_tex{k}`, k = 1..3 (n = số `inputs` của pass) | storage texture 2D chỉ ghi | Output phụ thứ k của pass (`output[k]`), cùng format với `out_tex`; chỉ khai báo khi pass có đủ số output đó |
 
 Một tên trong `inputs` được tra theo thứ tự: input của manifest (frame đã chuyển đổi; chỉ level 0, trừ khi input khai báo
 `mipmaps` thì cả chuỗi mip), texture của package (`rgba8unorm`, nạp một lần, chuỗi mip tạo trên CPU khi có `mipmaps`), hoặc
-output của pass trước (level 0). Pass không đọc được `out_tex`.
+output của pass trước (level 0). Pass không đọc được `out_tex` hay `out_tex1`..`out_tex3`.
 
 **Dispatch và tọa độ**
 
@@ -365,9 +390,9 @@ output của pass trước (level 0). Pass không đọc được `out_tex`.
 | Dispatch | Mỗi pass một lần `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)`, theo thứ tự trong manifest, tất cả trong một compute pass; `w`, `h` = size output. Shader khai báo `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); runtime không kiểm tra điều này. Thread vượt mép phải `return`: `gpufx_in_bounds(id)` |
 | Tọa độ pixel | `id.xy` của `global_invocation_id`, số nguyên, gốc ở góc trên trái, y hướng xuống; `textureLoad`/`imageStore` dùng `vec2i(x, y)` |
 | Tọa độ chuẩn hóa | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, tâm pixel, 0..1, v hướng xuống |
-| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi). Bản GLSL nhận `uvec3` |
+| Hàm hỗ trợ | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (kẹp 0..1 rồi ghi), `gpufx_write1`..`gpufx_write3` cho output phụ. Bản GLSL nhận `uvec3` |
 | Đạo hàm | Compute shader không có: dùng `textureSampleLevel` / `textureLod` hoặc `textureLoad` |
-| Tên dành riêng | `globals`, `params`, `out_tex`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable` hay `bypass` |
+| Tên dành riêng | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, mọi tên bắt đầu bằng `gpufx`; không có parameter tên `enable` hay `bypass` |
 
 **Màu**
 

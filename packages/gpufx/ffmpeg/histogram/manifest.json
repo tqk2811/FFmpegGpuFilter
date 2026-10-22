@@ -60,7 +60,7 @@
           "inputs": [
             "src"
           ],
-          "output": "tmp"
+          "output": ["tmp"]
         },
         {
           "shader": "shaders/draw.wgsl",
@@ -68,7 +68,7 @@
             "src",
             "tmp"
           ],
-          "output": "out"
+          "output": ["out"]
         }
       ]
     }

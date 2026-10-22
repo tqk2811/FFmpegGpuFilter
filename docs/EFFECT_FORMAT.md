@@ -142,11 +142,35 @@ Each element of `passes` (of a group):
 | `language` | from the file extension | `wgsl` or `glsl` (`.glsl` and `.comp` are GLSL) |
 | `entry` | `main` | The compute function (WGSL; GLSL is always `main`) |
 | `inputs` | every input, then every texture | Textures this pass reads: input names, textures, or the output of a previous pass |
-| `output` | `out` | Name of the texture this pass writes. The last pass is the result |
+| `output` | `["out"]` | Array of 1 to 4 names of the textures this pass writes (a plain string is an error). The first is the main output; the last pass writes one name, the result |
 
 The output has the same size as the first input unless `output.size` says otherwise. Input/texture/param names must be valid identifiers,
-must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `smp`.
+must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
+
+**Several outputs from one pass.** `output` lists up to 4 names. The first is the main output (`out_tex`, written by
+`gpufx_write`); the others are `out_tex1`, `out_tex2`, `out_tex3` (written by `gpufx_write1`..`gpufx_write3`), bound after the
+input textures (see the binding table). They have the format and size of the main output, and later passes read them by name.
+Names in one array must differ, and the last pass writes exactly one output (the result):
+
+```json
+"passes": [
+  { "shader": "shaders/split.wgsl", "inputs": ["src"], "output": ["base", "detail"] },
+  { "shader": "shaders/merge.wgsl", "inputs": ["base", "detail"], "output": ["out"] }
+]
+```
+
+```wgsl
+// shaders/split.wgsl: one input, so out_tex1 is at binding 5
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    let c = textureSampleLevel(src, smp, gpufx_uv(id), 2.0);
+    let full = textureLoad(src, vec2i(id.xy), 0);
+    gpufx_write(id, c);                                       // base
+    gpufx_write1(id, vec4f(full.rgb - c.rgb + 0.5, full.a)); // detail
+}
+```
 
 ### Variable number of inputs
 
@@ -211,21 +235,21 @@ numbers of passes. The top-level `passes` of older manifests is gone: wrap the p
     {
       "name": "dx12",
       "requires": { "os": ["windows"], "backend": ["d3d12"] },
-      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": "out" }]
+      "passes": [{ "shader": "shaders/glow_dx12.wgsl", "inputs": ["src"], "output": ["out"] }]
     },
     {
       "name": "tensor-core",
       "requires": { "backend": ["vulkan"], "vendor": ["nvidia"], "features": ["cooperative-matrix-f16"] },
       "passes": [
-        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": "out" }
+        { "shader": "shaders/glow_coop.wgsl", "inputs": ["src"], "output": ["tmp"] },
+        { "shader": "shaders/glow_coop_merge.wgsl", "inputs": ["src", "tmp"], "output": ["out"] }
       ]
     },
     {
       "name": "generic",
       "passes": [
-        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": "out" }
+        { "shader": "shaders/glow_h.wgsl", "inputs": ["src"], "output": ["tmp"] },
+        { "shader": "shaders/glow_v.wgsl", "inputs": ["tmp"], "output": ["out"] }
       ]
     }
   ]
@@ -355,10 +379,11 @@ The struct size is rounded up to 16 bytes. With no uniform parameter the struct 
 | 2 | `out_tex` | write-only storage texture, 2D | The pass output. `rgba8unorm` (`rgba8` in GLSL), or `rgba16float` (`rgba16f`) when an input or the output of the chain has more than 8 bits |
 | 3 | `smp` | filtering sampler | Linear, clamped to the edge, linear between mip levels; in GLSL a separate `sampler` (use `sampler2D(tex, smp)`) |
 | 4 + i | the i-th name of the pass `inputs` | sampled texture, float, filterable | `texture_2d<f32>` (`texture2D`), or `texture_2d_array<f32>` (`texture2DArray`) for a package texture with `layers`/`grid`. Without `inputs` in the manifest the list is every manifest input, then every package texture |
+| 4 + n + k − 1 | `out_tex{k}`, k = 1..3 (n = number of pass `inputs`) | write-only storage texture, 2D | Extra output k of the pass (`output[k]`), same format as `out_tex`; declared only when the pass has that many outputs |
 
 What a name in `inputs` resolves to, checked in this order: a manifest input (the converted frame; level 0 only unless the
 input declares `mipmaps`, then the whole mip chain), a package texture (`rgba8unorm`, loaded once, mip chain made on the CPU when
-`mipmaps` is set), or the output of a previous pass (level 0). A pass cannot read `out_tex`.
+`mipmaps` is set), or the output of a previous pass (level 0). A pass cannot read `out_tex` or `out_tex1`..`out_tex3`.
 
 **Dispatch and coordinates**
 
@@ -367,9 +392,9 @@ input declares `mipmaps`, then the whole mip chain), a package texture (`rgba8un
 | Dispatch | One `dispatch_workgroups(ceil(w / 8), ceil(h / 8), 1)` per pass, in manifest order, all in one compute pass; `w`, `h` = output size. The shader declares `@workgroup_size(8, 8)` (GLSL `local_size_x = 8, local_size_y = 8`); the runtime does not check it. Threads past the edge must return: `gpufx_in_bounds(id)` |
 | Pixel coordinates | `id.xy` of `global_invocation_id`, integers, origin at the top-left, y down; `textureLoad`/`imageStore` use `vec2i(x, y)` |
 | Normalised coordinates | `gpufx_uv(id) = (id.xy + 0.5) / globals.size`, the pixel centre, 0..1, v down |
-| Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores). GLSL versions take `uvec3` |
+| Helpers | `gpufx_in_bounds(id)`, `gpufx_uv(id)`, `gpufx_write(id, color)` (clamps to 0..1, then stores), `gpufx_write1`..`gpufx_write3` for extra outputs. GLSL versions take `uvec3` |
 | Derivatives | Not available in compute shaders: use `textureSampleLevel` / `textureLod` or `textureLoad` |
-| Reserved names | `globals`, `params`, `out_tex`, `smp`, anything starting with `gpufx`; no parameter named `enable` or `bypass` |
+| Reserved names | `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`, anything starting with `gpufx`; no parameter named `enable` or `bypass` |
 
 **Colour**
 

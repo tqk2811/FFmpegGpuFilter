@@ -96,12 +96,12 @@ Tóm tắt `manifest.json`:
         {
           "shader": "shaders/blur_h.wgsl",
           "inputs": ["src"],
-          "output": "tmp"
+          "output": ["tmp"]
         },
         {
           "shader": "shaders/blur_v.wgsl",
           "inputs": ["tmp"],
-          "output": "out"
+          "output": ["out"]
         }
       ]
     }

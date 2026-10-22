@@ -13,7 +13,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/yaepblur.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/yaepblur.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]

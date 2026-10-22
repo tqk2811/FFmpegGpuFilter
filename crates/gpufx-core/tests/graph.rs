@@ -439,7 +439,7 @@ impl TwoInputPackage {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let manifest = r#"{"api":1,"id":"t.mix","name":"Mix","used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"b","same_size":true}],
-            "groups":[{"passes":[{"shader":"mix.wgsl","inputs":["a","b"],"output":"tmp"},{"shader":"copy.wgsl","inputs":["tmp"],"output":"out"}]}]}"#;
+            "groups":[{"passes":[{"shader":"mix.wgsl","inputs":["a","b"],"output":["tmp"]},{"shader":"copy.wgsl","inputs":["tmp"],"output":["out"]}]}]}"#;
         std::fs::write(dir.join("manifest.json"), manifest).unwrap();
         let mix = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
     if (!gpufx_in_bounds(id)) { return; }
@@ -468,6 +468,100 @@ impl TwoInputPackage {
 impl Drop for TwoInputPackage {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+/// A two-pass effect whose first pass writes two textures in one dispatch (`a` red, `b`
+/// the input), in WGSL or GLSL, and whose second pass shows `a` on the left half and `b`
+/// on the right. Removed when dropped.
+struct MultiOutputPackage(PathBuf);
+
+impl MultiOutputPackage {
+    fn new(glsl: bool) -> Self {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("gpufx-multi-out-{}-{n}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let split = if glsl { "split.glsl" } else { "split.wgsl" };
+        let manifest = format!(
+            r#"{{"api":1,"id":"t.multi","name":"Multi","used_for":["gpufx"],
+            "groups":[{{"passes":[{{"shader":"{split}","inputs":["src"],"output":["a","b"]}},{{"shader":"join.wgsl","inputs":["a","b"],"output":["out"]}}]}}]}}"#
+        );
+        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+        let wgsl = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    gpufx_write(id, vec4f(1.0, 0.0, 0.0, 1.0));
+    gpufx_write1(id, textureLoad(src, vec2i(id.xy), 0));
+}";
+        let glsl_src = "#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    if (!gpufx_in_bounds(id)) { return; }
+    gpufx_write(id, vec4(1.0, 0.0, 0.0, 1.0));
+    gpufx_write1(id, texelFetch(sampler2D(src, smp), ivec2(id.xy), 0));
+}";
+        let join = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    let p = vec2i(id.xy);
+    if (f32(id.x) < globals.size.x * 0.5) { gpufx_write(id, textureLoad(a, p, 0)); } else { gpufx_write(id, textureLoad(b, p, 0)); }
+}";
+        std::fs::write(dir.join(split), if glsl { glsl_src } else { wgsl }).unwrap();
+        std::fs::write(dir.join("join.wgsl"), join).unwrap();
+        MultiOutputPackage(dir)
+    }
+
+    fn effect(&self, ctx: &Arc<GpuContext>) -> Effect {
+        Effect::new(ctx.clone(), Package::open(&self.0).unwrap()).unwrap()
+    }
+
+    /// What the effect makes of `input`, worked out on the CPU.
+    fn expected(input: &[u8]) -> Vec<u8> {
+        input
+            .chunks(4)
+            .enumerate()
+            .flat_map(|(i, p)| if (i as u32 % W) * 2 < W { [255, 0, 0, 255] } else { [p[0], p[1], p[2], p[3]] })
+            .collect()
+    }
+}
+
+impl Drop for MultiOutputPackage {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+#[test]
+fn a_pass_writes_several_outputs_in_wgsl_and_glsl() {
+    let Some(ctx) = gpu() else { return };
+    let src = gradient(W, H);
+    let info = FrameInfo::new(0.5, 3);
+    for glsl in [false, true] {
+        let pkg = MultiOutputPackage::new(glsl);
+        let got = run(&mut pkg.effect(&ctx), &[&src], &info);
+        assert!(got == MultiOutputPackage::expected(&src), "glsl {glsl}: the extra output does not hold the input");
+    }
+}
+
+#[test]
+fn extra_pass_outputs_get_their_own_pooled_textures() {
+    let Some(ctx) = own_gpu() else { return };
+    let src = gradient(W, H);
+    let info = FrameInfo::new(0.5, 3);
+    let pkg = MultiOutputPackage::new(false);
+    let inv = run(&mut effect(&ctx, "invert"), &[&src], &info);
+    let want = run(&mut effect(&ctx, "invert"), &[&MultiOutputPackage::expected(&inv)], &info);
+    // Effects before and after: the extra output must not share a pooled texture with the
+    // invert output it is made from, nor with the main output read beside it.
+    let mut g = EffectGraph::parse("[0]invert.zip|multi.zip|invert.zip[out]", |path| {
+        let name = path.trim_end_matches(".zip");
+        let fx = if name == "multi" { pkg.effect(&ctx) } else { effect(&ctx, name) };
+        Ok((name.to_string(), fx))
+    })
+    .unwrap();
+    for _ in 0..2 {
+        assert!(run_graph(&mut g, &[&src], &info)[0] == want, "the graph differs from the effects run one by one");
     }
 }
 

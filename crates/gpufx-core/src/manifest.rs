@@ -375,10 +375,15 @@ pub struct PassDef {
     /// Defaults to all effect inputs followed by all package textures.
     #[serde(default)]
     pub inputs: Option<Vec<String>>,
-    /// Name of the texture this pass writes. Defaults to `out`.
-    #[serde(default = "default_output")]
-    pub output: String,
+    /// Names of the textures this pass writes, JSON key `output`: an array of 1 to
+    /// [`MAX_PASS_OUTPUTS`] names. Defaults to `["out"]`. The first is the main output
+    /// (`out_tex`); the others are `out_tex1`.., bound after the input textures.
+    #[serde(default = "default_output", rename = "output")]
+    pub outputs: Vec<String>,
 }
+
+/// The most textures one pass may write: the storage textures WebGPU guarantees per stage.
+pub const MAX_PASS_OUTPUTS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -389,6 +394,11 @@ pub enum ShaderLanguage {
 }
 
 impl PassDef {
+    /// The main output: the first of [`PassDef::outputs`].
+    pub fn output(&self) -> &str {
+        &self.outputs[0]
+    }
+
     pub fn language(&self) -> ShaderLanguage {
         self.language.unwrap_or_else(|| {
             let lower = self.shader.to_ascii_lowercase();
@@ -407,8 +417,8 @@ fn default_api() -> u32 {
 fn default_entry() -> String {
     "main".into()
 }
-fn default_output() -> String {
-    "out".into()
+fn default_output() -> Vec<String> {
+    vec!["out".into()]
 }
 pub(crate) fn default_output_formats() -> Vec<String> {
     crate::PixelFormat::ALL.iter().map(|f| f.name().to_string()).collect()
@@ -464,7 +474,7 @@ pub(crate) fn is_ident(s: &str) -> bool {
 }
 
 /// Names the generated prelude already declares.
-const RESERVED: &[&str] = &["globals", "params", "out_tex", "smp"];
+const RESERVED: &[&str] = &["globals", "params", "out_tex", "out_tex1", "out_tex2", "out_tex3", "smp"];
 
 impl Manifest {
     pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
@@ -633,17 +643,30 @@ impl Manifest {
                         return bad(format!("{} reads `{src}`, which is not an input, texture or earlier pass output", at(i)));
                     }
                 }
-                if !is_ident(&pass.output) {
-                    return bad(format!("{} output `{}` is not a valid identifier", at(i), pass.output));
+                if pass.outputs.is_empty() || pass.outputs.len() > MAX_PASS_OUTPUTS {
+                    return bad(format!("{} must write 1 to {MAX_PASS_OUTPUTS} outputs, not {}", at(i), pass.outputs.len()));
                 }
-                if pass.inputs.iter().flatten().any(|s| *s == pass.output) {
-                    return bad(format!("{} cannot read its own output `{}`", at(i), pass.output));
+                if i + 1 == passes.len() && pass.outputs.len() > 1 {
+                    return bad(format!("{} is the last pass, so it can write only one output", at(i)));
                 }
-                if self.inputs.iter().any(|x| x.name == pass.output) || self.textures.iter().any(|x| x.name == pass.output) {
-                    return bad(format!("{} output `{}` shadows an input or texture", at(i), pass.output));
+                for (k, out) in pass.outputs.iter().enumerate() {
+                    if !is_ident(out) {
+                        return bad(format!("{} output `{out}` is not a valid identifier", at(i)));
+                    }
+                    if pass.outputs[..k].contains(out) {
+                        return bad(format!("{} writes `{out}` twice", at(i)));
+                    }
+                    if pass.inputs.iter().flatten().any(|s| s == out) {
+                        return bad(format!("{} cannot read its own output `{out}`", at(i)));
+                    }
+                    if self.inputs.iter().any(|x| x.name == *out) || self.textures.iter().any(|x| x.name == *out) {
+                        return bad(format!("{} output `{out}` shadows an input or texture", at(i)));
+                    }
                 }
-                if !names.contains(&pass.output.as_str()) {
-                    names.push(&pass.output);
+                for out in &pass.outputs {
+                    if !names.contains(&out.as_str()) {
+                        names.push(out);
+                    }
                 }
             }
         }
@@ -1021,7 +1044,7 @@ mod tests {
         Target { os: "windows", backend, vendor, name: name.into(), features, coop_f16: false, is_noop: false }
     }
 
-    const FAST: &str = r#"{"name":"fast","requires":{"backend":["d3d12"],"features":["shader-f16"]},"passes":[{"shader":"d3d12/a.wgsl","output":"x"},{"shader":"b.wgsl","inputs":["x"]}]}"#;
+    const FAST: &str = r#"{"name":"fast","requires":{"backend":["d3d12"],"features":["shader-f16"]},"passes":[{"shader":"d3d12/a.wgsl","output":["x"]},{"shader":"b.wgsl","inputs":["x"]}]}"#;
 
     #[test]
     fn groups_resolve_to_the_first_match() {
@@ -1140,5 +1163,33 @@ mod tests {
         assert!(parse(r#","used_for":["gpufx_blur"]"#).unwrap_err().contains("unknown filter `gpufx_blur`"));
         // Known names parse; the opener checks its own (see `Package::open`).
         assert_eq!(parse(r#","used_for":["gpufx_ai_upscale"]"#).unwrap(), ["gpufx_ai_upscale"]);
+    }
+
+    #[test]
+    fn pass_outputs_are_an_array_checked_name_by_name() {
+        let parse = |passes: &str| {
+            Manifest::parse(format!(r#"{{"id":"t.x","name":"X","used_for":["gpufx"],"groups":[{{"passes":[{passes}]}}]}}"#).as_bytes())
+                .map(|mut m| m.groups.swap_remove(0).passes)
+                .map_err(|e| e.to_string())
+        };
+        // Omitted: `["out"]`.
+        assert_eq!(parse(r#"{"shader":"a.wgsl"}"#).unwrap()[0].outputs, ["out"]);
+        // A later pass reads the extra output like any other.
+        let passes = parse(r#"{"shader":"a.wgsl","output":["a","b"]},{"shader":"b.wgsl","inputs":["a","b"],"output":["out"]}"#).unwrap();
+        assert_eq!(passes[0].outputs, ["a", "b"]);
+        assert_eq!(passes[0].output(), "a");
+        assert_eq!(passes[1].output(), "out");
+        // The string form is gone.
+        assert!(parse(r#"{"shader":"a.wgsl","output":"out"}"#).is_err());
+        let err = |passes: &str| parse(passes).unwrap_err();
+        assert!(err(r#"{"shader":"a.wgsl","output":[]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 0"));
+        assert!(err(r#"{"shader":"a.wgsl","output":["a","b","c","d","e"]},{"shader":"b.wgsl"}"#).contains("1 to 4 outputs, not 5"));
+        assert!(err(r#"{"shader":"a.wgsl","output":["a","a"]},{"shader":"b.wgsl"}"#).contains("writes `a` twice"));
+        assert!(err(r#"{"shader":"a.wgsl","output":["a","b"]}"#).contains("last pass, so it can write only one output"));
+        assert!(err(r#"{"shader":"a.wgsl","output":["a","src"]},{"shader":"b.wgsl"}"#).contains("shadows an input"));
+        assert!(err(r#"{"shader":"a.wgsl","inputs":["src"],"output":["a","b"]},{"shader":"b.wgsl","inputs":["b"],"output":["x","b"]},{"shader":"c.wgsl"}"#)
+            .contains("cannot read its own output `b`"));
+        assert!(err(r#"{"shader":"a.wgsl","output":["a","out_tex1"]},{"shader":"b.wgsl"}"#).contains("not a valid identifier"));
+        assert!(err(r#"{"shader":"a.wgsl","inputs":["b"],"output":["a","b"]},{"shader":"b.wgsl"}"#).contains("reads `b`"));
     }
 }

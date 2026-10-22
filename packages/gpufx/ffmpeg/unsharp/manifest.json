@@ -17,7 +17,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/unsharp.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/unsharp.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]

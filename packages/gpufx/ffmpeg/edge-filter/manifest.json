@@ -15,7 +15,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/edge_filter.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/edge_filter.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]
