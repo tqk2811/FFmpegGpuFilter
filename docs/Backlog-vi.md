@@ -22,6 +22,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] Manifest chưa kiểm giới hạn 16 texture đọc mỗi pass
+- **Vấn đề**: một pass đọc tối đa 16 texture (input kể cả mọi pad của `repeat`, texture package, output pass trước), nhưng manifest không đếm; vượt thì wgpu báo lỗi khó hiểu lúc tạo bind group layout.
+- **Vị trí**: các kiểm tra pass trong [manifest.rs](../crates/gpufx-core/src/manifest.rs), và `compile_pass` trong [runtime.rs](../crates/gpufx-core/src/runtime.rs).
+- **Vì sao**: vd `hstack` với 16 input `repeat` cộng một texture package đọc 17; tác giả gói chỉ thấy lỗi wgpu. Đề xuất: đếm theo từng pass (tính `repeat` ở N hiện tại), so với 16 và cả giới hạn của device, báo lỗi manifest nêu tên pass.
+- **Ngày ghi**: 2026-10-22
+
 ### [Thấp] Test bundle D3D11 "software input equals hwupload" chập chờn
 - **Vấn đề**: chạy `REQUIRE_D3D=1 bash scripts/test-bundle.sh dist/win64` 2 lần trên cùng bundle thì 1 lần đỏ: phía hwupload D3D11 trả md5 rỗng (ffmpeg không ra frame), không có log GPU; lần sau qua hết. Bài D3D12 tương tự và các bài D3D11 khác đều qua.
 - **Vị trí**: [test-bundle.sh:927](../scripts/test-bundle.sh#L927)
@@ -174,7 +180,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 ### [Thấp] Frame đổi kích thước giữa chừng: thiết kế để sau
 - **Vấn đề**: `check_frame` báo lỗi khi input đổi kích thước giữa luồng; effect không ra được output đổi kích thước theo thời gian. User tạm bỏ vì phức tạp; zoom to dần dùng canvas trong suốt cố định (input đầu) thay thế.
 - **Vị trí**: [vf_gpufx.c:1684](../ffmpeg/vf_gpufx.c#L1684) (`check_frame`), [vf_gpufx.c:2067](../ffmpeg/vf_gpufx.c#L2067) (biến `w`/`h` lấy từ outlink), [vf_gpufx.c:2127](../ffmpeg/vf_gpufx.c#L2127) (`ff_get_video_buffer` theo link), `vf_gpufx_transfer.c` (`transfer_setup`)
-- **Vì sao / cách làm**: core (`graph.rs` `prepare`) đã dựng lại slot khi đổi cỡ. Phần C cần cache frames context theo (sw_format, w, h) như `old_frames`/`config_out_frames` của `vf_gpufx_ai_upscale.c`, kích thước theo từng frame cho output, biến biểu thức, passthrough, pool upload; `gpufx_upload`/`download` cấu hình lại. Output động cần `output.size` dạng biểu thức (api 2) + API FFI `_at`. Giới hạn của FFmpeg: chỉ `scale`, `libplacebo`, `format`, `null`, buffersink... nhận frame khác cỡ link; encoder giữ cỡ frame đầu.
+- **Vì sao / cách làm**: core (`graph.rs` `prepare`) đã dựng lại slot khi đổi cỡ. Phần C cần cache frames context theo (sw_format, w, h) như `old_frames`/`config_out_frames` của `vf_gpufx_ai_upscale.c`, kích thước theo từng frame cho output, biến biểu thức, passthrough, pool upload; `gpufx_upload`/`download` cấu hình lại. Output động cần `output.size` dạng biểu thức + API FFI `_at`. Giới hạn của FFmpeg: chỉ `scale`, `libplacebo`, `format`, `null`, buffersink... nhận frame khác cỡ link; encoder giữ cỡ frame đầu.
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] `xfade.zip` `custom`: thiếu hàm đọc pixel `a0..a3`/`b0..b3`
@@ -266,9 +272,9 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Ngày ghi**: 2026-10-12
 
 ### Hiệu ứng thu nhỏ ảnh chưa dùng mipmap của input
-- **Vấn đề**: engine đã có `"mipmaps": true` cho input (api 2, chuỗi mip sinh trên GPU mỗi frame), nhưng `fit`, `push-box`, `photo-collection` vẫn lấy mẫu ở mức 0, nên ảnh lớn hơn khung nhiều (ảnh 4000 px trong `fit`, hộp nhỏ của `push-box`) vẫn răng cưa/nhấp nháy. Nền mờ của `fit` dùng 64 tap bilinear rải đều trên bán kính, bán kính lớn (trên khoảng 64 px) có thể lộ bóng lặp; đọc từ mức mip phù hợp sẽ hết.
+- **Vấn đề**: engine đã có `"mipmaps": true` cho input (chuỗi mip sinh trên GPU mỗi frame), nhưng `fit`, `push-box`, `photo-collection` vẫn lấy mẫu ở mức 0, nên ảnh lớn hơn khung nhiều (ảnh 4000 px trong `fit`, hộp nhỏ của `push-box`) vẫn răng cưa/nhấp nháy. Nền mờ của `fit` dùng 64 tap bilinear rải đều trên bán kính, bán kính lớn (trên khoảng 64 px) có thể lộ bóng lặp; đọc từ mức mip phù hợp sẽ hết.
 - **Vị trí**: `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/{fit,push-box,photo-collection}`, [crates/gpufx-core/src/mips.rs](../crates/gpufx-core/src/mips.rs).
-- **Vì sao**: giữ output của các hiệu ứng cũ giống từng byte khi thêm tính năng; chuyển sang api 2 và tự tính `lod` theo tỉ lệ thu nhỏ là thay đổi output, cần làm và kiểm riêng. Mip của input tốn thêm khoảng 1/3 VRAM của texture đó và một pass mỗi mức mỗi frame.
+- **Vì sao**: giữ output của các hiệu ứng cũ giống từng byte khi thêm tính năng; chuyển sang tự tính `lod` theo tỉ lệ thu nhỏ là thay đổi output, cần làm và kiểm riêng. Mip của input tốn thêm khoảng 1/3 VRAM của texture đó và một pass mỗi mức mỗi frame.
 - **Ngày ghi**: 2026-10-13
 
 ### Sprite/hạt: các phần để sau

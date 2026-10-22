@@ -92,9 +92,9 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
 ```
 
 - `inputs` determines the number of input pads on the filter (a transition uses 2 inputs, etc.). The last input may
-  carry `repeat` (api 2, WGSL only, `{default, min, max <= 16}`): it expands into pads `<name>0..N-1`, N = the number of
+  carry `repeat` (WGSL only, `{default, min, max <= 16}`): it expands into pads `<name>0..N-1`, N = the number of
   labels the graph node reads (`default` without labels); the prelude adds `gpufx_input_count/size/load`.
-- `output.size` (api 2): `first` (default, the size of the first input), `hstack` (width = sum of the widths, all inputs
+- `output.size`: `first` (default, the size of the first input), `hstack` (width = sum of the widths, all inputs
   the same height) or `vstack` (height = sum, same width). Checked at configure and on a size change; the result must
   fit the GPU's `max_texture_dimension_2d`. Downstream graph nodes see the propagated size.
 - `params` are **generated automatically** by the runtime into a `params` struct in the shader, following the
@@ -119,7 +119,7 @@ Each pass is a **compute shader**. Before the author's code, the runtime inserts
 | 3 | `smp` | Linear sampler, clamp, linear between mip levels |
 | 4.. | input/texture/pass names | Textures to read (`texture_2d<f32>`; `texture_2d_array<f32>` for package textures with `layers`/`grid`) |
 
-Package textures (api 2) can be texture arrays (`layers`, or an atlas cut by `grid`), with mip chains made
+Package textures can be texture arrays (`layers`, or an atlas cut by `grid`), with mip chains made
 on the CPU and premultiplied alpha, all once when the `Program` loads; image sizes are checked from the PNG
 headers (4096 a side, 64 M texels per package, the device limits) before anything is decoded. An input with
 `mipmaps` gets its mip chain on the GPU every frame, in its own texture (the input slot or the pooled
@@ -213,6 +213,11 @@ passes → built-in conversion pass → copy back to RAM. libgpufx converts `rgb
 - A disabled filter (timeline) converts input 0 to the output format on the GPU without running effects.
 
 All `gpufx` filters in the same process share one GPU device.
+
+The device asks for wgpu's default limits, except the buffer sizes (`device_limits` in `crates/gpufx-core/src/runtime.rs`, used
+where `runtime.rs` creates a device and by `vulkan.rs` for FFmpeg's shared `VkDevice`). This is deliberate: a package sees the
+same limits (16 sampled and 4 storage textures per pass...) on every GPU, so it is portable. Raising them later means asking for
+the adapter limits under a common cap and checking each pass against the device.
 
 Loaded packages are shared too. Each package (keyed by absolute path and GPU device) is read and compiled
 only once per process: a `Program` holds the manifest, pipelines, PNG textures and
@@ -708,8 +713,8 @@ untouched), runs `integrate.sh`, then configures FFmpeg with:
 ## 10. Roadmap
 
 1. **M0 – Prototype (this PR):** zip packages, WGSL + GLSL, multiple passes, multiple inputs, textures,
-   parameters + expressions, FFmpeg 9.0 filter, CLI, 5 sample effects, automated tests. Since then
-   (api 2): texture arrays, mipmaps (package textures and inputs), premultiplied textures, `expr`
+   parameters + expressions, FFmpeg 9.0 filter, CLI, 5 sample effects, automated tests. Since then:
+   texture arrays, mipmaps (package textures and inputs), premultiplied textures, `expr`
    parameters compiled into the shaders; sprites/particles as stateless shaders (`falling-*`).
 2. **M1 – Shaders:** SPIR-V/HLSL/Slang, a Shadertoy `mainImage` wrapper, `#include` of shared shader
    libraries (color, noise, blend modes), hot-reload during development, output size different from the input

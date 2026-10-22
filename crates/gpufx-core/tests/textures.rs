@@ -45,7 +45,7 @@ fn package_dir(tag: &str, manifest: &str, shader: &str, glsl: bool) -> Dir {
 }
 
 fn manifest(extra: &str) -> String {
-    format!(r#"{{"api":2,"id":"t.tex","name":"Tex","used_for":["gpufx"],"groups":[{{"passes":[{{"shader":"main.wgsl"}}]}}]{extra}}}"#)
+    format!(r#"{{"api":1,"id":"t.tex","name":"Tex","used_for":["gpufx"],"groups":[{{"passes":[{{"shader":"main.wgsl"}}]}}]{extra}}}"#)
 }
 
 const RED: [u8; 4] = [255, 0, 0, 255];
@@ -95,7 +95,7 @@ void main() {
     if (!gpufx_in_bounds(id)) { return; }
     gpufx_write(id, textureLod(sampler2DArray(pics, smp), vec3(gpufx_uv(id), 1.0), 0.0));
 }";
-    let m = r#"{"api":2,"id":"t.tex","name":"Tex","used_for":["gpufx"],"textures":[{"name":"pics","path":"atlas.png","grid":[1,2]}],"groups":[{"passes":[{"shader":"main.glsl"}]}]}"#;
+    let m = r#"{"api":1,"id":"t.tex","name":"Tex","used_for":["gpufx"],"textures":[{"name":"pics","path":"atlas.png","grid":[1,2]}],"groups":[{"passes":[{"shader":"main.glsl"}]}]}"#;
     let dir = package_dir("glsl", m, shader, true);
     png(&dir.0.join("atlas.png"), 2, 4, |_, y| if y < 2 { RED } else { BLUE });
     let mut fx = Effect::new(ctx, Package::open(&dir.0).unwrap()).unwrap();
@@ -251,7 +251,8 @@ fn image_sizes_are_checked_before_decoding() {
 }
 
 #[test]
-fn api_1_packages_keep_api_1_rules() {
+fn only_api_1_is_supported() {
+    // The features that once needed api 2 work at api 1.
     let dir = package_dir(
         "api1",
         r#"{"id":"t.x","name":"X","used_for":["gpufx"],"textures":[{"name":"t","path":"a.png","mipmaps":true}],"groups":[{"passes":[{"shader":"main.wgsl"}]}]}"#,
@@ -259,8 +260,15 @@ fn api_1_packages_keep_api_1_rules() {
         false,
     );
     png(&dir.0.join("a.png"), 4, 4, |_, _| RED);
+    Package::open(&dir.0).unwrap();
+    let dir = package_dir(
+        "api2",
+        r#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"groups":[{"passes":[{"shader":"main.wgsl"}]}]}"#,
+        "",
+        false,
+    );
     let err = open_err(&dir);
-    assert!(err.contains("\"api\": 2"), "{err}");
+    assert!(err.contains("unsupported manifest api 2"), "{err}");
     // A package for a newer runtime names the api, not its unknown fields.
     let dir = package_dir(
         "api3",

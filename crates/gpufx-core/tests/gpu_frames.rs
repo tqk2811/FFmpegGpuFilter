@@ -358,7 +358,7 @@ impl MipPackage {
         let dir = std::env::temp_dir().join(format!("gpufx-direct-mips-{}-{n}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
-        let manifest = r#"{"api":2,"id":"t.mips","name":"Mips","used_for":["gpufx"],"inputs":[{"name":"src","mipmaps":true}],"groups":[{"passes":[{"shader":"main.wgsl"}]}]}"#;
+        let manifest = r#"{"api":1,"id":"t.mips","name":"Mips","used_for":["gpufx"],"inputs":[{"name":"src","mipmaps":true}],"groups":[{"passes":[{"shader":"main.wgsl"}]}]}"#;
         std::fs::write(dir.join("manifest.json"), manifest).unwrap();
         let shader = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
     if (!gpufx_in_bounds(id)) { return; }

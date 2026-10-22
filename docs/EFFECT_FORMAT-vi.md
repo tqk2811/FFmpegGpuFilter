@@ -1,6 +1,6 @@
 English: [EFFECT_FORMAT.md](EFFECT_FORMAT.md)
 
-# Định dạng gói hiệu ứng và cách viết shader (api 2)
+# Định dạng gói hiệu ứng và cách viết shader
 
 ## Cấu trúc gói
 
@@ -34,7 +34,7 @@ scripts/pack-packages.sh --check -o out my-fx    # biên dịch shader trên GPU
 
 | Trường | Kiểu | Bắt buộc | Ý nghĩa |
 |--------|------|----------|---------|
-| `api` | số | không (1) | Phiên bản định dạng. Cần `2` cho texture mảng, `mipmaps`, `premultiply`, tham số `expr` và `enum`, input `repeat` và `output.size` khác `first`; gói không dùng các trường này giữ `1` và chạy như cũ. Runtime cũ hơn gói sẽ báo `unsupported manifest api 2` |
+| `api` | số | không (1) | Phiên bản định dạng. `1` là giá trị duy nhất; gói có giá trị khác bị từ chối với `unsupported manifest api N` |
 | `id` | chuỗi | có | Định danh dạng reverse-DNS |
 | `name` | chuỗi | có | Tên hiển thị |
 | `used_for` | mảng | có | Các filter FFmpeg dùng package này: effect ghi `["gpufx"]`. Mảng rỗng hoặc tên lạ (tên hợp lệ: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) thì không load được; filter `gpufx` từ chối package mà danh sách không có `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
@@ -64,8 +64,8 @@ Mỗi phần tử `inputs`:
 | `formats` | `[]` (mọi format) | Pixel format nhận (tên của FFmpeg: `yuv420p`, `nv12`, `rgba`, `rgb24`...) |
 | `width`, `height` | không giới hạn | `{ "min": 16, "max": 4096, "multiple_of": 2 }`, mỗi trường đều tuỳ chọn |
 | `same_size` | `false` | Kích thước phải bằng input đầu tiên (không dùng cho input đầu) |
-| `mipmaps` | `false` | (api 2) Texture của input có đủ chuỗi mip, sinh trên GPU mỗi frame, cho shader thu nhỏ ảnh nhiều (`textureSampleLevel(src, smp, uv, lod)`); xem [Mipmap](#mipmap) |
-| `repeat` | không có | (api 2, chỉ input cuối, chỉ WGSL) `{ "default": 2, "min": 2, "max": 16 }`: input đại diện cho số pad thay đổi được, xem [Số input thay đổi được](#số-input-thay-đổi-được) |
+| `mipmaps` | `false` | Texture của input có đủ chuỗi mip, sinh trên GPU mỗi frame, cho shader thu nhỏ ảnh nhiều (`textureSampleLevel(src, smp, uv, lod)`); xem [Mipmap](#mipmap) |
+| `repeat` | không có | (chỉ input cuối, chỉ WGSL) `{ "default": 2, "min": 2, "max": 16 }`: input đại diện cho số pad thay đổi được, xem [Số input thay đổi được](#số-input-thay-đổi-được) |
 
 `output.formats`: danh sách pixel format output được phép, theo thứ tự ưu tiên. Không có `output` thì
 danh sách là `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`, `yuv444p`, `yuv420p10le`,
@@ -76,7 +76,7 @@ phía sau nhận format có alpha. **Hiệu ứng tạo ra alpha nên khai báo 
 chọn một format trong danh sách khi nối filter; filter phía sau đòi format ngoài danh sách
 thì FFmpeg tự chèn bộ chuyển đổi sau `gpufx`.
 
-`output.size` (api 2): `first` (mặc định) — output có kích thước input đầu; `hstack` — mọi input phải cao
+`output.size`: `first` (mặc định) — output có kích thước input đầu; `hstack` — mọi input phải cao
 bằng input đầu, chiều rộng output là tổng chiều rộng; `vstack` — mọi input phải rộng bằng input đầu, chiều
 cao output là tổng chiều cao. Lệch là lỗi giống `same_size` (khi cấu hình và khi kích thước frame đổi):
 
@@ -121,7 +121,7 @@ Mỗi phần tử `params`:
 | Trường | Ý nghĩa |
 |--------|---------|
 | `name` | Tên, cũng là tên trường trong `params.<name>` |
-| `type` | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `color`, `expr` (api 2), `enum` (api 2) |
+| `type` | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `color`, `expr`, `enum` |
 | `default` | Số, mảng số, `true/false`, hoặc chuỗi (`"#ff8800"`; biểu thức của `expr`; tên một giá trị của `enum`). `enum` không có `default` thì lấy giá trị đầu tiên |
 | `min`, `max` | Giá trị bị kẹp vào khoảng này (không dùng cho `expr` và `enum`) |
 | `vars` | Chỉ cho `expr`: tên các biến của biểu thức, theo thứ tự tham số của hàm trong shader |
@@ -172,7 +172,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
 ### Số input thay đổi được
 
-Input có `repeat` (api 2) phải là input cuối. Nó nở thành các pad tên `<name>0`, `<name>1`...
+Input có `repeat` phải là input cuối. Nó nở thành các pad tên `<name>0`, `<name>1`...
 (`src0`, `src1` với input `src`), mỗi label mà node của graph đọc là một pad
 (`[0][1][2]hstack.zip[out]` có 3 input, như `hstack` của FFmpeg nhận mọi input nối vào), hoặc `default` pad
 khi node không ghi label input nào (chain, `graph='hstack.zip'`), với `min <= N <= max` (`max` tối đa 16, `min`
@@ -383,6 +383,12 @@ Một tên trong `inputs` được tra theo thứ tự: input của manifest (fr
 `mipmaps` thì cả chuỗi mip), texture của package (`rgba8unorm`, nạp một lần, chuỗi mip tạo trên CPU khi có `mipmaps`), hoặc
 output của pass trước (level 0). Pass không đọc được `out_tex` hay `out_tex1`..`out_tex3`.
 
+Một pass đọc tối đa 16 texture (input của effect, tính cả mọi pad của input `repeat`, texture của package và output của pass
+trước; pass không có `inputs` đọc mọi input của effect và mọi texture của package) và ghi tối đa 4 (`out_tex` và
+`out_tex1`..`out_tex3`). Đây là giới hạn mặc định của WebGPU (`maxSampledTexturesPerShaderStage` 16,
+`maxStorageTexturesPerShaderStage` 4); gpufx xin đúng mức này trên mọi backend dù phần cứng cho nhiều hơn, để một package chạy
+giống nhau ở mọi nơi. Manifest hiện chưa kiểm giới hạn 16 lần đọc: vượt thì lỗi lúc tạo bind group layout.
+
 **Dispatch và tọa độ**
 
 | Mục | Giá trị |
@@ -411,7 +417,7 @@ Mỗi phần tử `textures` tạo một texture `rgba8unorm` chỉ đọc từ 
 (không trùng input, output của pass hay texture khác):
 
 ```json
-"api": 2,
+"api": 1,
 "textures": [
   { "name": "lut", "path": "textures/lut.png" },
   { "name": "leaves", "layers": ["textures/maple.png", "textures/oak.png"], "mipmaps": true, "premultiply": true },
@@ -423,11 +429,11 @@ Mỗi phần tử `textures` tạo một texture `rgba8unorm` chỉ đọc từ 
 |--------|----------|---------|
 | `name` | | Tên trong shader |
 | `path` | | Một PNG. Không có `grid` thì là `texture_2d<f32>` (api 1) |
-| `layers` | | (api 2) Các PNG **cùng kích thước**, là các layer của `texture_2d_array<f32>`, theo thứ tự |
-| `grid` | | (api 2) `[cols, rows]` đi với `path`: cắt atlas thành các layer của `texture_2d_array<f32>`, theo từng hàng. Rộng và cao phải chia hết |
-| `count` | `cols*rows` | (api 2) Số ô dùng, khi các ô cuối bỏ trống |
-| `mipmaps` | `false` | (api 2) Sinh đủ chuỗi mip trên CPU khi nạp gói (mỗi mức từ mức trên, lọc tam giác, sau `premultiply`) |
-| `premultiply` | `false` | (api 2) Nhân RGB với alpha khi nạp: shader đọc màu premultiplied |
+| `layers` | | Các PNG **cùng kích thước**, là các layer của `texture_2d_array<f32>`, theo thứ tự |
+| `grid` | | `[cols, rows]` đi với `path`: cắt atlas thành các layer của `texture_2d_array<f32>`, theo từng hàng. Rộng và cao phải chia hết |
+| `count` | `cols*rows` | Số ô dùng, khi các ô cuối bỏ trống |
+| `mipmaps` | `false` | Sinh đủ chuỗi mip trên CPU khi nạp gói (mỗi mức từ mức trên, lọc tam giác, sau `premultiply`) |
+| `premultiply` | `false` | Nhân RGB với alpha khi nạp: shader đọc màu premultiplied |
 
 Quy tắc: có đúng một trong `path`/`layers`; `grid` chỉ đi với `path`, `count` chỉ đi với `grid`; từ 1 đến
 256 layer; mỗi ảnh tối đa **4096** pixel mỗi cạnh (runtime cũng kiểm `max_texture_dimension_2d` và
@@ -500,7 +506,7 @@ nhiều (ảnh 4000 px trong một hộp nhỏ).
 
 ## Tham số biểu thức
 
-Tham số `expr` (api 2) giữ một biểu thức toán, truyền dạng chuỗi như mọi tham số (inline sau tên package trong `graph=` của filter,
+Tham số `expr` giữ một biểu thức toán, truyền dạng chuỗi như mọi tham số (inline sau tên package trong `graph=` của filter,
 `sendcmd`, inline trong `gpufx run`), và được tính trên GPU ở chỗ shader gọi nó, ví dụ mỗi hạt một lần:
 
 ```json
@@ -529,7 +535,7 @@ let x = gpufx_expr_path_x(u, p, x0);   // tham số theo thứ tự `vars`, đ�
 
 ## Tham số enum
 
-Tham số kiểu `enum` (api 2) nhận một trong các lựa chọn có tên. Trong shader nó là `i32`/`int` giống
+Tham số kiểu `enum` nhận một trong các lựa chọn có tên. Trong shader nó là `i32`/`int` giống
 `int` (`params.<name>`), giữ số của tên được chọn. `values` liệt kê các tên theo một trong hai dạng:
 
 - mảng tên, đánh số từ 0 theo thứ tự: `"values": ["fade", "wipeleft", "wiperight"]`;
@@ -590,4 +596,4 @@ Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmp
 | `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/checkerboard`, `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/push-box`, `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/push-film`, `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/photo-collection` | Chuyển cảnh slideshow theo [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts) (viết lại bằng shader): ô vuông lớn dần, hộp thu nhỏ - đẩy - phóng to, cuộn phim có lỗ vẽ bằng shader, ảnh bay vào vừa xoay vừa đáp nghiêng lên clip đầu (nối chuỗi để xếp chồng ảnh) |
 | `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/box-in`, `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/sliding-bars`, `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/spin-transition` | Cũng theo các script đó: clip đầu thu nhỏ thành hộp rồi trượt ra, hộp clip sau trượt vào từ cùng phía rồi phóng to (`box_in_*`), các thanh của clip sau lần lượt trượt vào (`stagger`), clip đầu xoay thu nhỏ rồi clip sau xoay phóng to có motion blur (vòng lặp nhiều mẫu theo góc). `slide-transition` có thêm `mode` đẩy / phủ / lộ / đẩy qua khoảng trống màu `color`, `blinds` có `origin` mở từ giữa thanh |
 | `packages/gpufx/tqk2811/FFmpegArgs.TanersenerSlideShow/fit` | Các chế độ khung hình của các script đó (giữa, cắt, kéo giãn, nền mờ) cho ảnh kích thước bất kỳ: input đầu chỉ cho kích thước khung; **hai pass**, box blur tách trục với số tap bilinear cố định |
-| `packages/gpufx/standalone/falling-maple`, `packages/gpufx/standalone/falling-ginkgo` | Lá phong đỏ / lá rẻ quạt vàng rơi: (api 2): atlas 2×2 cắt thành **texture mảng** (`grid`) có **mipmap** và **alpha premultiplied**, mức mip tính cho từng lá, hạt không trạng thái (chỉ phụ thuộc `t`, seek đúng), `var<workgroup>` + `workgroupBarrier`, 4 kiểu chuyển động (`mode`) và quỹ đạo tùy chỉnh (`mode=4`, **tham số `expr`** `path_x`, `path_y`, `angle`). Ảnh gốc và giấy phép ở `assets/leaves/` |
+| `packages/gpufx/standalone/falling-maple`, `packages/gpufx/standalone/falling-ginkgo` | Lá phong đỏ / lá rẻ quạt vàng rơi:: atlas 2×2 cắt thành **texture mảng** (`grid`) có **mipmap** và **alpha premultiplied**, mức mip tính cho từng lá, hạt không trạng thái (chỉ phụ thuộc `t`, seek đúng), `var<workgroup>` + `workgroupBarrier`, 4 kiểu chuyển động (`mode`) và quỹ đạo tùy chỉnh (`mode=4`, **tham số `expr`** `path_x`, `path_y`, `angle`). Ảnh gốc và giấy phép ở `assets/leaves/` |

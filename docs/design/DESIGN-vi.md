@@ -110,9 +110,9 @@ Tóm tắt `manifest.json`:
 ```
 
 - `inputs` quyết định số pad input của filter (transition dùng 2 input, v.v.). Input cuối có thể mang `repeat`
-  (api 2, chỉ WGSL, `{default, min, max <= 16}`): nó mở thành các pad `<name>0..N-1`, N = số nhãn mà node graph đọc
+  (chỉ WGSL, `{default, min, max <= 16}`): nó mở thành các pad `<name>0..N-1`, N = số nhãn mà node graph đọc
   (`default` nếu không có nhãn); prelude thêm `gpufx_input_count/size/load`.
-- `output.size` (api 2): `first` (mặc định, kích thước input đầu), `hstack` (rộng = tổng các chiều rộng, mọi input cùng
+- `output.size`: `first` (mặc định, kích thước input đầu), `hstack` (rộng = tổng các chiều rộng, mọi input cùng
   chiều cao) hoặc `vstack` (cao = tổng, cùng chiều rộng). Kiểm ở configure và khi đổi size; kết quả phải vừa
   `max_texture_dimension_2d` của GPU. Các node graph phía sau thấy size đã lan truyền.
 - `params` được runtime **tự sinh** thành struct `params` trong shader, đúng quy tắc căn lề
@@ -137,7 +137,7 @@ Mỗi pass là một **compute shader**. Trước mã của tác giả, runtime 
 | 3 | `smp` | Sampler tuyến tính, clamp, tuyến tính giữa các mức mip |
 | 4.. | tên input/texture/pass | Texture đọc (`texture_2d<f32>`; `texture_2d_array<f32>` cho texture của gói có `layers`/`grid`) |
 
-Sampler `smp` lọc tuyến tính cả giữa các mức mip. Texture của gói (api 2) có thể là texture mảng
+Sampler `smp` lọc tuyến tính cả giữa các mức mip. Texture của gói có thể là texture mảng
 (`layers`, hoặc atlas cắt theo `grid`), có chuỗi mip sinh trên CPU và alpha premultiplied, làm một lần
 khi nạp `Program`; kích thước ảnh được kiểm từ header PNG (4096 mỗi cạnh, 64 M texel mỗi gói, giới hạn
 của device) trước khi giải mã. Input khai `mipmaps` được sinh chuỗi mip trên GPU mỗi frame ngay trong
@@ -227,6 +227,11 @@ các pass của hiệu ứng → pass chuyển đổi dựng sẵn → copy về
 - Filter bị tắt (timeline) đổi input 0 sang format output trên GPU mà không chạy hiệu ứng.
 
 Các filter `gpufx` trong cùng process dùng chung một GPU device.
+
+Device xin giới hạn mặc định của wgpu, trừ kích thước buffer (`device_limits` trong `crates/gpufx-core/src/runtime.rs`, dùng ở
+chỗ `runtime.rs` tạo device và ở `vulkan.rs` cho `VkDevice` dùng chung của FFmpeg). Đây là chủ ý: package thấy cùng một giới hạn
+(16 texture đọc và 4 texture ghi mỗi pass...) trên mọi GPU nên chạy được ở mọi nơi. Muốn nâng sau này thì phải xin giới hạn của
+adapter dưới một mức trần chung và kiểm từng pass theo device.
 
 Gói đã nạp cũng được dùng chung. Mỗi gói (khoá theo đường dẫn tuyệt đối và GPU device) chỉ
 được đọc và biên dịch một lần trong process: `Program` gồm manifest, pipeline, texture PNG,
@@ -703,7 +708,7 @@ nguyên), chạy `integrate.sh`, rồi configure FFmpeg với:
 ## 10. Lộ trình
 
 1. **M0 – Prototype (PR này):** gói zip, WGSL + GLSL, nhiều pass, nhiều input, texture,
-   tham số + biểu thức, filter FFmpeg 9.0, CLI, 5 hiệu ứng mẫu, test tự động. Sau đó (api 2):
+   tham số + biểu thức, filter FFmpeg 9.0, CLI, 5 hiệu ứng mẫu, test tự động. Sau đó:
    texture mảng, mipmap (texture của gói và input), texture premultiplied, tham số `expr` biên dịch
    vào shader; sprite/hạt bằng shader không trạng thái (`falling-*`).
 2. **M1 – Shader:** SPIR-V/HLSL/Slang, wrapper Shadertoy `mainImage`, `#include` thư viện
