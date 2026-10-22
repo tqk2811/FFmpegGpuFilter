@@ -1,4 +1,4 @@
-Tiếng Việt: [DESIGN-vi.md](DESIGN-vi.md)
+Tiếng Việt: [README-vi.md](README-vi.md)
 
 # Design: FFmpegGpuFilter (gpufx)
 
@@ -168,7 +168,7 @@ initialize the graph instead of running incorrectly.
 
 ## 5. The `gpufx` FFmpeg filter
 
-Full reference (syntax, options, runtime commands, examples): [design/filters/gpufx.md](filters/gpufx.md).
+Full reference (syntax, options, runtime commands, examples): [filters/gpufx.md](filters/gpufx.md).
 Other filters: [gpufx_upload / gpufx_download](filters/gpufx_transfer.md),
 [gpufx_ai_framerate](filters/gpufx_ai_framerate.md), [gpufx_ai_upscale](filters/gpufx_ai_upscale.md).
 
@@ -529,7 +529,7 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
 - `graph='a.zip|b.zip'` is the linear graph: `EffectGraph::parse` builds it, and a single
   effect runs through the same code. `graph` is the only filter option.
 - Parameters are written inline after each package of a node (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`, see
-  "Inline parameters" in [design/filters/gpufx.md](filters/gpufx.md)), so a graph example with values reads
+  "Inline parameters" in [filters/gpufx.md](filters/gpufx.md)), so a graph example with values reads
   `graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=clip((t-1)/1.5\,0\,1)&enable=between(t\,1\,3)&bypass=auto[x]'`.
   `sendcmd` addresses values at run time as `node.name=value` over all packages of the graph in statement order
   (package label, 0-based index, bare name, or a node's output label: `ba.radius`, `gb.strength` finds the one
@@ -650,7 +650,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 ### Transfer filters `gpufx_upload` / `gpufx_download` (Vulkan)
 
-Usage and options: [design/filters/gpufx_transfer.md](filters/gpufx_transfer.md).
+Usage and options: [filters/gpufx_transfer.md](filters/gpufx_transfer.md).
 
 Drop-in replacements for `hwupload` / `hwdownload` on Vulkan devices (`ffmpeg/vf_gpufx_transfer.c`, plain C
 on FFmpeg's internal Vulkan helpers `libavutil/vulkan.h`, no libgpufx). Why: on NVIDIA FFmpeg 9.0 copies
@@ -802,7 +802,7 @@ ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i a.mp4 \
 
 ### Frame interpolation `gpufx_ai_framerate` (RIFE, gpufx-nn packages)
 
-Usage and options: [design/filters/gpufx_ai_framerate.md](filters/gpufx_ai_framerate.md).
+Usage and options: [filters/gpufx_ai_framerate.md](filters/gpufx_ai_framerate.md).
 
 The `gpufx_ai_framerate` filter (`ffmpeg/vf_gpufx_ai_framerate.c`) raises the frame rate with a neural network run
 by libgpufx on the same GPU frames and devices as `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox). The model is a

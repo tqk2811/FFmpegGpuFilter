@@ -37,7 +37,7 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
   nv12 and p010le. Tested on NVIDIA RTX 4060 Laptop and Intel UHD Graphics (Windows 11); CI only builds them.
 - Optional on-disk shader cache: `GPUFX_SHADER_CACHE=<dir>` (Vulkan pipeline cache; D3D12 DXIL when
   `dxcompiler.dll` is on the DLL search path). `gpufx pack --precompile` puts D3D12 shaders in a package, used only
-  with `GPUFX_TRUST_PRECOMPILED=1` (see [design](docs/design/DESIGN.md)).
+  with `GPUFX_TRUST_PRECOMPILED=1` (see [architecture](docs/architecture/README.md)).
 
 ```sh
 # gpufx outputs GPU frames: give it a device (it uploads software inputs itself) and
@@ -76,7 +76,7 @@ given both ways is "given twice".
   alpha is used depends on the effect: its README says, per parameter, if alpha is ignored, sets a strength, or is
   written to the output.
 - `sendcmd` is a runtime command, not a filter option: `sendcmd=c='0.5 gpufx@g params gb.strength=0.2'` sets
-  `node.name=value` pairs (separated by `|`) while the stream runs; see [filter reference](docs/design/filters/gpufx.md).
+  `node.name=value` pairs (separated by `|`) while the stream runs; see [filter reference](docs/architecture/filters/gpufx.md).
 
 ```sh
 # a chain: the first gpufx uploads, every effect runs on FFmpeg's Vulkan device, one download
@@ -112,7 +112,7 @@ The filter's `backend` option is for testing only (leave it at `auto`, which fol
 `-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12"`;
 this path has not run on a Mac yet (see below).
 
-Docs: [design](docs/design/DESIGN.md) · [package format and how to write shaders](docs/EFFECT_FORMAT.md) · [benchmark](docs/BENCHMARK.md)
+Docs: [architecture](docs/architecture/README.md) · [package format and how to write shaders](docs/EFFECT_FORMAT.md) · [benchmark](docs/BENCHMARK.md)
 
 ## Frame interpolation (`gpufx_ai_framerate`)
 

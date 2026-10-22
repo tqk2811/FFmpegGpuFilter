@@ -76,7 +76,7 @@ Quyết định trong mục này ghi đè các chữ "đề xuất" bên dưới
 - `crates/gpufx-core/src/graph.rs`: pool theo (kích thước, pixel_layout), chèn convert khi pixel_layout lệch.
 - `ffmpeg/vf_gpufx.c`: chọn sw_format ra theo pixel_layout.
 - 5 gói keying (mất alpha từ khi bỏ `formats`, xem README của chúng): output khai `"pixel_layout": "yuva420"` (input yuv) hoặc `rgba` để lấy lại alpha; bỏ ghi chú `out_format=rgba` trong README. User chốt 2026-10-23.
-- Tài liệu EFFECT_FORMAT(.md/-vi.md), DESIGN, gói mẫu YUV (vd chroma key trên YUV).
+- Tài liệu EFFECT_FORMAT(.md/-vi.md), docs/architecture/README, gói mẫu YUV (vd chroma key trên YUV).
 
 ## Test
 

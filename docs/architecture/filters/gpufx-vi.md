@@ -5,7 +5,7 @@ English: [gpufx.md](gpufx.md)
 `gpufx` chạy một hoặc nhiều gói hiệu ứng GPU (`.zip` hoặc thư mục, xem [EFFECT_FORMAT-vi.md](../../EFFECT_FORMAT-vi.md))
 trong filter graph của FFmpeg. Filter nhận frame CPU hoặc GPU (Vulkan, D3D12, D3D11, VideoToolbox) và trả ra frame GPU;
 cả graph hiệu ứng của một filter chạy trong một lần submit GPU. Mã nguồn: `ffmpeg/vf_gpufx.c`. Lý do thiết kế như vậy:
-[DESIGN-vi.md](../DESIGN-vi.md#5-filter-ffmpeg-gpufx).
+[Kiến trúc](../README-vi.md#5-filter-ffmpeg-gpufx).
 
 Filter liên quan: [gpufx_upload / gpufx_download](gpufx_transfer-vi.md), [gpufx_ai_framerate](gpufx_ai_framerate-vi.md),
 [gpufx_ai_upscale](gpufx_ai_upscale-vi.md).
@@ -81,7 +81,7 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
   ra). Format có thể là bất kỳ format nào libgpufx chuyển được trên GPU
   (`gpufx_format_supported`; manifest không có danh sách `formats`), và với frame GPU thì FFmpeg phải tạo được storage image của nó; không thì
   filter báo lỗi lúc configure. Mặc định: format của input nguồn của output (input đầu, hoặc input `bypass` của output; input CPU: format nó được upload) nếu
-  libgpufx ghi được, không thì `rgba` (xem "Frame Vulkan" trong [DESIGN-vi.md](../DESIGN-vi.md)). Mặc định bỏ alpha khi input không có alpha: muốn giữ thì `out_format=rgba` (hoặc `yuva420p`). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
+  libgpufx ghi được, không thì `rgba` (xem "Frame Vulkan" trong [Kiến trúc](../README-vi.md)). Mặc định bỏ alpha khi input không có alpha: muốn giữ thì `out_format=rgba` (hoặc `yuva420p`). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
   đổi YUV ↔ RGBA (filter cuối quay về bằng `out_format=nv12`).
   Giới hạn: với frame D3D chỉ nv12, p010le, rgba, rgba64le; với frame VideoToolbox chỉ nv12, p010le.
 - **passthrough** (`auto`, `off`; mặc định `auto`): filter làm gì khi timeline `enable=` tắt nó.

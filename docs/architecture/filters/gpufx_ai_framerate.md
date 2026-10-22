@@ -4,7 +4,7 @@ Tiếng Việt: [gpufx_ai_framerate-vi.md](gpufx_ai_framerate-vi.md)
 
 Raises the frame rate with a neural frame interpolation model (RIFE v4.6, converted to a gpufx-nn package) run on
 the GPU by libgpufx. It works on the same GPU frames and devices as `gpufx` (Vulkan, D3D12, D3D11, VideoToolbox).
-Source: `ffmpeg/vf_gpufx_ai_framerate.c`. Design: [DESIGN.md, Frame interpolation](../DESIGN.md#frame-interpolation-gpufx_ai_framerate-rife-gpufx-nn-packages).
+Source: `ffmpeg/vf_gpufx_ai_framerate.c`. Design: [Architecture, Frame interpolation](../README.md#frame-interpolation-gpufx_ai_framerate-rife-gpufx-nn-packages).
 
 The output is a constant frame rate grid (like `framerate` and `minterpolate`). Each grid point between two source
 frames is made by the model at the matching time, a grid point on a source frame is that frame itself, and the last
@@ -82,5 +82,5 @@ The model is not in git: the release asset `gpufx-packages.zip` ships it in `gpu
 ## See also
 
 - [README: Frame interpolation](../../../README.md#frame-interpolation-gpufx_ai_framerate)
-- [NN_MODEL_FORMAT.md](../../NN_MODEL_FORMAT.md), [DESIGN.md, Frame interpolation](../DESIGN.md#frame-interpolation-gpufx_ai_framerate-rife-gpufx-nn-packages)
+- [NN_MODEL_FORMAT.md](../../NN_MODEL_FORMAT.md), [Architecture, Frame interpolation](../README.md#frame-interpolation-gpufx_ai_framerate-rife-gpufx-nn-packages)
 - [gpufx_transfer](gpufx_transfer.md), [gpufx_ai_upscale](gpufx_ai_upscale.md)

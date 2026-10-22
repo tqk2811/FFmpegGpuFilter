@@ -14,7 +14,7 @@ lấy từ bảng công khai của hãng/Microsoft, không phải từ test ở 
 | Resource binding tier | Tier 2 (adapter tier 1 bị bỏ qua) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:243-251` |
 | Shader model | 5.1 (có cao hơn thì dùng) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:345-385` |
 | Frame D3D11 | Windows 10 1703+ (`ID3D11Device5`, shared fence D3D11.4) | `crates/gpufx-core/src/d3d12.rs:191-218` |
-| `dxcompiler.dll` | Tuỳ chọn: chỉ cho shader cache DXIL D3D12 | [DESIGN-vi.md](design/DESIGN-vi.md) (shader cache, D3D12) |
+| `dxcompiler.dll` | Tuỳ chọn: chỉ cho shader cache DXIL D3D12 | [Kiến trúc](architecture/README-vi.md) (shader cache, D3D12) |
 
 GPU ví dụ đạt FL 11_0 + tier 2 (theo bảng tier D3D12 công khai, *chưa kiểm chứng* trên máy thật, trừ NVIDIA RTX 4060
 và Intel UHD đã chạy test): NVIDIA Kepler (GTX 600/700) trở lên, AMD GCN (HD 7000) trở lên, Intel Gen9
@@ -42,7 +42,7 @@ lavapipe; GPU thật trên Linux *chưa kiểm chứng*.
 | Yêu cầu | Tối thiểu | Nguồn |
 | --- | --- | --- |
 | Frame VideoToolbox | Apple silicon (unified memory) | `crates/gpufx-core/src/videotoolbox.rs:118-124` |
-| Định dạng VideoToolbox | nv12, p010le | [DESIGN-vi.md](design/DESIGN-vi.md) (frame VideoToolbox) |
+| Định dạng VideoToolbox | nv12, p010le | [Kiến trúc](architecture/README-vi.md) (frame VideoToolbox) |
 | Phiên bản macOS | 11.0 trên Apple silicon (tối thiểu của target Rust `aarch64-apple-darwin`); mức tối thiểu của wgpu Metal *chưa kiểm chứng* | Tài liệu platform support của Rust |
 | Metal GPU family | *chưa kiểm chứng* (wgpu chỉ kiểm family cho tính năng tuỳ chọn: `wgpu-hal-30.0.1/src/metal/adapter.rs:650-741`) | |
 

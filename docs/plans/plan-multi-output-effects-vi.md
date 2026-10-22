@@ -85,7 +85,7 @@ Mỗi phần tử:
 - **Q6**: `out_format` của `vf_gpufx.c` đang áp cho MỌI pad (matte `gray` sẽ vướng). **User đã chốt (2026-10-22)**:
   - Manifest: mỗi phần tử `output` có `formats` riêng; phần tử `repeat` có một `formats` dùng chung cho mọi pad nở ra từ nó. Không ghi `out_format` thì `vf_gpufx.c` chọn `sw_format` mỗi pad như hiện nay (format input nguồn nếu có trong `formats`, không thì format đầu tiên), nên thứ tự `formats` là mặc định của pad. LƯU Ý: pad `gpufx` ra frame GPU, `sw_format` do gpufx chọn, KHÔNG negotiate với filter phía sau.
   - `out_format` của filter nhận nhiều mục phân cách bằng `|`, theo thứ tự output pad: `out_format=yuva420p|gray`. Một mục thì áp cho mọi pad (lệnh cũ giữ nguyên). Mục rỗng (`out_format=|gray`) = để mặc định. Với `repeat`, mỗi mục ứng một pad nở ra. Mỗi mục chỉ ghi đè trong `formats` của output đó (ngoài danh sách → lỗi như hiện nay).
-  - Chỗ sửa: chỉ `ffmpeg/vf_gpufx.c` — option dòng ~2562 đổi `AV_OPT_TYPE_PIXEL_FMT` → `AV_OPT_TYPE_STRING`, parse sau khi biết `nb_outputs` (dòng ~527) thành mảng `out_formats[k]` (field dòng ~137); thay `s->out_format` bằng `s->out_formats[k]` ở các dòng ~554-570, 953, 967, 991, 1228, 1240, 1297, 1978. Lỗi mới: tên format sai (`unknown pixel format 'x'`), số mục khác 1 và khác `nb_outputs`. Tài liệu `docs/design/filters/gpufx.md` + `-vi`. Test thật trong `test-bundle.sh`: `out_format=rgba|gray` và hai ca lỗi.
+  - Chỗ sửa: chỉ `ffmpeg/vf_gpufx.c` — option dòng ~2562 đổi `AV_OPT_TYPE_PIXEL_FMT` → `AV_OPT_TYPE_STRING`, parse sau khi biết `nb_outputs` (dòng ~527) thành mảng `out_formats[k]` (field dòng ~137); thay `s->out_format` bằng `s->out_formats[k]` ở các dòng ~554-570, 953, 967, 991, 1228, 1240, 1297, 1978. Lỗi mới: tên format sai (`unknown pixel format 'x'`), số mục khác 1 và khác `nb_outputs`. Tài liệu `docs/architecture/filters/gpufx.md` + `-vi`. Test thật trong `test-bundle.sh`: `out_format=rgba|gray` và hai ca lỗi.
 - **Q7a**: Output `repeat` của effect đơn/chain (không có label): ngoài `default`, có thêm option `outputs=N` cho node không? Đề xuất: có. **Chốt (2026-10-22): B, có option `outputs=N`.**
 - **Q7b**: Có cần output tuỳ chọn (bật/tắt một output tên cố định bằng cờ lúc dựng graph)? Đề xuất: chưa làm, `repeat` với `min: 1` che phần lớn trường hợp. **Chốt (2026-10-22): B, làm output bật/tắt bằng cờ.**
 
@@ -171,7 +171,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 - `packages/gpufx/**/manifest.json` (~95 file có `"output"` cấp effect, trong đó `ffmpeg/hstack`, `ffmpeg/vstack` (nay dùng `gpufx_output_size` thay `size`), `ffmpeg/monochrome` có `formats`): chuyển `"outputs": {...}` → `"outputs": [{"name": "<tên output pass cuối>", ...}]` bằng script (Python `json` sẽ đổi format/line ending → dùng regex có kiểm CRLF, hoặc script đọc/ghi giữ nguyên byte ngoài khối `output`). Chú ý không nhầm với `passes[i].output` (đã là mảng chuỗi sau plan trước).
 - Một package mẫu mới (vd `packages/gpufx/ffmpeg/alphaextract` hoặc `chromakey-matte`) xuất `color` + `matte` để test thật bằng ffmpeg.
 - `docs/EFFECT_FORMAT.md` + `docs/EFFECT_FORMAT-vi.md`: mục `output` cấp effect (bảng trường, mặc định, ví dụ), luật "output = texture pass", bypass theo output, tên pad; phần graph: node ghi nhiều label. Sửa cả hai bản cho khớp.
-- `docs/design/DESIGN.md` + `-vi.md`: đoạn mô tả Topology/Source và pad của filter.
+- `docs/architecture/README.md` + `-vi.md`: đoạn mô tả Topology/Source và pad của filter.
 - Tài liệu filter (README/usage của `gpufx`): ví dụ lệnh:
   `ffmpeg -i in.mp4 -filter_complex "[0]hwupload,gpufx=effect=key.zip[c][m];[c]hwdownload,format=nv12[co];[m]hwdownload,format=gray[mo]" -map [co] c.mp4 -map [mo] m.mp4`
 - Thuật ngữ mới (output pad, matte) bổ sung `docs/Glossary-vi.md` nếu chưa có.
@@ -207,7 +207,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 1. manifest.rs: cú pháp mảng + validate + tests; chuyển toàn bộ package; tài liệu EFFECT_FORMAT (commit 1).
 2. graph.rs/runtime.rs: `Source::Node(j, o)`, plan, direct output, bypass, parser graph, chain; tests core (commit 2, cần review).
 3. FFI + comment header + test FFI; vf_gpufx.c comment/`out_format`; package mẫu; test thật trên FFmpeg (commit 3).
-4. DESIGN + tài liệu filter (có thể gộp vào 3).
+4. docs/architecture/README + tài liệu filter (có thể gộp vào 3).
 5. `out_format` nhiều mục `|` (Q6): chỉ `vf_gpufx.c` + tài liệu filter + test bundle (commit 5, nhỏ; làm sau commit 3 vì cần effect nhiều output để test thật).
 6. Output `repeat` (quyết định 9): manifest + prelude + parser + tests + tài liệu (commit 6, cần review), làm SAU khi 1-3 chạy ổn.
 
