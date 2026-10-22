@@ -986,6 +986,15 @@ impl Effect {
                 level0(&outputs[name])
             }
         };
+        // Optional outputs switched off: one 1x1 stand-in takes their writes.
+        let off = (!manifest.off_outputs.is_empty()).then(|| {
+            let format = if deep { wgpu::TextureFormat::Rgba16Float } else { wgpu::TextureFormat::Rgba8Unorm };
+            crate::convert::texture_2d(device, "gpufx off output", 1, 1, format, wgpu::TextureUsages::STORAGE_BINDING)
+        });
+        let written = |name: &str| match &off {
+            Some(t) if manifest.off_outputs.iter().any(|n| n == name) => level0(t),
+            _ => level0(&outputs[name]),
+        };
         let bind_groups = passes
             .iter()
             .enumerate()
@@ -994,8 +1003,8 @@ impl Effect {
                     return None;
                 }
                 let views: Vec<wgpu::TextureView> = pass.inputs.iter().map(|n| lookup(n)).collect();
-                let out_view = level0(&outputs[&pass.outputs[0]]);
-                let extra_views: Vec<wgpu::TextureView> = pass.outputs[1..].iter().map(|n| level0(&outputs[n])).collect();
+                let out_view = written(&pass.outputs[0]);
+                let extra_views: Vec<wgpu::TextureView> = pass.outputs[1..].iter().map(|n| written(n)).collect();
                 let mut entries = vec![
                     wgpu::BindGroupEntry { binding: 0, resource: self.globals[pass.size_of].as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 1, resource: self.params_buf.as_entire_binding() },
@@ -1085,6 +1094,24 @@ fn pass_copies(pkg: &Package, def: &PassDef) -> Option<(usize, usize)> {
     Some((first, n))
 }
 
+/// `gpufx_output_enabled(i)` for a pass writing an optional output (empty for others, so their
+/// source and shader cache key stay as they were): whether its output `i` (0 is `out_tex`, k is
+/// `out_tex{k}`) is on. A pass output that is off is bound to a 1x1 stand-in: writing it does
+/// nothing useful, and the shader may skip the work for it.
+fn output_enabled(pkg: &Package, def: &PassDef, glsl: bool) -> String {
+    if !pkg.manifest.writes_optional(def) {
+        return String::new();
+    }
+    let off: Vec<String> =
+        def.outputs.iter().enumerate().filter(|(_, n)| pkg.manifest.off_outputs.contains(n)).map(|(i, _)| format!("i != {i}u")).collect();
+    let test = if off.is_empty() { "true".to_string() } else { off.join(" && ") };
+    if glsl {
+        format!("bool gpufx_output_enabled(uint i) {{ return {test}; }}\n")
+    } else {
+        format!("fn gpufx_output_enabled(i: u32) -> bool {{ return {test}; }}\n")
+    }
+}
+
 /// WGSL declarations prepended to every pass shader. `copies` (see [`pass_copies`]) adds the
 /// indexed write helpers, only to a pass writing a repeated output.
 fn prelude(
@@ -1155,11 +1182,12 @@ fn glsl_with_prelude(
     params: &ParamBlock,
     inputs: &[String],
     pkg: &Package,
-    extra_outputs: usize,
+    def: &PassDef,
     user: &str,
     deep: bool,
     size_entry: bool,
 ) -> String {
+    let extra_outputs = def.outputs.len() - 1;
     let (version, body) = match user.trim_start().strip_prefix("#version") {
         Some(rest) => {
             let rest_at = user.len() - rest.len();
@@ -1194,6 +1222,7 @@ fn glsl_with_prelude(
             extra_output_binding(inputs.len(), k)
         ));
     }
+    s.push_str(&output_enabled(pkg, def, true));
     s.push_str(
         "bool gpufx_in_bounds(uvec3 id) { return float(id.x) < globals.size.x && float(id.y) < globals.size.y; }\n\
          vec2 gpufx_uv(uvec3 id) { return (vec2(id.xy) + 0.5) / globals.size; }\n\
@@ -1271,7 +1300,9 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
             let user = pkg.text(&def.shader)?;
             let source = format!(
                 "{}{}",
-                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), deep) + &input_helpers(pkg, &inputs, false),
+                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), deep)
+                    + &output_enabled(pkg, def, false)
+                    + &input_helpers(pkg, &inputs, false),
                 user
             );
             let module = naga::front::wgsl::parse_str(&source)
@@ -1279,7 +1310,7 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
             (module, source)
         }
         ShaderLanguage::Glsl => {
-            let source = glsl_with_prelude(params, &inputs, pkg, extra, pkg.text(&def.shader)?, deep, false);
+            let source = glsl_with_prelude(params, &inputs, pkg, def, pkg.text(&def.shader)?, deep, false);
             let module = naga::front::glsl::Frontend::default()
                 .parse(&naga::front::glsl::Options::from(naga::ShaderStage::Compute), &source)
                 .map_err(|e| Error::Shader(format!("{}: {}", def.shader, e.emit_to_string(&source))))?;
@@ -1384,14 +1415,16 @@ fn compile_size_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index
         ShaderLanguage::Wgsl => {
             let source = format!(
                 "{}{}\n@compute @workgroup_size(1) fn gpufx_size_main() {{ gpufx_size_io[0] = gpufx_output_size(gpufx_size_io[0].y); }}\n",
-                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), false) + &input_helpers(pkg, &inputs, true),
+                prelude(params, &inputs, &arrays, extra, pass_copies(pkg, def), false)
+                    + &output_enabled(pkg, def, false)
+                    + &input_helpers(pkg, &inputs, true),
                 user
             );
             let module = naga::front::wgsl::parse_str(&source).map_err(|e| shader_err(e.emit_to_string(&source)))?;
             (module, source, "gpufx_size_main")
         }
         ShaderLanguage::Glsl => {
-            let source = glsl_with_prelude(params, &inputs, pkg, extra, user, false, true);
+            let source = glsl_with_prelude(params, &inputs, pkg, def, user, false, true);
             let module = naga::front::glsl::Frontend::default()
                 .parse(&naga::front::glsl::Options::from(naga::ShaderStage::Compute), &source)
                 .map_err(|e| shader_err(e.emit_to_string(&source)))?;

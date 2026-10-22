@@ -24,6 +24,8 @@ pub struct Package {
     input_copies: u32,
     /// Copies the repeated output expanded to (0 without one).
     output_copies: u32,
+    /// Optional outputs switched off (see [`Package::with_outputs`]).
+    outputs_off: Vec<String>,
     files: HashMap<String, Vec<u8>>,
 }
 
@@ -49,8 +51,9 @@ impl Package {
         let manifest = parsed.with_input_count(None)?.with_output_count(None)?;
         let input_copies = parsed.repeat().map_or(0, |r| r.default);
         let output_copies = parsed.output_repeat().map_or(0, |r| r.default);
-        let template = (parsed.repeat().is_some() || parsed.output_repeat().is_some()).then(|| Box::new(parsed));
-        let pkg = Package { manifest, template, input_copies, output_copies, files };
+        let template = (parsed.repeat().is_some() || parsed.output_repeat().is_some() || parsed.outputs.iter().any(|o| o.optional))
+            .then(|| Box::new(parsed));
+        let pkg = Package { manifest, template, input_copies, output_copies, outputs_off: Vec::new(), files };
         for pass in pkg.manifest.groups.iter().flat_map(|g| &g.passes) {
             pkg.file(&pass.shader)?;
         }
@@ -67,26 +70,36 @@ impl Package {
     /// The package with its repeated input expanded to `count` inputs (the number of labels a
     /// graph node reads). Fails for a package without one or a count outside its range.
     pub fn with_input_count(&self, count: u32) -> Result<Self, Error> {
-        self.expand(Some(count), self.has_repeated_output().then_some(self.output_copies))
+        self.expand(Some(count), self.has_repeated_output().then_some(self.output_copies), &self.outputs_off)
     }
 
     /// The package with its repeated output expanded to `count` copies (the `outputs=N`
     /// option of a graph node), keeping its input count. Fails for a package without one,
     /// a count outside its range or more than [`crate::manifest::MAX_OUTPUTS`] outputs in all.
     pub fn with_output_count(&self, count: u32) -> Result<Self, Error> {
-        self.expand(self.has_repeated_input().then_some(self.input_copies), Some(count))
+        self.with_outputs(Some(count), &self.outputs_off)
     }
 
-    fn expand(&self, inputs: Option<u32>, outputs: Option<u32>) -> Result<Self, Error> {
+    /// The package with its repeated output expanded to `count` copies (its default when
+    /// `None`) and the optional outputs in `off` switched off (the `outputs=N` and `<name>=off`
+    /// options of a graph node), keeping its input count. The outputs left, copies included,
+    /// are at most [`crate::manifest::MAX_OUTPUTS`].
+    pub fn with_outputs(&self, count: Option<u32>, off: &[String]) -> Result<Self, Error> {
+        let count = count.or(self.has_repeated_output().then_some(self.output_copies));
+        self.expand(self.has_repeated_input().then_some(self.input_copies), count, off)
+    }
+
+    fn expand(&self, inputs: Option<u32>, outputs: Option<u32>, off: &[String]) -> Result<Self, Error> {
         let manifest = match &self.template {
-            Some(t) => t.with_input_count(inputs)?.with_output_count(outputs)?,
-            None => self.manifest.with_input_count(inputs)?.with_output_count(outputs)?,
+            Some(t) => t.with_input_count(inputs)?.with_outputs_off(off)?.with_output_count(outputs)?,
+            None => self.manifest.with_input_count(inputs)?.with_outputs_off(off)?.with_output_count(outputs)?,
         };
         Ok(Package {
             manifest,
             template: self.template.clone(),
             input_copies: inputs.unwrap_or(0),
             output_copies: outputs.unwrap_or(0),
+            outputs_off: off.to_vec(),
             files: self.files.clone(),
         })
     }
@@ -94,6 +107,16 @@ impl Package {
     /// The name of the repeated output as written (`part` for `part0`, `part1`...), if any.
     pub fn repeated_output(&self) -> Option<&str> {
         self.template.as_ref().and_then(|t| t.outputs.last()).filter(|o| o.repeat.is_some()).map(|o| o.name.as_str())
+    }
+
+    /// Names of the optional outputs as written (see [`Package::with_outputs`]), on or off.
+    pub fn optional_outputs(&self) -> Vec<&str> {
+        self.template.as_deref().unwrap_or(&self.manifest).outputs.iter().filter(|o| o.optional).map(|o| o.name.as_str()).collect()
+    }
+
+    /// The optional outputs switched off.
+    pub fn outputs_off(&self) -> &[String] {
+        &self.outputs_off
     }
 
     /// Number of copies the repeated output has (0 without one).
@@ -114,6 +137,7 @@ impl Package {
             template: self.template.as_ref().map(|t| Box::new(t.with_group(g))),
             input_copies: self.input_copies,
             output_copies: self.output_copies,
+            outputs_off: self.outputs_off.clone(),
             files: self.files.clone(),
         }
     }

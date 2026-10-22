@@ -75,6 +75,7 @@ Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là l�
 | `name` | (bắt buộc) | Texture mà một pass ghi (xem [Nhiều output](#nhiều-output)), cũng là tên output pad của effect có nhiều output |
 | `bypass` | input đầu | Input mà output này truyền thẳng khi effect bị tắt (`<effect>.enable`) |
 | `repeat` | không | (chỉ output cuối, chỉ WGSL) `{ "default": 2, "min": 1, "max": 3 }`: output đại diện cho số pad thay đổi được, chọn bằng option node `outputs=N`, xem [Số output thay đổi được](#số-output-thay-đổi-được) |
+| `optional` | `false` | `true`: node graph tắt được output này bằng option `<name>=off`, xem [Output tuỳ chọn](#output-tuỳ-chọn) |
 
 Pixel format: bộ chuyển đổi trên GPU đọc và ghi `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (và đọc thêm
@@ -252,6 +253,29 @@ fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpu
   của nó (bản sao j của `part` đứng sau một output cố định là chỉ số `1 + j`); các bản sao của một pass phải cùng kích thước.
 
 Gói được biên dịch cho số đó; `gpufx pack --precompile` chỉ biên dịch số `default`.
+
+### Output tuỳ chọn
+
+Output có `"optional": true` mặc định bật; option node `<name>=off` tắt nó (`<name>=on` là mặc định):
+`graph='key.zip=matte=off'`, `[0]key.zip=matte=off[c]`. Output đã tắt không có output pad, không có texture, và pass chỉ
+ghi output đã tắt thì không chạy. Option chốt lúc dựng graph (nó quyết định output pad của filter; lệnh lúc chạy
+`node.matte` là lỗi), và tên output không bao giờ trùng tên param nên key không đụng param.
+
+- Không gì được đọc output tuỳ chọn: không pass sau nào ghi nó trong `inputs` (khi tắt nó không có texture).
+- Output `repeat` không được optional (`outputs=N` với `min: 1` đã che trường hợp đó).
+- Giới hạn 4 output tính sau khi nở `repeat` và sau khi tắt output: với
+  `[{"name":"color"},{"name":"mask","optional":true},{"name":"part","repeat":{"default":2}}]`, `outputs=3` cần
+  `mask=off`. `max` của `repeat` được kiểm (và, khi bỏ trống, được đặt) chỉ theo các output không tắt được.
+- Pass ghi output đã tắt giữ nguyên binding: output đó bind vào một texture thế chỗ 1x1, nên `gpufx_write1(...)` vẫn
+  biên dịch và ghi vào chỗ vô dụng. Prelude của pass ghi output tuỳ chọn (bật hay tắt) có thêm hàm để bỏ phần việc đó;
+  pass khác không có:
+
+```wgsl
+fn gpufx_output_enabled(i: u32) -> bool   // output i của pass (0 = out_tex, k = out_tex{k}) đang bật
+```
+
+  GLSL: `bool gpufx_output_enabled(uint i)`. Mỗi tổ hợp bật/tắt biên dịch pipeline riêng.
+- Phải còn ít nhất một output bật.
 
 ### Kích thước output
 

@@ -22,6 +22,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] Input `repeat` chưa kiểm trùng tên với bản sao như output `repeat`
+- **Vấn đề**: output `repeat` từ chối mọi tên khác của package có dạng bản sao (`<name>0`, `<name>12`...), còn input `repeat` thì không: input `src` `repeat` cạnh texture/output pass tên `src1` chỉ lỗi mơ hồ "duplicate name" lúc nở, hoặc khó hiểu hơn khi tên chỉ trùng ở một số N.
+- **Vị trí**: kiểm của output ở `validate` trong [manifest.rs](../crates/gpufx-core/src/manifest.rs#L618) (`is_copy`); nhánh input `repeat` cùng hàm (~dòng 559-572) thiếu phần tương ứng.
+- **Vì sao**: báo lỗi rõ ngay lúc nạp package, cùng một luật cho hai phía. Đề xuất: tách `is_copy` thành hàm chung, gọi cho cả input `repeat`.
+- **Ngày ghi**: 2026-10-23
+
 ### [Thấp] Manifest chưa kiểm giới hạn 16 texture đọc mỗi pass
 - **Vấn đề**: một pass đọc tối đa 16 texture (input kể cả mọi pad của `repeat`, texture package, output pass trước), nhưng manifest không đếm; vượt thì wgpu báo lỗi khó hiểu lúc tạo bind group layout.
 - **Vị trí**: các kiểm tra pass trong [manifest.rs](../crates/gpufx-core/src/manifest.rs), và `compile_pass` trong [runtime.rs](../crates/gpufx-core/src/runtime.rs).
