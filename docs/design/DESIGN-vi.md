@@ -213,13 +213,13 @@ các pass của hiệu ứng → pass chuyển đổi dựng sẵn → copy về
   một buffer map được rồi đọc về.
 - Texture RGBA là `rgba16float` khi chuỗi có frame (input hoặc output) trên 8 bit, nên 10-bit giữ
   được qua chuỗi; còn lại là `rgba8unorm`. PNG trong gói vẫn là `rgba8unorm`.
-- Filter: input không có `formats` nhận thẳng các format này (FFmpeg đổi format khác sang một trong
-  số đó); input có `formats` nhận nguyên frame. Format, ma trận (FCC, SMPTE 240M, YCgCo…) và BT.2020
+- Filter: input nhận thẳng các format này (FFmpeg đổi format khác sang một trong
+  số đó; manifest không có trường `formats`, shader luôn thấy RGBA). Format, ma trận (FCC, SMPTE 240M, YCgCo…) và BT.2020
   constant luminance mà libgpufx không xử lý thì vẫn đổi bằng `swscale` sang `rgba` (hoặc `rgba64le`
   khi trên 8 bit) như trước. Output không bao giờ qua swscale: filter chỉ xuất frame GPU (xem "Format GPU không chuyển
-  được"). Manifest không có `outputs` thì được xuất mọi format này (`rgba` đứng đầu), nên encoder CPU nhận `yuv420p`
+  được"). Output được xuất mọi format này (mặc định: format của input nguồn, xem bên dưới), nên encoder CPU nhận `yuv420p`
   cần `hwdownload` sau `gpufx` nhưng không cần `scale`. Output đó có thể là YUV không alpha, bỏ alpha mà hiệu ứng ghi:
-  hiệu ứng tạo ra alpha nên khai báo `output.formats` (khuyến nghị, code không kiểm).
+  muốn giữ thì dùng `out_format=rgba` (hoặc `yuva420p`).
 - Vị trí chroma không rõ thì là center với frame full range (JPEG/MJPEG), còn lại là left.
 - Mỗi gói biên dịch pipeline `rgba8unorm` lúc nạp, pipeline `rgba16float` khi gặp frame trên 8 bit
   đầu tiên (frame đó chờ biên dịch; lỗi có ghi tên gói).
@@ -410,17 +410,17 @@ mẫu trong plane, còn `encode()` ([L51](../../crates/gpufx-core/src/convert_ou
 Core không chọn; nó dựng convert-out khớp với frame output được đưa vào (`GpuOutputSlot::new` và `OutputSlot::new` nhận
 format của frame). Việc chọn nằm ở filter C:
 
-1. **Manifest**: `output.formats` liệt kê các format hiệu ứng có thể tạo, theo thứ tự ưu tiên. Không khai thì danh sách
-   là mọi format libgpufx chuyển được, `rgba` đứng đầu ([manifest.rs](../../crates/gpufx-core/src/manifest.rs#L419)). Khuyến nghị (code không ép):
-   hiệu ứng ghi alpha có ý nghĩa nên chỉ liệt kê format có alpha (`rgba`, `rgba64le`, `yuva*`).
-2. **Option `out_format` của filter**: khi đặt, mọi output phải liệt kê nó và libgpufx phải chuyển được nó
-   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L554)), nếu không thì cấu hình lỗi.
+1. **Manifest**: không có danh sách format. Manifest không có trường `formats` ở `inputs` hay `outputs` (ghi vào là lỗi
+   "unknown field"); mỗi output có thể là mọi format libgpufx chuyển được. Hiệu ứng ghi alpha có ý nghĩa cần
+   `out_format=rgba` (hoặc `yuva420p`) khi format input không có alpha.
+2. **Option `out_format` của filter**: một mục, hoặc mỗi output pad một mục cách nhau bằng `|`; có thể là bất kỳ
+   format nào GPU chuyển được (kiểm tra cũ "phải nằm trong format output" đã bỏ). Format libgpufx không chuyển được thì cấu hình lỗi.
 3. **Thứ tự ứng viên** (`config_vulkan_output`, [vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L949); `config_d3d_output`,
    [L1224](../../ffmpeg/vf_gpufx.c#L1224)): `out_format` nếu đặt, không thì `sw_format` của input
-   `source[k]` (`hw_in_fmt[source[k]]`) nếu manifest liệt kê nó. `source[k]` lấy từ `gpufx_effect_output_source`
-   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L587)): input pad mà output `k` mang kích thước (và frame rate, aspect ratio),
-   tìm bằng cách đi ngược graph từ output qua input đầu của mỗi hiệu ứng; rồi tới danh sách manifest theo thứ tự. Ứng viên bị bỏ qua khi nó
-   không có trong danh sách, libgpufx không chuyển được, hoặc API không ghi được. Có `out_format` thì không có phương án
+   `source[k]` (`hw_in_fmt[source[k]]`) nếu libgpufx ghi được, không thì `rgba`. `source[k]` lấy từ `gpufx_effect_output_source`
+   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L587)): input đầu, hoặc input `bypass` của output,
+   tìm bằng cách đi ngược graph từ output qua input đầu của mỗi hiệu ứng. Ứng viên bị bỏ qua khi
+   libgpufx không chuyển được hoặc API không ghi được. Có `out_format` thì không có phương án
    dự phòng: đúng format đó hoặc lỗi.
 4. **Giới hạn theo API**: Vulkan cần FFmpeg tạo được image mỗi plane một cái có storage usage cho format đó
    (`av_vkfmt_from_pixfmt`, `VK_IMAGE_USAGE_STORAGE_BIT`). D3D12 và D3D11 nhận `nv12`, `p010le`, `rgba`, `rgba64le`;
@@ -441,10 +441,10 @@ các bit thêm chỉ là các bước làm tròn của giá trị 8-bit.
 
 Lớp C chỉ cho qua những format GPU đọc được và dùng swscale cho phần còn lại:
 
-- `query_formats` ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2248)): input không có danh sách `formats` trong manifest chỉ
+- `query_formats` ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2248)): input chỉ
   đưa ra các format libgpufx chuyển được (`gpufx_format_supported`), nên bước đàm phán của FFmpeg tự chèn `scale`
-  (swscale) phía trước cho các format khác (`gray`, `rgb24`, `yuv411p`...). Input *có* danh sách `formats` đưa ra mọi
-  format swscale đọc được và nhận frame đúng format của nó.
+  (swscale) phía trước cho các format khác (`gray`, `rgb24`, `yuv411p`...). Format nào vẫn lọt tới input mà không chuyển được
+  thì lỗi ``pixel format `x` is not converted on the GPU (supported: ...)``.
 - Frame phần mềm được `upload_input` ([L1619](../../ffmpeg/vf_gpufx.c#L1619)) upload vào frame GPU có format do
   `config_upload` ([L1574](../../ffmpeg/vf_gpufx.c#L1574)) chọn: format của chính input nếu device nhận, không thì
   `nv12` / `p010le` cho YUV 4:2:0 không alpha, không thì `rgba` / `rgba64le` (`rgba_for`,
@@ -465,7 +465,7 @@ Lớp C chỉ cho qua những format GPU đọc được và dùng swscale cho p
    `PIXEL_FORMATS` trong [convert.rs](../../crates/gpufx-core/src/convert.rs#L315) (`Yuva444p as usize + 1`) sang variant
    cuối mới. Nếu format là tổ hợp của thứ đã có (YUV hoặc RGBA planar hay semi-planar, depth tới 16, subsampling 1 hoặc 2,
    plane alpha tuỳ chọn) thì `plane_dims`, `plane_texture_format`, `plane_format`, `uniform` và các shader không cần
-   sửa; `from_name`, `gpufx_format_supported` và `output.formats` mặc định đi theo `NAMES`.
+   sửa; `from_name` và `gpufx_format_supported` đi theo `NAMES`.
 2. **Layout** mới (YUV packed như `yuyv422`, RGB 3 kênh, subsampling 4) cần một `PlaneKind` mới và sửa ở
    `plane_dims` / `plane_count`; `uniform` (bảng kênh `ch`); chú thích `kind` của `convert.wgsl`; `load_uv` và `pixel` của
    `convert_in.wgsl`; `sample` và `channel` của `convert_out.wgsl`; `fused_source`; và kích thước tile của
@@ -573,8 +573,8 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   frames context output do gpufx tạo dùng `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` và cần usage `STORAGE`.
   Image multiplane bị từ chối lúc configure kèm thông báo, frame input không có usage `SAMPLED` cũng vậy. FFmpeg 9.0 mặc định tạo
   frames context `yuva420p`/`yuva444p` không có usage nào (của `hwupload` thì dùng được), nên output chuyển sang
-  format khác, ví dụ `rgba`. sw_format của output là của input nguồn nếu effect
-  được phép xuất, không thì format đầu tiên của pad output mà libgpufx chuyển được và ghi được.
+  format khác, ví dụ `rgba`. sw_format của output là của input nguồn nếu libgpufx ghi được
+  và FFmpeg tạo được storage image cho nó, không thì `rgba`.
   `out_format` thay cho cách chọn đó (đúng format ấy, hoặc lỗi lúc configure). Chuỗi nhiều filter rời giữ
   RGBA ở giữa bằng `out_format=rgba` trên mọi filter trừ cái cuối (số đo ở [BENCHMARK-vi.md](../BENCHMARK-vi.md)).
 - **Mỗi frame**, CPU không chờ: filter khoá mỗi `AVVkFrame` một lần (`lock_frame`; một frame `split` phía

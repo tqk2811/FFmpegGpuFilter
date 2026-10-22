@@ -95,7 +95,6 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   phụ chỉ lặp lại frame cũ. Ảnh tĩnh thành video: đặt `loop` sau `hwupload` để chỉ upload một lần.
 - **Hạn chế:** `gpufx_upload`/`gpufx_download` chỉ có cho Vulkan; đổi kích thước frame giữa chừng trả EINVAL; với
   input thưa (live) mỗi frame trễ `latency` frame.
-- **Hạn chế:** `out_format` dùng chung một định dạng cho mọi output.
 
 ## Effect, tham số, biểu thức, graph
 

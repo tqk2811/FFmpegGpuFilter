@@ -37,7 +37,7 @@ Paths in a graph must not contain `[`, `]`, `;` or `|`.
 | `graph` | string | none | an effect path, a `\|` chain or a labelled graph | Required: the filter fails at init without it. The number of input pads is the number of inputs of the first effect for an unlabelled chain (for a `repeat` input, `default`), else the highest pad read (labelled or bound implicitly) plus one; the number of output pads is the number of graph outputs |
 | `backend` | string | `auto` | `auto`, `vulkan` (`vk`), `dx12` (`d3d12`, `directx`), `metal` (`mtl`); not case sensitive | Testing only: `auto` follows the device of the frames. `gl` is refused; `metal` is refused unless the build has VideoToolbox support (macOS). Any other name fails when the graph is opened |
 | `shortest` | bool | `0` | `0`, `1` | `0`: only input 0 decides the end (other inputs hold their last frame, and show a blank frame before their first frame). `1`: the output ends when any input ends |
-| `out_format` | string | none (chosen from the input) | an FFmpeg pixel format name, or one per output pad separated by `\|` | Forces the format of the outputs (the `sw_format` of GPU frames). One name applies to every output (`out_format=rgba`); several give one per output pad in order (`out_format=yuva420p\|nv12`), an empty entry keeps that pad's default (`out_format=\|nv12`). Each must be in the `formats` of its manifest output, written by libgpufx and storable by the device, else configuration fails. Errors: `unknown pixel format 'x'`, `has 3 entries` (neither 1 nor the number of output pads) |
+| `out_format` | string | none (chosen from the input) | an FFmpeg pixel format name, or one per output pad separated by `\|` | Forces the format of the outputs (the `sw_format` of GPU frames). One name applies to every output (`out_format=rgba`); several give one per output pad in order (`out_format=yuva420p\|nv12`), an empty entry keeps that pad's default (`out_format=\|nv12`). Each must be a format written by libgpufx and storable by the device, else configuration fails. Errors: `unknown pixel format 'x'`, `has 3 entries` (neither 1 nor the number of output pads) |
 | `passthrough` | int (enum) | `auto` | `auto`, `off` | While `enable=` turns the filter off: `auto` relabels the input textures as output frames without a GPU copy when that leaves the pixels unchanged and the next filter is `gpufx`, `gpufx_download` or `hwdownload`; `off` always copies |
 | `bypass` | int (enum) | `0` | `0`, `auto` | Input passed on while the filter is disabled by `enable=`: `0` the source input pad of each output, `auto` that pad until the filter has been enabled for one frame, then the last input pad. The chosen pad must have the output's size, else `EINVAL` |
 | `enable` | string (expression) | none | FFmpeg timeline expression | The generic FFmpeg timeline option (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): when it is 0 the filter takes the disabled path described under `passthrough`/`bypass`. Not the same as the inline `enable=` of an effect |
@@ -62,8 +62,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   all passes fit in a single GPU submit, without intermediate frames.
   The filter's inputs are the inputs of the first effect; only the first effect may have multiple inputs. The output
   follows the rules of the last effect. The rules of the later effects are checked as when chaining filters:
-  the format is the first one in the previous effect's `output.formats` that the next effect accepts,
-  and the size is the one the previous effect writes (the first input's, or the size from `gpufx_output_size`). The frame stays RGBA on the GPU and is not converted to that format.
+  the size is the one the previous effect writes (the first input's, or the size from `gpufx_output_size`). Between effects the textures are RGBA on the GPU, whatever the stream format is.
   Each effect takes its own inline parameters (`graph='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, see
   "Inline parameters" below). Spaces around `|` are ignored.
 - **GPU frames out only**, like the `*_cuda` filters: every output is a Vulkan, D3D12, D3D11 or VideoToolbox frame, so
@@ -79,12 +78,12 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   CLI keep it). Adding an API is one entry in `hw_apis[]` plus
   its cases in the per-API switches of `vf_gpufx.c`.
 - **out_format**: forces the pixel format of every output (on Vulkan/D3D frames: the sw_format of the
-  output frames context). It must be in the effect's output formats and converted on the GPU by libgpufx
-  (`gpufx_format_supported`), and for GPU frames FFmpeg must make storage images of it; otherwise the
-  filter fails at configuration. Default: the source input's format (for a software input, the format it
-  is uploaded in) when the effect may output it, else its first output format the GPU writes (see "Vulkan frames" in [DESIGN.md](../DESIGN.md)). Use: `out_format=rgba` between separate `gpufx` filters, so the middle
+  output frames context). It may be any format converted on the GPU by libgpufx
+  (`gpufx_format_supported`; the manifest has no `formats` list), and for GPU frames FFmpeg must make storage images of it; otherwise the
+  filter fails at configuration. Default: the format of the output's source input (the first input, or the output's `bypass` input; for a software input, the format it
+  is uploaded in) when libgpufx can write it, else `rgba` (see "Vulkan frames" in [DESIGN.md](../DESIGN.md)). The default drops alpha when the input has none: keep it with `out_format=rgba` (or `yuva420p`). Use: `out_format=rgba` between separate `gpufx` filters, so the middle
   ones skip the YUV ↔ RGBA conversions (the last one goes back with `out_format=nv12`).
-  Limits: one format for every output of the filter; on D3D frames only nv12, p010le, rgba and rgba64le; on VideoToolbox frames nv12 and p010le.
+  Limits: on D3D frames only nv12, p010le, rgba and rgba64le; on VideoToolbox frames nv12 and p010le.
 - **passthrough** (`auto`, `off`; default `auto`): what the filter does while timeline `enable=`
   turns it off. `auto` hands each output its source input's texture relabelled as an output frame
   (the input's buffers with the output link's frames context, no GPU copy) when the GPU copy would

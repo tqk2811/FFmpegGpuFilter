@@ -594,21 +594,12 @@ static av_cold int init(AVFilterContext *ctx)
     }
     for (unsigned k = 0; k < s->nb_outputs; k++) {
         const char *name = av_get_pix_fmt_name(s->out_fmts[k]);
-        const uint32_t count = gpufx_effect_output_pad_format_count(s->fx, k);
-        int listed = 0;
 
         if (s->out_fmts[k] == AV_PIX_FMT_NONE)
             continue;
         if (!gpufx_format_supported(name)) {
             av_log(ctx, AV_LOG_ERROR, "out_format=%s is not converted on the GPU by libgpufx "
                    "(nv12, yuv420p, p010le, rgba...).\n", name);
-            return AVERROR(EINVAL);
-        }
-        for (uint32_t j = 0; j < count && !listed; j++)
-            listed = !strcmp(gpufx_effect_output_pad_format(s->fx, k, j), name);
-        if (!listed) {
-            av_log(ctx, AV_LOG_ERROR, "out_format=%s: output '%s' of '%s' cannot have that format.\n",
-                   name, gpufx_effect_output_name(s->fx, k), gpufx_effect_name(s->fx));
             return AVERROR(EINVAL);
         }
     }

@@ -47,11 +47,13 @@ scripts/pack-packages.sh --check -o out my-fx    # compile the shaders on the GP
 
 ## Input/output rules
 
-A package can declare which formats and sizes each input accepts and which format the output produces. A stream
-that does not match **is rejected with an error** (the filter does not convert silently), and the error names the input and the rule:
+A package can declare the sizes each input accepts. The pixel format is not part of the manifest: shaders always see
+RGBA, and an input accepts every pixel format the GPU converter supports (`formats` is gone from `inputs` and
+`outputs`; giving it is an "unknown field" error). A stream that does not match **is rejected with an error** (the
+filter does not convert silently), and the error names the input and the rule:
 
 ```
-unsupported: input `src` of `Chroma Key`: pixel format `gray` is not supported (accepted: yuv420p, rgba)
+unsupported: input `src` of `Chroma Key`: pixel format `x` is not converted on the GPU (supported: rgba, rgba64le, nv12, ...)
 unsupported: input `second` of `Crossfade`: size 300x180 must equal the first input (320x180)
 ```
 
@@ -61,7 +63,6 @@ Each element of `inputs`:
 |-------|---------|---------|
 | `name` | | Input name, also the texture name in the shader |
 | `description` | | Description |
-| `formats` | `[]` (any format) | Accepted pixel formats (FFmpeg names: `yuv420p`, `nv12`, `rgba`, `rgb24`...) |
 | `width`, `height` | unrestricted | `{ "min": 16, "max": 4096, "multiple_of": 2 }`, each field is optional |
 | `same_size` | `false` | The size must equal the first input (not for the first input itself) |
 | `mipmaps` | `false` | The input texture gets a full mip chain, made on the GPU every frame, for shaders that shrink it a lot (`textureSampleLevel(src, smp, uv, lod)`); see [Mipmaps](#mipmaps) |
@@ -72,44 +73,38 @@ Each element of `outputs` (an array; the object form of earlier versions is an e
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `name` | (required) | The texture a pass writes (see [Several outputs](#several-outputs)), also the output pad name of an effect with several outputs |
-| `formats` | every GPU format (below) | Allowed pixel formats of this output, in order of preference |
 | `bypass` | the first input | The input this output passes when the effect is switched off (`<effect>.enable`) |
 
-`formats`: the allowed output pixel formats, in order of preference. Without it the list is
-`rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`, `yuv444p`, `yuv420p10le`, `yuv422p10le`,
-`yuv444p10le`, `yuva420p`, `yuva444p`: the formats gpufx writes on the GPU. So an effect without
-`formats` may output YUV without alpha: the alpha it writes is dropped unless the filter after it
-takes an alpha format. **An effect that produces alpha should declare `formats`** (e.g.
-`["rgba", "yuva420p"]`). FFmpeg
-picks one format from the list when linking filters; if a downstream filter demands a format outside the list,
-FFmpeg inserts a converter after `gpufx`.
+Pixel formats: the GPU converter reads and writes `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
+`yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (and reads `yuvj420p`/`yuvj422p`/`yuvj444p`).
+The `sw_format` of an output defaults to the format of the output's source input (the first input, or the output's
+`bypass` input) when the converter can write it, else `rgba`. The filter option `out_format` (one entry, or one per
+output pad separated by `|`) overrides it and may be any GPU-converted format. **An effect that produces alpha loses it
+when the default is a format without alpha** (`yuv420p`): set `out_format=rgba` (or `yuva420p`) to keep it.
 
 The size of an output is not in the manifest: it comes from an optional shader function, see [Output size](#output-size).
 
 ```json
 "inputs": [
-  { "name": "src", "formats": ["yuv420p", "nv12", "rgba"],
+  { "name": "src",
     "width": { "min": 64, "multiple_of": 2 }, "height": { "min": 64, "multiple_of": 2 } },
-  { "name": "matte", "formats": ["gray"], "same_size": true }
+  { "name": "matte", "same_size": true }
 ],
-"outputs": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
+"outputs": [{ "name": "out" }]
 ```
 
 How the rules apply:
 
-- **FFmpeg:** an input without `formats` takes the formats gpufx converts on the GPU (the list above, plus
-  `yuvj420p`/`yuvj422p`/`yuvj444p`); FFmpeg converts other formats to one of them. An input with
-  `formats` receives the stream's format as is; if it is not in the list, configuring the filter graph fails.
-  To make it work, change the format first with `format=yuv420p,gpufx=...`. The size is checked
-  at configuration and whenever the frame size changes. A misspelled format name is also an error.
+- **FFmpeg:** an input takes the formats gpufx converts on the GPU (the list above); FFmpeg converts other
+  formats to one of them. A format that still reaches the filter unconverted fails configuring with
+  ``pixel format `x` is not converted on the GPU (supported: ...)``. The size is checked
+  at configuration and whenever the frame size changes.
 - **Chains and graphs** (`graph='a|b'`, `graph='...'`): every effect is checked where it sits. An effect
   reading another sees the size of the output it reads (the size of the first input, or the size its shader gives with
-  `gpufx_output_size`) and the first format of that output's
-  `formats` that the reader accepts; an input pad read by several effects must have a format
-  all of them accept. `same_size` therefore also holds between two branches of a graph.
+  `gpufx_output_size`). Between effects the textures are RGBA, whatever the stream format is.
+  `same_size` therefore also holds between two branches of a graph.
 - **`gpufx run`:** the format comes from the PNG (`rgba`, `rgb24`, `gray`, `ya8`, and the 16-bit versions
-  `rgba64be`, `rgb48be`, `gray16be`, `ya16be`). The CLI always writes an RGBA PNG, so it does not check
-  the output `formats`.
+  `rgba64be`, `rgb48be`, `gray16be`, `ya16be`). The CLI always writes an RGBA PNG.
 - Shaders always see RGBA with straight alpha, whatever the input/output format is: the conversion happens
   on the GPU outside the shader. The textures are `rgba8unorm`, or `rgba16float` when an input or the
   output of the chain has more than 8 bits (10-bit video keeps its precision).
@@ -176,10 +171,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 image and a matte from one dispatch, or the matte from an early pass:
 
 ```json
-"inputs": [{ "name": "src", "formats": ["rgba"] }],
+"inputs": [{ "name": "src" }],
 "outputs": [
-  { "name": "color", "formats": ["rgba", "nv12"] },
-  { "name": "matte", "formats": ["gray", "rgba"] }
+  { "name": "color" },
+  { "name": "matte" }
 ],
 "groups": [{ "passes": [
   { "shader": "key.wgsl", "inputs": ["src"], "outputs": ["color", "matte"] }
@@ -203,7 +198,7 @@ An input with `repeat` must be the last one. It expands into pads named `<name>0
 (`src0`, `src1` for an input `src`), one per label the graph node reads
 (`[0][1][2]hstack.zip[out]` has 3 inputs, as FFmpeg's `hstack` takes its connected inputs), or `default` of
 them when the node names no input labels (a chain, `graph='hstack.zip'`), with `min <= N <= max` (`max` at most 16, `min`
-at least 1). The other fields of the input (`formats`, `width`, `height`, `mipmaps`, `same_size`) apply to every
+at least 1). The other fields of the input (`width`, `height`, `mipmaps`, `same_size`) apply to every
 pad. The package is compiled for that count; the number of input pads of the `gpufx` filter follows from the graph as always. A pass `inputs` list that
 names the input reads all its pads. `gpufx pack --precompile` compiles the `default` count only; another count compiles
 its shaders when the graph loads.
@@ -643,7 +638,7 @@ The examples live in group folders under `packages/gpufx/`: `ffmpeg/` (equivalen
 | `packages/gpufx/ffmpeg/mirror` | Horizontal/vertical flip, an `int` parameter |
 | `packages/gpufx/ffmpeg/transform` | Zoom, rotate, pan (Ken Burns), a `vec2` parameter |
 | `packages/gpufx/ffmpeg/fade` | Fade to a color |
-| `packages/gpufx/ffmpeg/chroma-key` | Green screen → alpha; input `formats` **rules**, output `rgba`/`yuva420p`/`yuva444p` |
+| `packages/gpufx/ffmpeg/chroma-key` | Green screen → alpha; the output defaults to the input's format, so keep alpha with `out_format=rgba` (or `yuva420p`) |
 | `packages/gpufx/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
 | `packages/gpufx/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
 | `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and a `gpufx_output_size` that stacks the inputs (an output larger than the inputs) |

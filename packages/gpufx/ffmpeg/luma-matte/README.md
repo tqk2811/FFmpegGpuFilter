@@ -4,14 +4,14 @@ Luma key with two outputs: `color`, the video with the keyed range transparent (
 
 ## Inputs
 
-- `src` (accepted pixel formats: `yuv420p`, `yuv422p`, `yuv444p`, `yuvj420p`, `nv12`, `rgb24`, `bgr24`, `rgba`, `bgra`)
+- `src` (any pixel format the GPU converts; shaders see RGBA)
 
 ## Outputs
 
 Two output pads, in this order, both the size of `src`:
 
-- `color`: one of `rgba`, `yuva420p`, `yuva444p`.
-- `matte`: one of `yuv420p`, `nv12`, `rgba`.
+- `color`: has alpha; the format defaults to that of `src`, so use `out_format=rgba|...` (or `yuva420p`) to keep the alpha.
+- `matte`: opaque gray image; the format defaults to that of `src`, any GPU-converted format works (for example `out_format=rgba|yuv420p` gives `color` rgba and `matte` yuv420p).
 
 ## Options
 
@@ -27,6 +27,6 @@ Written inline after the package name: `luma-matte.zip=name=value`. Several opti
 
 ```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 -filter_complex \
-  "[0]hwupload,gpufx=graph='luma-matte.zip=threshold=0.9&tolerance=0.1'[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]" \
+  "[0]hwupload,gpufx=graph='luma-matte.zip=threshold=0.9&tolerance=0.1':out_format=yuva420p|yuv420p[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]" \
   -map "[co]" -c:v libvpx-vp9 color.webm -map "[mo]" matte.mp4
 ```

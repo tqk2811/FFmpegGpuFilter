@@ -4,11 +4,11 @@ Turns pixels close to a hue/saturation/value into transparency. Use a format wit
 
 ## Inputs
 
-- `src` (accepted pixel formats: `yuv420p`, `yuv422p`, `yuv444p`, `yuvj420p`, `nv12`, `rgb24`, `bgr24`, `rgba`, `bgra`)
+- `src` (any pixel format the GPU converts; shaders see RGBA)
 
 ## Output
 
-Same size as the first input (`src`). Pixel format: one of `rgba`, `yuva420p`, `yuva444p`.
+Same size as the first input (`src`). Pixel format: that of `src` by default (the output has alpha, which a format without alpha such as `yuv420p` drops), so use `out_format=rgba` (or `yuva420p`) to keep the alpha.
 
 ## Options
 
@@ -46,6 +46,6 @@ gpufx run 'hsv-key.zip=hue=120:sat=0.8:val=0.7:similarity=0.2:blend=0.1' -i in.p
 
 ## Notes
 
-The output carries alpha. A filter after it must take an alpha format (`rgba`, `yuva420p`, `yuva444p`) to keep it; `overlay.zip` honours it. Converting to a format without alpha drops it.
+The output carries alpha. The output format defaults to the input's, so set `out_format=rgba` (or `yuva420p`) on `gpufx` to keep it, and any filter after it must take an alpha format; `overlay.zip` honours it. Converting to a format without alpha drops it.
 
 Port of FFmpeg's `hsvkey` filter (the hue option goes through the same conversion as in FFmpeg, so the same numbers pick the same hue). Differences: FFmpeg reads the Y, U and V planes of the video, the shader derives BT.709 full-range luma and Cb/Cr from RGB, so the values can differ slightly (mostly for limited-range video); the output alpha is multiplied by the input alpha; the `hsvhold` filter of the same file is not ported.

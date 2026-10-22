@@ -9,36 +9,15 @@
   "description": "Luma key with two outputs: the video with the keyed range transparent (color) and the key as a gray image (matte).",
   "inputs": [
     {
-      "name": "src",
-      "formats": [
-        "yuv420p",
-        "yuv422p",
-        "yuv444p",
-        "yuvj420p",
-        "nv12",
-        "rgb24",
-        "bgr24",
-        "rgba",
-        "bgra"
-      ]
+      "name": "src"
     }
   ],
   "outputs": [
     {
-      "name": "color",
-      "formats": [
-        "rgba",
-        "yuva420p",
-        "yuva444p"
-      ]
+      "name": "color"
     },
     {
-      "name": "matte",
-      "formats": [
-        "yuv420p",
-        "nv12",
-        "rgba"
-      ]
+      "name": "matte"
     }
   ],
   "params": [

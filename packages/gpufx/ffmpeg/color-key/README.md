@@ -4,11 +4,11 @@ Turns pixels close to a key color into transparency (RGB distance). Use a format
 
 ## Inputs
 
-- `src` (accepted pixel formats: `yuv420p`, `yuv422p`, `yuv444p`, `yuvj420p`, `nv12`, `rgb24`, `bgr24`, `rgba`, `bgra`)
+- `src` (any pixel format the GPU converts; shaders see RGBA)
 
 ## Output
 
-Same size as the first input (`src`). Pixel format: one of `rgba`, `yuva420p`, `yuva444p`.
+Same size as the first input (`src`). Pixel format: that of `src` by default (the output has alpha, which a format without alpha such as `yuv420p` drops), so use `out_format=rgba` (or `yuva420p`) to keep the alpha.
 
 ## Options
 
@@ -46,6 +46,6 @@ gpufx run 'color-key.zip=color=#00ff00:similarity=0.3:blend=0.1' -i in.png -o ou
 
 ## Notes
 
-The output carries alpha. A filter after it must take an alpha format (`rgba`, `yuva420p`, `yuva444p`) to keep it; `overlay.zip` honours it. Converting to a format without alpha drops it.
+The output carries alpha. The output format defaults to the input's, so set `out_format=rgba` (or `yuva420p`) on `gpufx` to keep it, and any filter after it must take an alpha format; `overlay.zip` honours it. Converting to a format without alpha drops it.
 
 Port of FFmpeg's `colorkey` filter. Differences: the key color is a `color` parameter (FFmpeg takes any color string); the output alpha is multiplied by the input alpha (FFmpeg overwrites it, which is the same for opaque video); the `colorhold` filter of the same file is not ported.

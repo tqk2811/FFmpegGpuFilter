@@ -1750,8 +1750,9 @@ mod tests {
         unsafe {
             assert_eq!(gpufx_effect_output_count(fx), 2);
             assert_eq!((name(gpufx_effect_output_name(fx, 0)), name(gpufx_effect_output_name(fx, 1))), ("color".into(), "matte".into()));
-            assert_eq!(formats(0), ["rgba", "yuva420p", "yuva444p"]);
-            assert_eq!(formats(1), ["yuv420p", "nv12", "rgba"]);
+            // No format rules: every output may have any format the GPU writes.
+            assert_eq!(formats(0), formats(1));
+            assert_eq!(formats(0)[0], "rgba");
             assert_eq!((gpufx_effect_output_source(fx, 0), gpufx_effect_output_source(fx, 1)), (0, 0));
             let streams = [GpufxStreamInfo { format: c"rgba".as_ptr(), width: 6, height: 5 }];
             let (mut w, mut h) = (0, 0);

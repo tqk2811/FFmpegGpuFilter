@@ -7,28 +7,12 @@
   "description": "Turns pixels of a chosen brightness range into transparency. Use a format with alpha after it, or overlay it.",
   "inputs": [
     {
-      "name": "src",
-      "formats": [
-        "yuv420p",
-        "yuv422p",
-        "yuv444p",
-        "yuvj420p",
-        "nv12",
-        "rgb24",
-        "bgr24",
-        "rgba",
-        "bgra"
-      ]
+      "name": "src"
     }
   ],
   "outputs": [
     {
-      "name": "out",
-      "formats": [
-        "rgba",
-        "yuva420p",
-        "yuva444p"
-      ]
+      "name": "out"
     }
   ],
   "params": [

@@ -60,7 +60,7 @@ impl Packages {
         let dir = std::env::temp_dir().join(format!("gpufx-outputs-{}-{n}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         let pkgs = Packages(dir);
-        let head = r#""api":1,"used_for":["gpufx"],"outputs":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"]}]"#;
+        let head = r#""api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"matte"}]"#;
         // One pass writes both.
         pkgs.add(
             "key",
@@ -217,7 +217,7 @@ fn an_effect_writes_two_outputs_in_wgsl_and_glsl_from_any_pass() {
         let mut g = pkgs.graph(&ctx, &format!("{name}.zip")).unwrap();
         assert_eq!(g.output_names(), ["color", "matte"], "{name}");
         assert_eq!(g.output_source(1), Source::Node(0, 1));
-        assert_eq!(g.output_formats(1), ["gray", "rgba"]);
+        assert_eq!(g.output_formats(1)[0], "rgba");
         let outs = run_graph(&mut g, &[&src]);
         assert!(outs[0] == swapped(&src), "{name}: color");
         assert!(outs[1] == matte(&src), "{name}: matte");

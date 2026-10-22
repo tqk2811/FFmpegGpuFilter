@@ -47,11 +47,13 @@ scripts/pack-packages.sh --check -o out my-fx    # biên dịch shader trên GPU
 
 ## Quy tắc input/output
 
-Gói có thể khai báo input nhận format/kích thước nào và output ra format nào. Stream
-không khớp sẽ **bị báo lỗi** (filter không tự chuyển đổi ngầm), lỗi nêu rõ input và quy tắc:
+Gói có thể khai báo input nhận kích thước nào. Pixel format không nằm trong manifest: shader luôn thấy RGBA,
+và input nhận mọi pixel format mà bộ chuyển đổi trên GPU hỗ trợ (`formats` đã bỏ khỏi `inputs` và `outputs`;
+ghi vào là lỗi "unknown field"). Stream không khớp sẽ **bị báo lỗi** (filter không tự chuyển đổi ngầm),
+lỗi nêu rõ input và quy tắc:
 
 ```
-unsupported: input `src` of `Chroma Key`: pixel format `gray` is not supported (accepted: yuv420p, rgba)
+unsupported: input `src` of `Chroma Key`: pixel format `x` is not converted on the GPU (supported: rgba, rgba64le, nv12, ...)
 unsupported: input `second` of `Crossfade`: size 300x180 must equal the first input (320x180)
 ```
 
@@ -61,7 +63,6 @@ Mỗi phần tử `inputs`:
 |--------|----------|---------|
 | `name` | | Tên input, cũng là tên texture trong shader |
 | `description` | | Mô tả |
-| `formats` | `[]` (mọi format) | Pixel format nhận (tên của FFmpeg: `yuv420p`, `nv12`, `rgba`, `rgb24`...) |
 | `width`, `height` | không giới hạn | `{ "min": 16, "max": 4096, "multiple_of": 2 }`, mỗi trường đều tuỳ chọn |
 | `same_size` | `false` | Kích thước phải bằng input đầu tiên (không dùng cho input đầu) |
 | `mipmaps` | `false` | Texture của input có đủ chuỗi mip, sinh trên GPU mỗi frame, cho shader thu nhỏ ảnh nhiều (`textureSampleLevel(src, smp, uv, lod)`); xem [Mipmap](#mipmap) |
@@ -72,43 +73,37 @@ Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là l�
 | Trường | Mặc định | Ý nghĩa |
 |--------|----------|---------|
 | `name` | (bắt buộc) | Texture mà một pass ghi (xem [Nhiều output](#nhiều-output)), cũng là tên output pad của effect có nhiều output |
-| `formats` | mọi format GPU (bên dưới) | Pixel format output này được có, theo thứ tự ưu tiên |
 | `bypass` | input đầu | Input mà output này truyền thẳng khi effect bị tắt (`<effect>.enable`) |
 
-`formats`: danh sách pixel format output được phép, theo thứ tự ưu tiên. Không ghi thì
-danh sách là `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`, `yuv444p`, `yuv420p10le`,
-`yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p`: các format gpufx ghi trên GPU. Vì vậy hiệu ứng
-không có `formats` có thể xuất YUV không alpha: alpha mà hiệu ứng ghi bị bỏ, trừ khi filter
-phía sau nhận format có alpha. **Hiệu ứng tạo ra alpha nên khai báo `formats`** (ví dụ
-`["rgba", "yuva420p"]`). FFmpeg
-chọn một format trong danh sách khi nối filter; filter phía sau đòi format ngoài danh sách
-thì FFmpeg tự chèn bộ chuyển đổi sau `gpufx`.
+Pixel format: bộ chuyển đổi trên GPU đọc và ghi `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
+`yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (và đọc thêm
+`yuvj420p`/`yuvj422p`/`yuvj444p`). `sw_format` của output mặc định là format của input nguồn của output đó (input đầu,
+hoặc input `bypass` của output) nếu bộ chuyển đổi ghi được, không thì `rgba`. Option `out_format` của filter (một mục,
+hoặc mỗi output pad một mục cách nhau bằng `|`) ghi đè và có thể là bất kỳ format nào GPU chuyển được.
+**Hiệu ứng tạo ra alpha sẽ mất alpha khi mặc định là format không có alpha** (`yuv420p`): đặt `out_format=rgba`
+(hoặc `yuva420p`) để giữ.
 
 Kích thước của output không nằm trong manifest: nó đến từ một hàm shader tuỳ chọn, xem [Kích thước output](#kích-thước-output).
 
 ```json
 "inputs": [
-  { "name": "src", "formats": ["yuv420p", "nv12", "rgba"],
+  { "name": "src",
     "width": { "min": 64, "multiple_of": 2 }, "height": { "min": 64, "multiple_of": 2 } },
-  { "name": "matte", "formats": ["gray"], "same_size": true }
+  { "name": "matte", "same_size": true }
 ],
-"outputs": [{ "name": "out", "formats": ["yuva420p", "rgba"] }]
+"outputs": [{ "name": "out" }]
 ```
 
 Cách áp dụng:
 
-- **FFmpeg:** input không có `formats` nhận các format gpufx chuyển trên GPU (danh sách trên, thêm
-  `yuvj420p`/`yuvj422p`/`yuvj444p`); FFmpeg đổi format khác sang một trong số đó. Input có
-  `formats` nhận nguyên format của stream; khác danh sách thì lỗi khi cấu hình filter graph.
-  Muốn chạy thì đổi format trước bằng `format=yuv420p,gpufx=...`. Kích thước được kiểm tra
-  khi cấu hình và mỗi khi kích thước frame đổi. Tên format sai chính tả cũng là lỗi.
+- **FFmpeg:** input nhận các format gpufx chuyển trên GPU (danh sách trên); FFmpeg đổi format khác sang một
+  trong số đó. Format nào vẫn lọt tới filter mà không chuyển được thì cấu hình lỗi với
+  ``pixel format `x` is not converted on the GPU (supported: ...)``. Kích thước được kiểm tra
+  khi cấu hình và mỗi khi kích thước frame đổi.
 - **Chuỗi và đồ thị** (`graph='a|b'`, `graph='...'`): mỗi hiệu ứng được kiểm tại chỗ của nó. Hiệu ứng
-  đọc hiệu ứng khác thấy kích thước của output nó đọc (kích thước input đầu, hoặc kích thước shader của nó đưa ra qua `gpufx_output_size`) và format đầu tiên
-  trong `formats` của output đó mà hiệu ứng đọc nhận; input pad được nhiều hiệu ứng đọc phải có
-  format mà tất cả đều nhận. Vì vậy `same_size` cũng áp dụng giữa hai nhánh của đồ thị.
+  đọc hiệu ứng khác thấy kích thước của output nó đọc (kích thước input đầu, hoặc kích thước shader của nó đưa ra qua `gpufx_output_size`). Giữa các hiệu ứng, texture là RGBA bất kể format của stream. Vì vậy `same_size` cũng áp dụng giữa hai nhánh của đồ thị.
 - **`gpufx run`:** format lấy từ PNG (`rgba`, `rgb24`, `gray`, `ya8`, bản 16-bit là
-  `rgba64be`, `rgb48be`, `gray16be`, `ya16be`). CLI luôn ghi PNG RGBA nên không kiểm tra
-  `formats` của output.
+  `rgba64be`, `rgb48be`, `gray16be`, `ya16be`). CLI luôn ghi PNG RGBA.
 - Shader luôn thấy RGBA alpha thường (straight), dù format vào/ra là gì: chuyển đổi chạy trên GPU,
   ngoài shader. Texture là `rgba8unorm`, hoặc `rgba16float` khi input hay output của chuỗi trên 8 bit
   (video 10-bit giữ được độ chính xác).
@@ -175,10 +170,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 matte từ cùng một dispatch, hoặc lấy matte từ một pass sớm:
 
 ```json
-"inputs": [{ "name": "src", "formats": ["rgba"] }],
+"inputs": [{ "name": "src" }],
 "outputs": [
-  { "name": "color", "formats": ["rgba", "nv12"] },
-  { "name": "matte", "formats": ["gray", "rgba"] }
+  { "name": "color" },
+  { "name": "matte" }
 ],
 "groups": [{ "passes": [
   { "shader": "key.wgsl", "inputs": ["src"], "outputs": ["color", "matte"] }
@@ -202,7 +197,7 @@ Input có `repeat` phải là input cuối. Nó nở thành các pad tên `<name
 (`src0`, `src1` với input `src`), mỗi label mà node của graph đọc là một pad
 (`[0][1][2]hstack.zip[out]` có 3 input, như `hstack` của FFmpeg nhận mọi input nối vào), hoặc `default` pad
 khi node không ghi label input nào (chain, `graph='hstack.zip'`), với `min <= N <= max` (`max` tối đa 16, `min`
-tối thiểu 1). Các trường khác của input (`formats`, `width`, `height`, `mipmaps`, `same_size`) áp cho mọi pad.
+tối thiểu 1). Các trường khác của input (`width`, `height`, `mipmaps`, `same_size`) áp cho mọi pad.
 Gói được biên dịch cho đúng số đó; số input pad của filter `gpufx` vẫn suy ra từ graph như mọi khi. Danh sách `inputs` của pass có
 tên input này thì đọc mọi pad của nó. `gpufx pack --precompile` chỉ biên dịch sẵn cho số `default`; số khác thì
 biên dịch shader lúc nạp graph.
@@ -635,7 +630,7 @@ Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmp
 | `packages/gpufx/ffmpeg/mirror` | Lật ngang/dọc, tham số `int` |
 | `packages/gpufx/ffmpeg/transform` | Zoom, xoay, pan (Ken Burns), tham số `vec2` |
 | `packages/gpufx/ffmpeg/fade` | Fade về một màu |
-| `packages/gpufx/ffmpeg/chroma-key` | Phông xanh → alpha; **quy tắc** `formats` input, output `rgba`/`yuva420p`/`yuva444p` |
+| `packages/gpufx/ffmpeg/chroma-key` | Phông xanh → alpha; output mặc định theo format của input, nên muốn giữ alpha thì dùng `out_format=rgba` (hoặc `yuva420p`) |
 | `packages/gpufx/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
 | `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `gpufx_output_size` xếp các input lại (output lớn hơn input) |
 | `packages/gpufx/ffmpeg/scale` | `scale` của FFmpeg (`w`, `h` với quy tắc `0` và `-n`, bilinear): `gpufx_output_size` tính kích thước từ param và input, ví dụ `scale.zip=w=1280:h=-2` |

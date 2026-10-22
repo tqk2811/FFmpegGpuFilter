@@ -540,27 +540,16 @@ fn chain_rules_follow_two_filters_in_a_row() {
     let mut out = vec![0u8; src.len()];
     transition.process(&[img, img], vec![target(&mut out, 8, 8, 32)], &FrameInfo::new(0.0, 0)).unwrap();
 
-    // The format the first effect outputs must be one the next accepts.
     let gray_only = TempPackage::new(
         "gray-only",
-        r#"{"id":"t.gray","name":"Gray only","used_for":["gpufx"],"inputs":[{"name":"src","formats":["gray"],"width":{"max":100}}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
+        r#"{"id":"t.gray","name":"Gray only","used_for":["gpufx"],"inputs":[{"name":"src","width":{"max":100}}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
         "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
     );
     let gray = || ("gray".to_string(), Effect::new(ctx.clone(), Package::open(&gray_only.0).unwrap()).unwrap());
-    let err = common::chain(vec![open(&ctx, "invert"), gray()]).err().unwrap().to_string();
-    assert!(err.contains("`invert` outputs rgba, rgba64le, nv12") && err.contains("but `gray` accepts gray"), "{err}");
-    // An effect without output rules may output YUV, as two filters would negotiate.
-    let yuv_only = TempPackage::new(
-        "yuv-only",
-        r#"{"id":"t.yuv","name":"YUV only","used_for":["gpufx"],"inputs":[{"name":"src","formats":["yuv420p"]}],"groups":[{"passes":[{"shader":"shaders/main.wgsl"}]}]}"#,
-        "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) { if (gpufx_in_bounds(id)) { gpufx_write(id, textureLoad(src, vec2i(id.xy), 0)); } }",
-    );
-    common::chain(vec![open(&ctx, "invert"), ("yuv".to_string(), Effect::new(ctx.clone(), Package::open(&yuv_only.0).unwrap()).unwrap())])
-        .unwrap();
-    // A gray-only first effect is fine: its input is the chain input. Later effects check
+    // A first effect checks the chain input. Later effects check
     // their rules against the size of the first input.
     let chain = common::chain(vec![gray(), open(&ctx, "invert")]).unwrap();
-    let stream = |w| [StreamInfo { format: Some("gray"), width: w, height: 8 }];
+    let stream = |w| [StreamInfo { format: Some("nv12"), width: w, height: 8 }];
     chain.check_inputs(&stream(64)).unwrap();
     assert!(chain.check_inputs(&stream(128)).is_err());
     let narrow = TempPackage::new(
@@ -570,7 +559,7 @@ fn chain_rules_follow_two_filters_in_a_row() {
     );
     let narrow = ("narrow".to_string(), Effect::new(ctx.clone(), Package::open(&narrow.0).unwrap()).unwrap());
     let mut late = common::chain(vec![open(&ctx, "invert"), narrow]).unwrap();
-    let gray = |w| [StreamInfo { format: Some("gray"), width: w, height: 8 }];
+    let gray = |w| [StreamInfo { format: Some("nv12"), width: w, height: 8 }];
     late.check_inputs(&gray(64)).unwrap();
     let err = late.check_inputs(&gray(128)).unwrap_err().to_string();
     assert!(err.contains("above the maximum 100"), "{err}");

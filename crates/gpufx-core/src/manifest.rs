@@ -68,10 +68,6 @@ pub struct InputDef {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// Pixel formats (FFmpeg names, e.g. `yuv420p`, `rgba`) this input accepts.
-    /// Empty accepts anything. Other formats are an error, never converted silently.
-    #[serde(default)]
-    pub formats: Vec<String>,
     #[serde(default)]
     pub width: Option<SizeRule>,
     #[serde(default)]
@@ -144,10 +140,6 @@ pub struct OutputDef {
     /// The texture a pass writes, and the name of the output pad of an effect with
     /// several outputs.
     pub name: String,
-    /// Pixel formats the output may have, in order of preference. Defaults to `rgba`
-    /// and every other format the runtime writes on the GPU ([`crate::PixelFormat`]).
-    #[serde(default = "default_output_formats")]
-    pub formats: Vec<String>,
     /// The input this output passes when the effect is switched off; the first when omitted.
     #[serde(default)]
     pub bypass: Option<String>,
@@ -408,29 +400,12 @@ fn default_inputs() -> Vec<InputDef> {
     vec![InputDef {
         name: "src".into(),
         description: String::new(),
-        formats: Vec::new(),
         width: None,
         height: None,
         same_size: false,
         mipmaps: false,
         repeat: None,
     }]
-}
-
-fn is_format_name(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-}
-
-fn check_formats(list: &[String], what: &str) -> Result<(), Error> {
-    for (i, f) in list.iter().enumerate() {
-        if !is_format_name(f) {
-            return Err(Error::Manifest(format!("{what}: `{f}` is not a pixel format name (e.g. `yuv420p`)")));
-        }
-        if list[..i].contains(f) {
-            return Err(Error::Manifest(format!("{what}: duplicate format `{f}`")));
-        }
-    }
-    Ok(())
 }
 
 fn check_size_rule(rule: &Option<SizeRule>, what: &str) -> Result<(), Error> {
@@ -487,7 +462,7 @@ impl Manifest {
         if m.outputs.is_empty() {
             // One output: what the last pass writes first (every group must write it).
             let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
-            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), formats: default_output_formats(), bypass: None });
+            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None });
         }
         m.validate()?;
         Ok(m)
@@ -534,7 +509,6 @@ impl Manifest {
         for (idx, i) in self.inputs.iter().enumerate() {
             declare(&i.name, "input", &mut names)?;
             names.push(&i.name);
-            check_formats(&i.formats, &format!("input `{}` formats", i.name))?;
             check_size_rule(&i.width, &format!("input `{}` width", i.name))?;
             check_size_rule(&i.height, &format!("input `{}` height", i.name))?;
             if idx == 0 && i.same_size {
@@ -573,10 +547,6 @@ impl Manifest {
                 // `<output>=off` is a node option, beside the parameters.
                 return bad(format!("output `{n}` has the name of a param"));
             }
-            if o.formats.is_empty() {
-                return bad(format!("output `{n}`: formats must list at least one pixel format"));
-            }
-            check_formats(&o.formats, &format!("output `{n}` formats"))?;
             if let Some(b) = &o.bypass {
                 if self.input_index(b).is_none() {
                     return bad(format!("output `{n}`: bypass `{b}` is not an input"));
@@ -767,8 +737,11 @@ impl Manifest {
         for (def, s) in self.inputs.iter().zip(streams) {
             let fail = |msg: String| Error::Unsupported(format!("input `{}` of `{}`: {msg}", def.name, self.name));
             if let Some(f) = s.format {
-                if !def.formats.is_empty() && !def.formats.iter().any(|x| x == f) {
-                    return Err(fail(format!("pixel format `{f}` is not supported (accepted: {})", def.formats.join(", "))));
+                if crate::PixelFormat::from_name(f).is_none() {
+                    return Err(fail(format!(
+                        "pixel format `{f}` is not converted on the GPU (supported: {})",
+                        default_output_formats().join(", ")
+                    )));
                 }
             }
             if let Some(r) = &def.width {
@@ -822,14 +795,14 @@ impl Manifest {
     /// Checks that output `k` may have `format`.
     pub fn check_output_format(&self, k: usize, format: &str) -> Result<(), Error> {
         let o = &self.outputs[k];
-        if o.formats.iter().any(|x| x == format) {
+        if crate::PixelFormat::from_name(format).is_some() {
             Ok(())
         } else {
             let what = if self.outputs.len() == 1 { "output".to_string() } else { format!("output `{}`", o.name) };
             Err(Error::Unsupported(format!(
-                "{what} of `{}`: pixel format `{format}` is not supported (supported: {})",
+                "{what} of `{}`: pixel format `{format}` is not converted on the GPU (supported: {})",
                 self.name,
-                o.formats.join(", ")
+                default_output_formats().join(", ")
             )))
         }
     }
@@ -904,7 +877,6 @@ mod tests {
         m.check_inputs(&[info("yuv420p", 3, 5)]).unwrap();
         assert_eq!(m.outputs.len(), 1);
         assert_eq!(m.outputs[0].name, "out");
-        assert_eq!(m.outputs[0].formats[0], "rgba");
         m.check_output_format(0, "yuv420p").unwrap();
         m.check_output_format(0, "p010le").unwrap();
         assert!(m.check_output_format(0, "gray").is_err());
@@ -913,14 +885,15 @@ mod tests {
     #[test]
     fn input_rules_reject_mismatches() {
         let m = manifest(
-            r#"[{"name":"a","formats":["yuv420p","rgba"],"width":{"min":16,"max":64,"multiple_of":2}},
+            r#"[{"name":"a","width":{"min":16,"max":64,"multiple_of":2}},
                 {"name":"b","same_size":true}]"#,
-            r#","outputs":[{"name":"out","formats":["yuv420p"]}]"#,
+            "",
         )
         .unwrap();
-        m.check_inputs(&[info("rgba", 32, 9), info("gray", 32, 9)]).unwrap();
+        m.check_inputs(&[info("rgba", 32, 9), info("nv12", 32, 9)]).unwrap();
         let err = |s: &[StreamInfo]| m.check_inputs(s).unwrap_err().to_string();
-        assert!(err(&[info("nv12", 32, 9), info("rgba", 32, 9)]).contains("pixel format `nv12` is not supported"));
+        // Every format the GPU converts is accepted, no other.
+        assert!(err(&[info("gray", 32, 9), info("rgba", 32, 9)]).contains("pixel format `gray` is not converted on the GPU"));
         assert!(err(&[info("rgba", 8, 9), info("rgba", 8, 9)]).contains("below the minimum 16"));
         assert!(err(&[info("rgba", 66, 9), info("rgba", 66, 9)]).contains("above the maximum 64"));
         assert!(err(&[info("rgba", 33, 9), info("rgba", 33, 9)]).contains("not a multiple of 2"));
@@ -928,18 +901,16 @@ mod tests {
         assert!(err(&[info("rgba", 32, 9)]).contains("takes 2 input(s), got 1"));
         // Unknown format (RGBA buffers from the CLI) only checks sizes.
         m.check_inputs(&[StreamInfo { format: None, ..info("", 32, 9) }; 2]).unwrap();
-        m.check_output_format(0, "yuv420p").unwrap();
-        assert!(m.check_output_format(0, "rgba").is_err());
     }
 
     #[test]
     fn invalid_rules_are_manifest_errors() {
-        assert!(manifest(r#"[{"name":"a","formats":["YUV 420"]}]"#, "").is_err());
-        assert!(manifest(r#"[{"name":"a","formats":["rgba","rgba"]}]"#, "").is_err());
+        // Formats are no rule any more: shaders see RGBA, the runtime converts.
+        assert!(manifest(r#"[{"name":"a","formats":["rgba"]}]"#, "").unwrap_err().to_string().contains("unknown field `formats`"));
         assert!(manifest(r#"[{"name":"a","width":{"min":10,"max":5}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","height":{"multiple_of":0}}]"#, "").is_err());
         assert!(manifest(r#"[{"name":"a","same_size":true}]"#, "").is_err());
-        assert!(manifest(r#"[{"name":"a"}]"#, r#","outputs":[{"name":"out","formats":[]}]"#).is_err());
+        assert!(manifest(r#"[{"name":"a"}]"#, r#","outputs":[{"name":"out","formats":["rgba"]}]"#).is_err());
     }
 
     #[test]
@@ -1183,30 +1154,29 @@ mod tests {
         // Omitted: one output named after the main output of the last pass.
         let m = parse("", r#"{"shader":"a.wgsl","outputs":["tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"outputs":["res"]}"#).unwrap();
         assert_eq!(m.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["res"]);
-        // Two outputs, one written by a middle pass, with their own formats, sizes and bypass.
-        let two = r#","outputs":[{"name":"color","formats":["rgba","nv12"]},{"name":"matte","formats":["gray","rgba"],"bypass":"bg"}]"#;
+        // Two outputs, one written by a middle pass, with their own sizes and bypass.
+        let two = r#","outputs":[{"name":"color"},{"name":"matte","bypass":"bg"}]"#;
         let m = parse(two, r#"{"shader":"a.wgsl","outputs":["matte","tmp"]},{"shader":"b.wgsl","inputs":["tmp"],"outputs":["color"]}"#)
             .unwrap();
         assert_eq!(m.output_index("matte"), Some(1));
         assert_eq!((m.output_bypass(0), m.output_bypass(1)), (0, 1));
         assert_eq!(m.pass_size(&m.groups[0].passes[0]), 1);
         assert_eq!(m.pass_size(&m.groups[0].passes[1]), 0);
-        m.check_output_format(1, "gray").unwrap();
+        m.check_output_format(1, "nv12").unwrap();
         assert!(m.check_output_format(0, "gray").unwrap_err().to_string().contains("output `color` of `X`"));
         let both = r#","outputs":[{"name":"color"},{"name":"matte"}]"#;
         parse(both, r#"{"shader":"a.wgsl","outputs":["color","matte"]}"#).unwrap();
         let err = |extra: &str, passes: &str| parse(extra, passes).unwrap_err();
         let one = r#"{"shader":"a.wgsl","outputs":["color","matte"]}"#;
-        assert!(err(r#","outputs":{"formats":["rgba"]}"#, one).contains(r#"`outputs` is an array: [{"name": "out", ...}]"#));
+        assert!(err(r#","outputs":{"name":"out"}"#, one).contains(r#"`outputs` is an array: [{"name": "out", ...}]"#));
         assert!(err(r#","outputs":[]"#, one).contains("1 to 4 outputs, not 0"));
         let five = r#","outputs":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"}]"#;
         assert!(err(five, one).contains("1 to 4 outputs, not 5"));
         assert!(err(r#","outputs":[{"name":"color"},{"name":"color"}]"#, one).contains("duplicate output name `color`"));
         assert!(err(r#","outputs":[{"name":"color"},{"name":"bg"}]"#, one).contains("shadows an input"));
         assert!(err(r#","outputs":[{"name":"enable"}]"#, one).contains("reserved"));
-        assert!(err(r#","outputs":[{"formats":["rgba"]}]"#, one).contains("missing field `name`"));
+        assert!(err(r#","outputs":[{"bypass":"src"}]"#, one).contains("missing field `name`"));
         assert!(err(r#","outputs":[{"name":"color","bypass":"nope"}]"#, one).contains("bypass `nope` is not an input"));
-        assert!(err(r#","outputs":[{"name":"color","formats":[]}]"#, one).contains("at least one pixel format"));
         assert!(err(r#","outputs":[{"name":"color"},{"name":"other"}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#)
             .contains("output `other`: no pass writes it"));
         let twice = r#"{"shader":"a.wgsl","outputs":["color"]},{"shader":"b.wgsl","inputs":["src"],"outputs":["color","matte"]}"#;

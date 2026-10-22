@@ -2,6 +2,8 @@
 
 Ngày ghi: 2026-10-22. Xây trên nền [plan-multi-output-passes-vi.md](plan-multi-output-passes-vi.md) (pass ghi nhiều texture, `passes[i].output` là mảng). Branch đề xuất: tạo từ `feat/multi-output-passes` sau khi phần đó đã commit, ví dụ `feat/multi-output-effects`.
 
+> Ghi chú (sau khi làm xong): trường `formats` đã bị bỏ khỏi `inputs`/`outputs` của manifest; shader luôn thấy RGBA, `sw_format` của output mặc định theo input nguồn và `out_format` ghi đè. Các đoạn dưới nói về `formats` là bản kế hoạch cũ.
+
 Số dòng dưới đây đo trên working tree ngày 2026-10-22 (đang có sửa đổi của plan multi-output-passes), nên có thể lệch vài dòng; grep theo tên hàm trước khi sửa.
 
 ## Mục tiêu

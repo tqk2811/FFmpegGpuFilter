@@ -181,11 +181,9 @@ int gpufx_format_supported(const char *format);
  *
  * An effect writes the size of its first input. Every input is uploaded once and every
  * output read back once; edges stay on the GPU in pooled textures that are reused once
- * their last reader has run. Between two effects the rules are checked against the first
- * output format of one that the next accepts, as two filters in a row would negotiate
- * it, but frames stay RGBA on the GPU: nothing is converted to that format (no chroma
- * subsampling, alpha kept). Cycles, labels read but never written, written twice or read
- * twice, unread pads, wrong label counts and formats no next effect accepts fail here;
+ * their last reader has run. Between two effects the textures are RGBA on the GPU,
+ * whatever the stream format is (no chroma subsampling, alpha kept). Cycles, labels read
+ * but never written, written twice or read twice, unread pads and wrong label counts fail here;
  * the manifest size and format rules of every node are checked by
  * gpufx_effect_check_inputs().
  *
@@ -205,7 +203,7 @@ int gpufx_format_supported(const char *format);
  * Parameters are named over all packages, in statement order (see
  * gpufx_effect_param_name()); gpufx_effect_find_param() also takes "label.name" where
  * label is the output label of a node ("ba.radius"). The other functions describe the
- * graph: input formats are those every effect reading the pad accepts,
+ * graph: input formats are every format the GPU converts,
  * gpufx_effect_output_format*() describe output 0.
  * No GPU device is made here: shaders are checked on a device with no GPU, limited to
  * the WebGPU default formats. The device comes from gpufx_effect_use_* or the first
@@ -238,13 +236,19 @@ uint32_t gpufx_effect_input_count(const GpufxEffect *fx);
 const char *gpufx_effect_input_name(const GpufxEffect *fx, uint32_t index);
 
 /*
- * Pixel formats an input accepts (FFmpeg names). A count of 0 means any format.
- * Formats outside the list are rejected by gpufx_effect_check_inputs().
+ * Pixel formats an input accepts (FFmpeg names): every format the GPU converter
+ * supports (the manifest has no `formats` field). Formats outside the list are
+ * rejected by gpufx_effect_check_inputs().
  */
 uint32_t gpufx_effect_input_format_count(const GpufxEffect *fx, uint32_t input);
 const char *gpufx_effect_input_format(const GpufxEffect *fx, uint32_t input, uint32_t index);
 
-/* Pixel formats output pad 0 may have, in order of preference (at least one). */
+/*
+ * Pixel formats output pad 0 may have: every format the GPU converter writes (the
+ * manifest has no `formats` field). The sw_format default is that of the output's
+ * source input when it is in the list, else "rgba"; the filter option out_format
+ * overrides it.
+ */
 uint32_t gpufx_effect_output_format_count(const GpufxEffect *fx);
 const char *gpufx_effect_output_format(const GpufxEffect *fx, uint32_t index);
 

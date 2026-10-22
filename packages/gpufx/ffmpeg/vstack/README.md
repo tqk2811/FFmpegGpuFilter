@@ -10,7 +10,7 @@ The effect takes every input connected to its graph node, in order, 2 to 16 (lik
 
 ## Output
 
-Height = the sum of the input heights, width = the inputs' width. It must fit the GPU's largest texture side (8192 or more on desktop GPUs); a taller output is an error. Pixel format: the first input's, when the effect may output it (the manifest has no `output.formats` rule). Frame rate and aspect ratio come from the first input.
+Height = the sum of the input heights, width = the inputs' width. It must fit the GPU's largest texture side (8192 or more on desktop GPUs); a taller output is an error. Pixel format: the first input's when the GPU converter can write it, else `rgba`; `out_format` overrides. Frame rate and aspect ratio come from the first input.
 
 ## Options
 

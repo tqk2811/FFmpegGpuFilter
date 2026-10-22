@@ -336,7 +336,7 @@ rejects "out_format with the wrong number of entries" "has 3 entries" -i "$A" -a
 # shellcheck disable=SC2086
 rejects "out_format with an unknown format" "unknown pixel format 'nope'" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|nope[c][m]" -map "[c]" $NULL -map "[m]" $NULL
 # shellcheck disable=SC2086
-rejects "out_format outside an output's formats" "output 'matte' of" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|yuva420p[c][m]" -map "[c]" $NULL -map "[m]" $NULL
+ok "out_format: any GPU format for any output" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|yuva420p[c][m]" -map "[c]" $NULL -map "[m]" $NULL
 for m in 0 1 2 3; do
     # shellcheck disable=SC2086
     ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/FFmpegArgs.TanersenerSlideShow/fit.zip=mode=$m'" -an $NULL
