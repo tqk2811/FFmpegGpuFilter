@@ -411,7 +411,19 @@ pub struct Program {
     pub(crate) default_exprs: Vec<String>,
     /// Package textures, viewed with their dimension and every mip level.
     textures: HashMap<String, wgpu::TextureView>,
+    /// For each output, the pipeline running the `gpufx_output_size` of the pass writing
+    /// it, when that shader has one (else the output has the size of the first input).
+    size_passes: Vec<Option<Arc<SizePass>>>,
 }
+
+/// A one-thread pipeline calling `gpufx_output_size(out_index)` of a pass shader.
+pub(crate) struct SizePass {
+    pipeline: wgpu::ComputePipeline,
+    layout: wgpu::BindGroupLayout,
+}
+
+/// Binding of the buffer a size pipeline reads the input sizes from and writes its result to.
+const SIZE_BINDING: u32 = 64;
 
 impl Program {
     /// The package is compiled with the first pass group matching the device,
@@ -516,7 +528,19 @@ impl Program {
             passes.push(compile_pass(&ctx, &package, &params, i, def, false)?);
         }
         let default_exprs = params.expr_key().into_iter().map(String::from).collect();
-        Ok(Arc::new(Program { ctx, package, passes, deep_passes: Default::default(), sampler, default_exprs, textures }))
+        let mut size_passes: Vec<Option<Arc<SizePass>>> = vec![None; package.manifest.outputs.len()];
+        for (i, def) in package.manifest.passes.iter().enumerate() {
+            if !package.text(&def.shader)?.contains("gpufx_output_size") {
+                continue;
+            }
+            let sp = Arc::new(compile_size_pass(&ctx, &package, &params, i, def)?);
+            for (o, out) in package.manifest.outputs.iter().enumerate() {
+                if def.outputs.contains(&out.name) {
+                    size_passes[o] = Some(sp.clone());
+                }
+            }
+        }
+        Ok(Arc::new(Program { ctx, package, passes, deep_passes: Default::default(), sampler, default_exprs, textures, size_passes }))
     }
 
     /// The pipelines for one work format; the shaders were validated in `new`.
@@ -540,7 +564,15 @@ impl Program {
     pub fn package(&self) -> &Package {
         &self.package
     }
+
+    /// Some pass shader gives an output its size (`gpufx_output_size`).
+    pub fn has_size_functions(&self) -> bool {
+        self.size_passes.iter().any(Option::is_some)
+    }
 }
+
+/// Input sizes and parameter bytes the output sizes were computed for.
+type SizeKey = (Vec<(u32, u32)>, Vec<u8>);
 
 /// An instance of a [`Program`] with its own parameter values and frame buffers.
 pub struct Effect {
@@ -558,6 +590,8 @@ pub struct Effect {
     /// Pipelines built for this effect's own `expr` values, when they differ from the
     /// package defaults the program was compiled with.
     own: Option<OwnPasses>,
+    /// Output sizes from `gpufx_output_size` by input sizes and parameter values.
+    sizes: std::sync::Mutex<HashMap<SizeKey, Vec<(u32, u32)>>>,
     /// Bindings of recent frame textures made by [`Effect::rebind`], until the next `bind`.
     rebinds: crate::lru::Lru<(Vec<wgpu::Texture>, Vec<Option<wgpu::Texture>>), Bound>,
 }
@@ -604,6 +638,7 @@ impl Effect {
             active: Vec::new(),
             io: None,
             own: None,
+            sizes: Default::default(),
             rebinds: Default::default(),
         })
     }
@@ -652,6 +687,121 @@ impl Effect {
             self.bound = None;
             self.rebinds.clear();
         }
+    }
+
+    /// The size of every output for inputs of these sizes and the current parameter values:
+    /// what the `gpufx_output_size` of the pass writing it gives, else the size of the first
+    /// input. Results are kept per sizes and values, so asking again costs a lookup. Fails
+    /// when a size is 0, or when one pass would write two sizes.
+    pub fn output_sizes(&self, ins: &[(u32, u32)]) -> Result<Vec<(u32, u32)>, Error> {
+        let program = &self.program;
+        let m = &program.package.manifest;
+        let first = ins.first().copied().unwrap_or((0, 0));
+        if !program.has_size_functions() {
+            return Ok(vec![first; m.outputs.len()]);
+        }
+        let key = (ins.to_vec(), self.params.bytes().to_vec());
+        if let Some(sizes) = self.sizes.lock().expect("not poisoned").get(&key) {
+            return Ok(sizes.clone());
+        }
+        let ctx = &program.ctx;
+        let (device, queue) = (&ctx.device, &ctx.queue);
+        let params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gpufx size params"),
+            size: self.params.size() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&params, 0, &key.1);
+        let words: u64 = 8 * (1 + ins.len() as u64);
+        let mut sizes = vec![first; m.outputs.len()];
+        for (o, sp) in program.size_passes.iter().enumerate() {
+            let Some(sp) = sp else { continue };
+            let io = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gpufx size io"),
+                size: words,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let read = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gpufx size readback"),
+                size: 8,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut data: Vec<u32> = vec![ins.len() as u32, o as u32];
+            data.extend(ins.iter().flat_map(|&(w, h)| [w, h]));
+            queue.write_buffer(&io, 0, &data.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>());
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("gpufx size"),
+                layout: &sp.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 1, resource: params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: SIZE_BINDING, resource: io.as_entire_binding() },
+                ],
+            });
+            let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx size") });
+            {
+                let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("gpufx size"), timestamp_writes: None });
+                cpass.set_pipeline(&sp.pipeline);
+                cpass.set_bind_group(0, &group, &[]);
+                cpass.dispatch_workgroups(1, 1, 1);
+            }
+            enc.copy_buffer_to_buffer(&io, 0, &read, 0, 8);
+            queue.submit([enc.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                let _ = tx.send(r);
+            });
+            device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| Error::Gpu(e.to_string()))?;
+            rx.recv().map_err(|e| Error::Gpu(e.to_string()))?.map_err(|e| Error::Gpu(e.to_string()))?;
+            let bytes = read.slice(..).get_mapped_range().map_err(|e| Error::Gpu(e.to_string()))?.to_vec();
+            let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().expect("4 bytes"));
+            sizes[o] = (word(0), word(1));
+        }
+        let what = |o: usize| {
+            if m.outputs.len() == 1 {
+                format!("output of `{}`", m.name)
+            } else {
+                format!("output `{}` of `{}`", m.outputs[o].name, m.name)
+            }
+        };
+        for (o, &(w, h)) in sizes.iter().enumerate() {
+            if w == 0 || h == 0 {
+                return Err(Error::Unsupported(format!("{}: gpufx_output_size gives {w}x{h}", what(o))));
+            }
+        }
+        // One pass writes one size, and a texture several passes write keeps one.
+        let mut texture: HashMap<&str, (u32, u32)> = HashMap::new();
+        for (i, pass) in m.passes.iter().enumerate() {
+            let size = sizes[m.pass_size(pass)];
+            for (o, out) in m.outputs.iter().enumerate() {
+                if pass.outputs.contains(&out.name) && sizes[o] != size {
+                    let (a, b) = (&m.outputs[m.pass_size(pass)].name, &out.name);
+                    return Err(Error::Unsupported(format!(
+                        "pass {i} of `{}` writes `{a}` ({}x{}) and `{b}` ({}x{}): the outputs of one pass have one size",
+                        m.name, size.0, size.1, sizes[o].0, sizes[o].1
+                    )));
+                }
+            }
+            for out in &pass.outputs {
+                if let Some(&had) = texture.get(out.as_str()) {
+                    if had != size {
+                        return Err(Error::Unsupported(format!(
+                            "pass {i} of `{}` writes `{out}` at another size than an earlier pass",
+                            m.name
+                        )));
+                    }
+                }
+                texture.insert(out, size);
+            }
+        }
+        let mut cache = self.sizes.lock().expect("not poisoned");
+        if cache.len() > 64 {
+            cache.clear();
+        }
+        cache.insert(key, sizes.clone());
+        Ok(sizes)
     }
 
     /// Whether pass `i` runs (see [`Effect::set_used_outputs`]).
@@ -916,7 +1066,15 @@ fn prelude(params: &ParamBlock, inputs: &[String], arrays: &[bool], extra_output
 
 /// Inserts the GLSL prelude after the author's `#version` line (adding `#version 450`
 /// when there is none), so their line numbers stay readable in errors.
-fn glsl_with_prelude(params: &ParamBlock, inputs: &[String], arrays: &[bool], extra_outputs: usize, user: &str, deep: bool) -> String {
+fn glsl_with_prelude(
+    params: &ParamBlock,
+    inputs: &[String],
+    arrays: &[bool],
+    extra_outputs: usize,
+    user: &str,
+    deep: bool,
+    size_entry: bool,
+) -> String {
     let (version, body) = match user.trim_start().strip_prefix("#version") {
         Some(rest) => {
             let rest_at = user.len() - rest.len();
@@ -955,6 +1113,29 @@ fn glsl_with_prelude(params: &ParamBlock, inputs: &[String], arrays: &[bool], ex
          void gpufx_write(uvec3 id, vec4 c) { imageStore(out_tex, ivec2(id.xy), clamp(c, vec4(0.0), vec4(1.0))); }\n\
          // ---- end of gpufx prelude ----\n",
     );
+    if size_entry {
+        // The size pipeline: the input sizes come in a buffer, and its `main` calls
+        // `gpufx_output_size` (the author's `main` is renamed out of the way).
+        s.push_str(&format!(
+            "layout(set = 0, binding = {SIZE_BINDING}, std430) buffer GpufxSizeIo {{ uvec2 gpufx_size_io[]; }};\n\
+             uint gpufx_input_count() {{ return gpufx_size_io[0].x; }}\n\
+             uvec2 gpufx_input_size(uint i) {{ if (i < gpufx_size_io[0].x) {{ return gpufx_size_io[1u + i]; }} return uvec2(0u); }}\n\
+             #define main gpufx_author_main\n"
+        ));
+        s.push_str(body);
+        s.push_str("\n#undef main\nvoid main() { gpufx_size_io[0] = gpufx_output_size(gpufx_size_io[0].y); }\n");
+        return s;
+    }
+    if user.contains("gpufx_output_size") {
+        s.push_str(&format!("uint gpufx_input_count() {{ return {}u; }}\nuvec2 gpufx_input_size(uint i) {{\n", inputs.len()));
+        for (k, n) in inputs.iter().enumerate() {
+            let sampler = if arrays[k] { "sampler2DArray" } else { "sampler2D" };
+            let size =
+                if arrays[k] { format!("textureSize({sampler}({n}, smp), 0).xy") } else { format!("textureSize({sampler}({n}, smp), 0)") };
+            s.push_str(&format!("    if (i == {k}u) {{ return uvec2({size}); }}\n"));
+        }
+        s.push_str("    return uvec2(0u);\n}\n");
+    }
     s.push_str(body);
     s
 }
@@ -962,18 +1143,27 @@ fn glsl_with_prelude(params: &ParamBlock, inputs: &[String], arrays: &[bool], ex
 /// WGSL helpers of a package with a repeated input, over the effect inputs a pass binds
 /// (in manifest order): `gpufx_input_count()`, `gpufx_input_size(i)` and
 /// `gpufx_input_load(i, p)` (level 0 texel), so a shader loops over however many there are.
-fn input_helpers(pkg: &Package, bound: &[String]) -> String {
-    if !pkg.has_repeated_input() {
+fn input_helpers(pkg: &Package, bound: &[String], user: &str, sizes_from_buffer: bool) -> String {
+    if !pkg.has_repeated_input() && !user.contains("gpufx_output_size") {
         return String::new();
     }
     let names: Vec<&str> = pkg.manifest.inputs.iter().map(|i| i.name.as_str()).filter(|n| bound.iter().any(|b| b == n)).collect();
-    let mut s = String::from("// ---- gpufx repeated input helpers ----\n");
-    s.push_str(&format!("fn gpufx_input_count() -> u32 {{ return {}u; }}\n", names.len()));
-    s.push_str("fn gpufx_input_size(i: u32) -> vec2u {\n    switch i {\n");
-    for (k, n) in names.iter().enumerate() {
-        s.push_str(&format!("        case {k}u: {{ return textureDimensions({n}); }}\n"));
+    let mut s = String::from("// ---- gpufx input helpers ----\n");
+    if sizes_from_buffer {
+        // The size pipeline: every effect input, from the buffer it is given.
+        s.push_str(&format!(
+            "@group(0) @binding({SIZE_BINDING}) var<storage, read_write> gpufx_size_io: array<vec2u>;\n\
+             fn gpufx_input_count() -> u32 {{ return gpufx_size_io[0].x; }}\n\
+             fn gpufx_input_size(i: u32) -> vec2u {{ if (i < gpufx_size_io[0].x) {{ return gpufx_size_io[1u + i]; }} return vec2u(0u); }}\n"
+        ));
+    } else {
+        s.push_str(&format!("fn gpufx_input_count() -> u32 {{ return {}u; }}\n", names.len()));
+        s.push_str("fn gpufx_input_size(i: u32) -> vec2u {\n    switch i {\n");
+        for (k, n) in names.iter().enumerate() {
+            s.push_str(&format!("        case {k}u: {{ return textureDimensions({n}); }}\n"));
+        }
+        s.push_str("        default: { return vec2u(0u); }\n    }\n}\n");
     }
-    s.push_str("        default: { return vec2u(0u); }\n    }\n}\n");
     s.push_str("fn gpufx_input_load(i: u32, p: vec2i) -> vec4f {\n    switch i {\n");
     for (k, n) in names.iter().enumerate() {
         s.push_str(&format!("        case {k}u: {{ return textureLoad({n}, p, 0); }}\n"));
@@ -991,14 +1181,14 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
     let extra = def.outputs.len() - 1;
     let (module, source) = match def.language() {
         ShaderLanguage::Wgsl => {
-            let source =
-                format!("{}{}", prelude(params, &inputs, &arrays, extra, deep) + &input_helpers(pkg, &inputs), pkg.text(&def.shader)?);
+            let user = pkg.text(&def.shader)?;
+            let source = format!("{}{}", prelude(params, &inputs, &arrays, extra, deep) + &input_helpers(pkg, &inputs, user, false), user);
             let module = naga::front::wgsl::parse_str(&source)
                 .map_err(|e| Error::Shader(format!("{}: {}", def.shader, e.emit_to_string(&source))))?;
             (module, source)
         }
         ShaderLanguage::Glsl => {
-            let source = glsl_with_prelude(params, &inputs, &arrays, extra, pkg.text(&def.shader)?, deep);
+            let source = glsl_with_prelude(params, &inputs, &arrays, extra, pkg.text(&def.shader)?, deep, false);
             let module = naga::front::glsl::Frontend::default()
                 .parse(&naga::front::glsl::Options::from(naga::ShaderStage::Compute), &source)
                 .map_err(|e| Error::Shader(format!("{}: {}", def.shader, e.emit_to_string(&source))))?;
@@ -1085,6 +1275,88 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
         Some(pkg),
     );
     Ok(Pass { pipeline, layout, inputs, outputs: def.outputs.clone(), size_of: pkg.manifest.pass_size(def) })
+}
+
+/// The size pipeline of pass `def`: its shader with an entry point calling
+/// `gpufx_output_size`, which may read `params` and the input sizes only.
+fn compile_size_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usize, def: &PassDef) -> Result<SizePass, Error> {
+    let inputs: Vec<String> = match &def.inputs {
+        Some(v) => v.clone(),
+        None => pkg.manifest.inputs.iter().map(|i| i.name.clone()).chain(pkg.manifest.textures.iter().map(|t| t.name.clone())).collect(),
+    };
+    let arrays: Vec<bool> = inputs.iter().map(|n| pkg.manifest.textures.iter().any(|t| t.name == *n && t.is_array())).collect();
+    let extra = def.outputs.len() - 1;
+    let user = pkg.text(&def.shader)?;
+    let shader_err = |e: String| Error::Shader(format!("{} (gpufx_output_size): {e}", def.shader));
+    let (module, source, entry) = match def.language() {
+        ShaderLanguage::Wgsl => {
+            let source = format!(
+                "{}{}\n@compute @workgroup_size(1) fn gpufx_size_main() {{ gpufx_size_io[0] = gpufx_output_size(gpufx_size_io[0].y); }}\n",
+                prelude(params, &inputs, &arrays, extra, false) + &input_helpers(pkg, &inputs, user, true),
+                user
+            );
+            let module = naga::front::wgsl::parse_str(&source).map_err(|e| shader_err(e.emit_to_string(&source)))?;
+            (module, source, "gpufx_size_main")
+        }
+        ShaderLanguage::Glsl => {
+            let source = glsl_with_prelude(params, &inputs, &arrays, extra, user, false, true);
+            let module = naga::front::glsl::Frontend::default()
+                .parse(&naga::front::glsl::Options::from(naga::ShaderStage::Compute), &source)
+                .map_err(|e| shader_err(e.emit_to_string(&source)))?;
+            (module, source, "main")
+        }
+    };
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+        .validate(&module)
+        .map_err(|e| shader_err(e.emit_to_string(&source)))?;
+    let Some(ep) = module.entry_points.iter().position(|ep| ep.name == entry) else {
+        return Err(shader_err("no size entry point".into()));
+    };
+    // Only `params` and the input sizes exist when the size is asked for.
+    let uses = info.get_entry_point(ep);
+    for (h, var) in module.global_variables.iter() {
+        // Globals without a binding (GLSL built-ins, private variables) need no bind group.
+        let allowed = var.binding.as_ref().is_none_or(|b| b.binding == 1 || b.binding == SIZE_BINDING);
+        if !uses[h].is_empty() && !allowed {
+            return Err(shader_err(format!(
+                "gpufx_output_size may read only `params`, gpufx_input_count() and gpufx_input_size(), not `{}`",
+                var.name.as_deref().unwrap_or("?")
+            )));
+        }
+    }
+    let device = &ctx.device;
+    let entries = [
+        uniform_entry(1),
+        wgpu::BindGroupLayoutEntry {
+            binding: SIZE_BINDING,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+    ];
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpufx size"), entries: &entries });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("gpufx size"),
+        bind_group_layouts: &[Some(&layout)],
+        immediate_size: 0,
+    });
+    let language = match def.language() {
+        ShaderLanguage::Wgsl => "wgsl",
+        ShaderLanguage::Glsl => "glsl",
+    };
+    let pipeline = ShaderCache::compute_pipeline(
+        ctx.shader_cache.as_deref(),
+        device,
+        &PipelineDesc { label: &format!("gpufx size {index} ({})", def.shader), layout: &pipeline_layout, entries: &entries, entry },
+        module,
+        &[language, entry, "size", &source],
+        Some(pkg),
+    );
+    Ok(SizePass { pipeline, layout })
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {

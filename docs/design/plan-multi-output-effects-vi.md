@@ -31,7 +31,7 @@ Số dòng dưới đây đo trên working tree ngày 2026-10-22 (đang có sử
   "inputs": [{ "name": "src", "formats": ["rgba"] }],
   "output": [
     { "name": "color", "formats": ["rgba", "nv12"] },
-    { "name": "matte", "formats": ["gray", "rgba"], "size": "first" }
+    { "name": "matte", "formats": ["gray", "rgba"] }
   ],
   "groups": [{ "passes": [
     { "shader": "key.wgsl", "inputs": ["src"], "output": ["color", "matte"] }
@@ -45,7 +45,7 @@ Mỗi phần tử:
 |---|---|---|
 | `name` | có | identifier; đồng thời là tên texture output của một pass (xem quyết định 2) và là tên output pad |
 | `formats` | không | như `output.formats` hiện nay, mặc định `default_output_formats()` |
-| `size` | không | như `output.size` hiện nay (`first`, `hstack`...), mặc định `first` |
+| ~~`size`~~ | | đã bỏ: kích thước output đến từ hàm shader `gpufx_output_size` của pass ghi output đó (xem mục 11b) |
 | `bypass` | không | tên input mà output này truyền thẳng khi effect bị tắt; mặc định input đầu (xem quyết định 6) |
 
 ## Quyết định thiết kế (đề xuất)
@@ -59,7 +59,7 @@ Mỗi phần tử:
    - Effect đơn có nhiều output: pad tên đúng `output[k].name` (`color`, `matte`), thứ tự như manifest.
    - Chain (`gpufx=effect=a.zip,b.zip` – `linear`): chỉ effect CUỐI được nhiều output; effect giữa nối output 0 sang effect sau, effect giữa có >1 output thì báo lỗi "use graph=". Pad của chain: như effect đơn, theo effect cuối.
 4. **Graph**: node effect ghi đúng số label bằng số output của effect, theo thứ tự manifest: `[0]key.zip[c][m]`. Ghi ít hơn là lỗi (bắt buộc đặt tên hết, output không cần thì nối sang `nullsink` phía FFmpeg — xem Q2). Label của output phụ dùng được như label thường (vào effect khác, `split`, hoặc thành output graph).
-5. **Kích thước và format theo từng output**: mỗi output có `size` rule riêng, áp lên kích thước input của effect như `OutputSize::apply` hiện nay. Mọi texture pass của một effect hiện có cùng kích thước effect; vì vậy **v1 yêu cầu mọi output của effect có cùng `size`** (validate), thực chất `size` vẫn là một thuộc tính của effect nhưng ghi ở từng output để mở rộng sau. Format negotiate riêng cho từng output (`formats` riêng), conversion GPU (rgba→nv12/gray...) theo slot output như hiện nay. Xem Q4.
+5. **Kích thước và format theo từng output**: kích thước của mỗi output đến từ hàm `gpufx_output_size(out_index)` tuỳ chọn trong shader của pass ghi output đó (không có thì bằng input đầu; không còn trường `size` trong manifest). Mọi texture của một pass có cùng kích thước, nên các output một pass ghi phải cùng kích thước (validate). Format negotiate riêng cho từng output (`formats` riêng), conversion GPU (rgba→nv12/gray...) theo slot output như hiện nay. Xem Q4.
 6. **Bypass**: khi effect bị tắt (`<node>.bypass`/`enable`) hoặc cả graph bypass, output k sao chép input `output[k].bypass` (mặc định input 0). Mọi output của một effect tắt cùng lúc. Kích thước output khi bypass = kích thước input đó; nếu khác kích thước output thì lỗi như `check_bypass_pad` hiện nay.
 7. **Timestamp/EOF**: mọi output của một lần process có cùng pts/duration (đã đúng ở `vf_gpufx.c:2177-2230`). EOF: giữ cơ chế hiện có (output 0 quyết định; output khác đóng thì frame của nó bị bỏ, filter vẫn chạy). Không thêm gì mới về phía C ngoài việc pad giờ có thể đến từ một effect đơn.
 8. **API C**: không thêm hàm. `gpufx_effect_output_count/name/size/pad_format*` đã theo chỉ số output; chỉ đổi nguồn dữ liệu trong core. Hàm process single-output (`gpufx_effect_process` cũ) từ chối effect >1 output như đang từ chối graph.
@@ -92,7 +92,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 1. **Q1 = B**: bỏ trống `output` cấp effect ⇒ một output, tên = `output[0]` của pass cuối.
 2. **Q3 = 4**: tối đa 4 output mỗi effect (sau khi nở `repeat`).
 3. **Q4 = B — mỗi output có kích thước riêng ngay từ v1** (thay quyết định 5 "cùng size"):
-   - Mỗi phần tử `output` có `size` riêng (`first`/`hstack`/`vstack`), có thể khác nhau.
+   - Mỗi output có kích thước riêng, có thể khác nhau, lấy từ `gpufx_output_size` của pass ghi nó (không còn trường `size` trong manifest).
    - Texture của một pass có kích thước riêng = kích thước output effect mà pass đó ghi (pass ghi texture trung gian: kích thước effect mặc định = `output[0]`; cần quy ước rõ, đề xuất: pass không ghi output effect nào thì theo `output[0]`). Các texture cùng một pass phải cùng kích thước (một dispatch) ⇒ validate.
    - `globals.size`, `gpufx_uv`, `gpufx_in_bounds`, kích thước dispatch theo PASS. Pool cấp slot theo kích thước từng texture. Bypass kiểm kích thước theo từng output. Ghi rõ trong EFFECT_FORMAT rằng `globals.size` là kích thước pass đang chạy.
    - Đây là phần nặng nhất: nằm trong commit 2, review `opus`.
@@ -108,7 +108,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 8. **Q7b = B — output bật/tắt bằng cờ**: phần tử `output` có `"optional": true`; bật/tắt lúc dựng graph bằng option node (đề xuất `outputs.<name>=0|1` hoặc `<name>=off` — chốt tên khi làm, tránh trùng param); output tắt dùng cơ chế bỏ của Q2 luật 3. Mặc định bật. Output không optional không tắt được.
 9. **Gán input theo tên** (đối xứng phía output, đang chờ user chốt kiểu A): `[src=0][mask=m]abc.zip`, vế trái là tên input trong manifest, vế phải là label (`[N]` = input pad N của filter `gpufx`, chỉ đứng vế phải). Mỗi node một kiểu ở phía input (vị trí hoặc tên), chọn độc lập với phía output. Lỗi: tên không có, gán hai lần, THIẾU input (input không bỏ được). Input `repeat`: `[src0=a][src1=b]`, N = số pad gán, phải liền từ 0. Trong chain, effect sau nhận output trước vào input đầu tiên chưa gán; label input chỉ đứng đầu câu nên kiểu theo tên phía input chỉ dùng cho effect đầu câu. Mỗi `[N]` vẫn chỉ đọc một lần (`split` nếu cần).
 10. **Ví dụ phải có test** (graph): lỗi `[0]key.zip[matte=m][color=c]|def.zip[out]` (chain không còn output chưa gán) và `|[c]ghi.zip` (label giữa chain); đúng: `[0]key.zip[matte=m]|def.zip[out]; [m]ghi.zip[out2]`, `[0]key.zip[matte=m][color=c]; [c]def.zip[out]; [m]ghi.zip[out2]`, `[0]key.zip[c][m]; [c]def.zip[out]; [m]ghi.zip[out2]`; lỗi trộn kiểu `[0][bg=1]x.zip[c]`, `[src=0][bg=1]x.zip[matte=m][x]`.
-11. **Đã chốt (2026-10-23, user bảo làm luôn, lấy theo đề xuất)**: (a) kiểu A `[tên=label]` ở cả hai phía; (b) CHƯA thêm giá trị `size` thu nhỏ (`half`/`scale`), chỉ có `first`/`hstack`/`vstack`, ghi Backlog; (c) tắt output optional bằng option `<tên output>=off` (mặc định `on`; tên output đã không trùng param). Giới hạn 4 output tính SAU khi nở `repeat` và sau khi tắt output optional.
+11. **Đã chốt (2026-10-23, user bảo làm luôn, lấy theo đề xuất)**: (a) kiểu A `[tên=label]` ở cả hai phía; (b) trường `size` của output (`first`/`hstack`/`vstack`) đã bị BỎ; kích thước output đến từ hàm shader tuỳ chọn `gpufx_output_size(out_index)` (WGSL `-> vec2u`, GLSL `uvec2 ...(uint)`) trong shader của pass ghi output đó, chỉ được đọc `params`, `gpufx_input_count()` và `gpufx_input_size(i)`; không có hàm thì bằng input đầu. Kích thước tính một lần bằng một dispatch GPU lúc configure (từ giá trị param lúc đó: mặc định và giá trị inline hằng của graph; biểu thức theo frame không được tính, param giữ mặc định); 0 hoặc quá cạnh texture lớn nhất của thiết bị là lỗi; đổi param làm kích thước đổi giữa chừng thì xử lý báo lỗi lệch kích thước. Nhờ vậy matte thu nhỏ hay scale làm được bằng shader, không cần `half`/`scale` trong manifest; (c) tắt output optional bằng option `<tên output>=off` (mặc định `on`; tên output đã không trùng param). Giới hạn 4 output tính SAU khi nở `repeat` và sau khi tắt output optional.
 
 ## Các chỗ phải sửa
 
@@ -118,7 +118,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 - Validate (dòng 571-577 và khối kiểm pass ~636-660):
   - Mảng 1..=4; tên là identifier, không trùng nhau, không trùng input/texture/param/tên dành riêng.
   - Mỗi tên là output của đúng một pass trong mỗi group (dùng `group.passes`, chạy cho mọi group).
-  - Mọi `size` bằng nhau (quyết định 5).
+  - Các output một pass ghi phải cùng kích thước (quyết định 5).
   - `bypass` phải là tên input.
   - Bỏ luật "pass cuối chỉ một output" (do plan trước thêm), thay bằng luật output không ai dùng.
 - Dòng 732 (`match self.output.size`) và 796-810 (`output_size`, `check_output_format`): nhận chỉ số output `k`; thêm helper `fn output_size(&self, k, sizes)` và `fn output_names()`.
@@ -164,7 +164,7 @@ User đã chốt hết câu hỏi. Agent thực hiện theo mục này trước,
 - `ffmpeg/vf_gpufx_ai_*.c`: không đụng.
 
 ### Package và tài liệu
-- `packages/gpufx/**/manifest.json` (~95 file có `"output"` cấp effect, trong đó `ffmpeg/hstack`, `ffmpeg/vstack`, `ffmpeg/monochrome` có `size`/`formats`): chuyển `"output": {...}` → `"output": [{"name": "<tên output pass cuối>", ...}]` bằng script (Python `json` sẽ đổi format/line ending → dùng regex có kiểm CRLF, hoặc script đọc/ghi giữ nguyên byte ngoài khối `output`). Chú ý không nhầm với `passes[i].output` (đã là mảng chuỗi sau plan trước).
+- `packages/gpufx/**/manifest.json` (~95 file có `"output"` cấp effect, trong đó `ffmpeg/hstack`, `ffmpeg/vstack` (nay dùng `gpufx_output_size` thay `size`), `ffmpeg/monochrome` có `formats`): chuyển `"output": {...}` → `"output": [{"name": "<tên output pass cuối>", ...}]` bằng script (Python `json` sẽ đổi format/line ending → dùng regex có kiểm CRLF, hoặc script đọc/ghi giữ nguyên byte ngoài khối `output`). Chú ý không nhầm với `passes[i].output` (đã là mảng chuỗi sau plan trước).
 - Một package mẫu mới (vd `packages/gpufx/ffmpeg/alphaextract` hoặc `chromakey-matte`) xuất `color` + `matte` để test thật bằng ffmpeg.
 - `docs/EFFECT_FORMAT.md` + `docs/EFFECT_FORMAT-vi.md`: mục `output` cấp effect (bảng trường, mặc định, ví dụ), luật "output = texture pass", bypass theo output, tên pad; phần graph: node ghi nhiều label. Sửa cả hai bản cho khớp.
 - `docs/design/DESIGN.md` + `-vi.md`: đoạn mô tả Topology/Source và pad của filter.

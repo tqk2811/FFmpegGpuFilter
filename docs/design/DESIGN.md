@@ -94,9 +94,10 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
 - `inputs` determines the number of input pads on the filter (a transition uses 2 inputs, etc.). The last input may
   carry `repeat` (WGSL only, `{default, min, max <= 16}`): it expands into pads `<name>0..N-1`, N = the number of
   labels the graph node reads (`default` without labels); the prelude adds `gpufx_input_count/size/load`.
-- `output.size`: `first` (default, the size of the first input), `hstack` (width = sum of the widths, all inputs
-  the same height) or `vstack` (height = sum, same width). Checked at configure and on a size change; the result must
-  fit the GPU's `max_texture_dimension_2d`. Downstream graph nodes see the propagated size.
+- Output size: by default the size of the first input; a shader can set it with the optional function
+  `gpufx_output_size(out_index)` of the pass that writes the output (it reads only `params`, `gpufx_input_count()` and
+  `gpufx_input_size(i)`). Computed once by a one-off GPU dispatch at configure, from the param values then; 0 or above the GPU's
+  `max_texture_dimension_2d` is an error, and a later change of the size fails processing. Downstream graph nodes see the propagated size.
 - `params` are **generated automatically** by the runtime into a `params` struct in the shader, following the
   WGSL/std140 uniform alignment rules; the author just uses `params.radius`.
 - `passes` run sequentially; the output of one pass is a readable texture in the next; the last pass is the
@@ -173,8 +174,7 @@ Design rationale:
   inputs, so the plan, the pooled textures and the bindings stay as they are and toggling is free of allocation. The
   filter-level `enable=` can hand the input textures on without any GPU copy (`passthrough`), and `bypass=auto` serves
   transitions that should keep showing the clip they ended on.
-- **Framesync for several inputs.** The first input decides the length, frame rate, SAR and (unless an effect stacks
-  inputs with `output.size`) the size; other inputs repeat, drop or hold frames to follow it.
+- **Framesync for several inputs.** The first input decides the length, frame rate, SAR and (unless the effect's `gpufx_output_size` gives another) the size; other inputs repeat, drop or hold frames to follow it.
 - **Strict checks at configuration**, with errors that name the effect, input and key, instead of silent conversion.
 
 The frame path behind this is in [section 6](#6-frame-path-and-performance). What a shader receives (prelude, bindings,
@@ -503,7 +503,7 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
   outputs are dropped with the passes only they need. In the engine an edge is `Source::Node(effect, output)`;
   each output has its own texture, size, formats, bypass input and in-place frame.
   `split` and `null` cost nothing: their outputs *are* their input (two edges reading one texture).
-- An effect writes the size of its first input (the stacked size with `output.size` `hstack`/`vstack`, propagated to
+- An effect writes the size of its first input (or the size from `gpufx_output_size`, propagated to
   downstream nodes); output pad k takes the SAR and frame rate of the
   input pad its source comes from. Frames come at input 0's events (framesync as with several inputs).
 - Each input pad is uploaded once, each output pad is read back once, all outputs through one shared

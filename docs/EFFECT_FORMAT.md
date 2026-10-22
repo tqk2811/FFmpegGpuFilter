@@ -73,7 +73,6 @@ Each element of `output` (an array; the object form of earlier versions is an er
 |-------|---------|---------|
 | `name` | (required) | The texture a pass writes (see [Several outputs](#several-outputs)), also the output pad name of an effect with several outputs |
 | `formats` | every GPU format (below) | Allowed pixel formats of this output, in order of preference |
-| `size` | `first` | Size of this output: `first`, `hstack` or `vstack` (below) |
 | `bypass` | the first input | The input this output passes when the effect is switched off (`<effect>.enable`) |
 
 `formats`: the allowed output pixel formats, in order of preference. Without it the list is
@@ -85,19 +84,7 @@ takes an alpha format. **An effect that produces alpha should declare `formats`*
 picks one format from the list when linking filters; if a downstream filter demands a format outside the list,
 FFmpeg inserts a converter after `gpufx`.
 
-`size`: `first` (default) — the output has the size of the first input; `hstack` — every
-input must have the height of the first, the output width is the sum of the widths; `vstack` — every input
-must have the width of the first, the output height is the sum of the heights. A mismatch is an error like
-`same_size` (at configuration and when the frame size changes):
-
-```
-unsupported: input `src1` of `Horizontal Stack`: height 240 must equal the first input's (180) to stack side by side
-```
-
-The output may then be larger than every input, up to the GPU's largest texture side
-(`max_texture_dimension_2d`, 8192 or more on desktop GPUs); a larger output is an error. Downstream effects of a
-chain or graph see the stacked size, and the FFmpeg filter gives its output link that size (frame rate and
-aspect ratio still come from the first input).
+The size of an output is not in the manifest: it comes from an optional shader function, see [Output size](#output-size).
 
 ```json
 "inputs": [
@@ -116,8 +103,8 @@ How the rules apply:
   To make it work, change the format first with `format=yuv420p,gpufx=...`. The size is checked
   at configuration and whenever the frame size changes. A misspelled format name is also an error.
 - **Chains and graphs** (`graph='a|b'`, `graph='...'`): every effect is checked where it sits. An effect
-  reading another sees the size of the output it reads (the size of the first input, or the stacked size with
-  `size`) and the first format of that output's
+  reading another sees the size of the output it reads (the size of the first input, or the size its shader gives with
+  `gpufx_output_size`) and the first format of that output's
   `formats` that the reader accepts; an input pad read by several effects must have a format
   all of them accept. `same_size` therefore also holds between two branches of a graph.
 - **`gpufx run`:** the format comes from the PNG (`rgba`, `rgb24`, `gray`, `ya8`, and the 16-bit versions
@@ -154,7 +141,7 @@ Each element of `passes` (of a group):
 | `output` | `["out"]` | Array of 1 to 4 names of the textures this pass writes (a plain string is an error). The first is the main output |
 
 A pass runs at the size of the effect output it writes (see [Several outputs](#several-outputs)), the size of the first input
-unless that output's `size` says otherwise. Input/texture/param names must be valid identifiers,
+unless the shader of the pass that writes that output sets another size with `gpufx_output_size` (see [Output size](#output-size)). Input/texture/param names must be valid identifiers,
 must not collide with each other, must not start with `gpufx`, and must not use `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 A param must not be named `enable` or `bypass`: the inline keys `enable=` and `bypass=` of an effect (`graph='my-effect.zip=enable=lt(t\,2)'`) switch an effect of a chain or graph.
 
@@ -207,7 +194,7 @@ Rules:
 - Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable` or `bypass`.
 - A pass runs at the size of the first effect output it writes, or of output 0 when it writes none (a pass making
   textures for later passes); `globals.size`, `gpufx_uv` and `gpufx_in_bounds` follow that size. The outputs one
-  pass writes must have the same `size`, and a texture written by several passes is written at one size.
+  pass writes must have the same size (the `gpufx_output_size` of the pass gives the same size for each of them), and a texture written by several passes is written at one size.
 - `bypass` names the input an output passes when the effect is switched off; it must have the size of the output.
 
 ### Variable number of inputs
@@ -221,7 +208,7 @@ pad. The package is compiled for that count; the number of input pads of the `gp
 names the input reads all its pads. `gpufx pack --precompile` compiles the `default` count only; another count compiles
 its shaders when the graph loads.
 
-The shader cannot know the pad names in advance, so the prelude of a package with a `repeat` input also declares
+The shader cannot know the pad names in advance, so the prelude of a package with a `repeat` input (or whose shader defines `gpufx_output_size`) also declares
 (over the effect inputs the pass reads, in pad order):
 
 ```wgsl
@@ -231,6 +218,36 @@ fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad of input i at
 ```
 
 See `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
+
+### Output size
+
+By default an output has the size of the first input. A shader can give another size by defining, in the shader of the pass
+that writes that output, a function (`out_index` is the index of the output in the manifest `output` array):
+
+```wgsl
+fn gpufx_output_size(out_index: u32) -> vec2u        // WGSL
+```
+
+```glsl
+uvec2 gpufx_output_size(uint out_index)              // GLSL
+```
+
+Rules:
+
+- It may read only `params` and the prelude helpers `gpufx_input_count()` and `gpufx_input_size(i)` (the size of input `i`,
+  in WGSL and GLSL): no textures, no `globals`.
+- It is optional. Without it, the output has the size of the first input.
+- The sizes are computed once, by a one-off GPU dispatch when the filter is configured, from the param values at that
+  time: the defaults and the constant inline values of the graph. Per-frame expressions are not evaluated then, their params keep the default.
+- A size of 0, or above the device's largest texture side (`max_texture_dimension_2d`, 8192 or more on desktop GPUs), is an error.
+  `hstack` of inputs with different heights returns 0, so the error reads `gpufx_output_size gives 0x0`.
+- Downstream effects of a chain or graph see that size, and the FFmpeg filter gives its output link that size (frame rate and
+  aspect ratio still come from the first input).
+- If a param later changes so that the size changes, processing fails with an error naming the size mismatch
+  (a size from `gpufx_output_size` must not change while the stream runs).
+
+Examples: `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl` (the inputs side by side) and
+`packages/gpufx/ffmpeg/scale/shaders/scale.wgsl` (the size from the params `w` and `h`).
 
 ## Pass groups and device requirements
 
@@ -382,7 +399,7 @@ The short form of the prelude is under [Writing WGSL shaders](#writing-wgsl-shad
 
 | Field | WGSL type | GLSL type | Offset | Meaning |
 |-------|-----------|-----------|--------|---------|
-| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The size the pass runs at: the size of the effect output it writes (the first input's, or the stacked size with `size` `hstack`/`vstack`), see [Several outputs](#several-outputs) |
+| `size` | `vec2f` | `vec2` | 0 | Output size in pixels (width, height) as floats. The size the pass runs at: the size of the effect output it writes (the first input's, or the size from `gpufx_output_size`), see [Several outputs](#several-outputs) |
 | `time` | `f32` | `float` | 8 | Presentation time in seconds (`t` of the filter). Loses precision on long clips (about 0.008 s steps after one day) |
 | `frame` | `u32` | `uint` | 12 | Frame count of this filter instance (also the `n` of expressions); restarts on a seek, so not for time-based motion |
 | `time_int` | `i32` | `int` | 16 | Whole seconds of the time (floor; saturates beyond the i32 range) |
@@ -629,7 +646,8 @@ The examples live in group folders under `packages/gpufx/`: `ffmpeg/` (equivalen
 | `packages/gpufx/ffmpeg/chroma-key` | Green screen → alpha; input `formats` **rules**, output `rgba`/`yuva420p`/`yuva444p` |
 | `packages/gpufx/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
 | `packages/gpufx/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
-| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and an output `size` `hstack`/`vstack`, an output larger than the inputs |
+| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and a `gpufx_output_size` that stacks the inputs (an output larger than the inputs) |
+| `packages/gpufx/ffmpeg/scale` | FFmpeg's `scale` (`w`, `h` with the `0` and `-n` rules, bilinear): `gpufx_output_size` computes the size from the params and the input, e.g. `scale.zip=w=1280:h=-2` |
 | `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/gpufx/ffmpeg/slide-transition`, `packages/gpufx/ffmpeg/circle-reveal` | 2-input transitions; `same_size` **rule** |
 | `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Clock-hand transition, a `bool` parameter `reverse` |
 | `packages/gpufx/ffmpeg/blend` | 2 inputs, an `int` `mode` choosing one of 40 formulas |

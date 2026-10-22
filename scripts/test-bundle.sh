@@ -326,6 +326,17 @@ else fail "two outputs: same frame count and pts"; cat "$CLIPS/last.log"; fi
 if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM'[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c2.md5" -map "[mo]" -frames:v 3 -f framemd5 -y "$CLIPS/lm_m2.md5" > "$CLIPS/last.log" 2>&1     && [ "$(grep -vc '^#' "$CLIPS/lm_m2.md5")" -eq 3 ] && [ "$(pts_of "$CLIPS/lm_c2.md5")" = "$(pts_of "$CLIPS/lm_c.md5")" ]; then
     pass "two outputs: the second ends early, the first runs to the end"
 else fail "two outputs: the second ends early, the first runs to the end"; cat "$CLIPS/last.log"; fi
+# out_format per output pad: one entry per pad, an empty entry keeps the default.
+# shellcheck disable=SC2086
+ok "out_format per output pad" -i "$A" -an -filter_complex     "[0]gpufx=graph='$LM':out_format=rgba|nv12[c][m];[c]hwdownload,format=rgba[co];[m]hwdownload,format=nv12[mo]" -map "[co]" $NULL -map "[mo]" $NULL
+# shellcheck disable=SC2086
+ok "out_format with an empty entry" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=|nv12[c][m];[m]hwdownload,format=nv12[mo]" -map "[c]" $NULL -map "[mo]" $NULL
+# shellcheck disable=SC2086
+rejects "out_format with the wrong number of entries" "has 3 entries" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|nv12|rgba[c][m]" -map "[c]" $NULL -map "[m]" $NULL
+# shellcheck disable=SC2086
+rejects "out_format with an unknown format" "unknown pixel format 'nope'" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|nope[c][m]" -map "[c]" $NULL -map "[m]" $NULL
+# shellcheck disable=SC2086
+rejects "out_format outside an output's formats" "output 'matte' of" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|yuva420p[c][m]" -map "[c]" $NULL -map "[m]" $NULL
 for m in 0 1 2 3; do
     # shellcheck disable=SC2086
     ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/FFmpegArgs.TanersenerSlideShow/fit.zip=mode=$m'" -an $NULL

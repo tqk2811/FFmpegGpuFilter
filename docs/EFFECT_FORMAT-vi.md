@@ -73,7 +73,6 @@ Mỗi phần tử `output` (một mảng; dạng object của bản cũ là lỗ
 |--------|----------|---------|
 | `name` | (bắt buộc) | Texture mà một pass ghi (xem [Nhiều output](#nhiều-output)), cũng là tên output pad của effect có nhiều output |
 | `formats` | mọi format GPU (bên dưới) | Pixel format output này được có, theo thứ tự ưu tiên |
-| `size` | `first` | Kích thước output này: `first`, `hstack` hoặc `vstack` (bên dưới) |
 | `bypass` | input đầu | Input mà output này truyền thẳng khi effect bị tắt (`<effect>.enable`) |
 
 `formats`: danh sách pixel format output được phép, theo thứ tự ưu tiên. Không ghi thì
@@ -85,18 +84,7 @@ phía sau nhận format có alpha. **Hiệu ứng tạo ra alpha nên khai báo 
 chọn một format trong danh sách khi nối filter; filter phía sau đòi format ngoài danh sách
 thì FFmpeg tự chèn bộ chuyển đổi sau `gpufx`.
 
-`size`: `first` (mặc định) — output có kích thước input đầu; `hstack` — mọi input phải cao
-bằng input đầu, chiều rộng output là tổng chiều rộng; `vstack` — mọi input phải rộng bằng input đầu, chiều
-cao output là tổng chiều cao. Lệch là lỗi giống `same_size` (khi cấu hình và khi kích thước frame đổi):
-
-```
-unsupported: input `src1` of `Horizontal Stack`: height 240 must equal the first input's (180) to stack side by side
-```
-
-Khi đó output có thể lớn hơn mọi input, tối đa bằng cạnh texture lớn nhất của GPU
-(`max_texture_dimension_2d`, từ 8192 trở lên trên GPU desktop); lớn hơn là lỗi. Hiệu ứng phía sau trong chain
-hoặc graph thấy kích thước đã ghép, và filter FFmpeg đặt kích thước đó cho output link (frame rate và aspect
-ratio vẫn lấy từ input đầu).
+Kích thước của output không nằm trong manifest: nó đến từ một hàm shader tuỳ chọn, xem [Kích thước output](#kích-thước-output).
 
 ```json
 "inputs": [
@@ -115,7 +103,7 @@ Cách áp dụng:
   Muốn chạy thì đổi format trước bằng `format=yuv420p,gpufx=...`. Kích thước được kiểm tra
   khi cấu hình và mỗi khi kích thước frame đổi. Tên format sai chính tả cũng là lỗi.
 - **Chuỗi và đồ thị** (`graph='a|b'`, `graph='...'`): mỗi hiệu ứng được kiểm tại chỗ của nó. Hiệu ứng
-  đọc hiệu ứng khác thấy kích thước của output nó đọc (kích thước input đầu, hoặc kích thước đã ghép khi có `size`) và format đầu tiên
+  đọc hiệu ứng khác thấy kích thước của output nó đọc (kích thước input đầu, hoặc kích thước shader của nó đưa ra qua `gpufx_output_size`) và format đầu tiên
   trong `formats` của output đó mà hiệu ứng đọc nhận; input pad được nhiều hiệu ứng đọc phải có
   format mà tất cả đều nhận. Vì vậy `same_size` cũng áp dụng giữa hai nhánh của đồ thị.
 - **`gpufx run`:** format lấy từ PNG (`rgba`, `rgb24`, `gray`, `ya8`, bản 16-bit là
@@ -151,8 +139,8 @@ Mỗi phần tử `passes` (của một group):
 | `inputs` | mọi input rồi mọi texture | Texture pass này đọc: tên input, texture, hoặc output của pass trước |
 | `output` | `["out"]` | Mảng 1 đến 4 tên texture pass này ghi (chuỗi đơn là lỗi). Tên đầu là output chính |
 
-Pass chạy ở kích thước của output effect mà nó ghi (xem [Nhiều output](#nhiều-output)): kích thước input đầu tiên, trừ khi `size`
-của output đó quy định khác. Tên input/texture/param phải là định danh hợp lệ,
+Pass chạy ở kích thước của output effect mà nó ghi (xem [Nhiều output](#nhiều-output)): kích thước input đầu tiên, trừ khi shader của pass ghi output đó
+đặt kích thước khác bằng `gpufx_output_size` (xem [Kích thước output](#kích-thước-output)). Tên input/texture/param phải là định danh hợp lệ,
 không trùng nhau, không bắt đầu bằng `gpufx` và không dùng `globals`, `params`, `out_tex`, `out_tex1`, `out_tex2`, `out_tex3`, `smp`.
 Param không được tên `enable` hay `bypass`: các key inline `enable=` và `bypass=` của một effect (`graph='my-effect.zip=enable=lt(t\,2)'`) dùng để bật/tắt một effect của chain hoặc graph.
 
@@ -205,7 +193,7 @@ Luật:
 - Tên output là định danh, không trùng nhau, không trùng input, texture, param, và không phải `enable` hay `bypass`.
 - Pass chạy ở kích thước của output effect đầu tiên nó ghi, hoặc của output 0 khi nó không ghi output nào (pass làm
   texture cho pass sau); `globals.size`, `gpufx_uv`, `gpufx_in_bounds` theo kích thước đó. Các output một pass ghi
-  phải cùng `size`, và texture được nhiều pass ghi thì ghi ở một kích thước.
+  phải cùng kích thước (`gpufx_output_size` của pass trả cùng một kích thước cho mọi output đó), và texture được nhiều pass ghi thì ghi ở một kích thước.
 - `bypass` là tên input mà output truyền thẳng khi effect bị tắt; input đó phải có kích thước của output.
 
 ### Số input thay đổi được
@@ -219,7 +207,7 @@ Gói được biên dịch cho đúng số đó; số input pad của filter `gp
 tên input này thì đọc mọi pad của nó. `gpufx pack --precompile` chỉ biên dịch sẵn cho số `default`; số khác thì
 biên dịch shader lúc nạp graph.
 
-Shader không biết trước tên pad, nên prelude của gói có input `repeat` khai báo thêm (trên các input của
+Shader không biết trước tên pad, nên prelude của gói có input `repeat` (hoặc có shader định nghĩa `gpufx_output_size`) khai báo thêm (trên các input của
 hiệu ứng mà pass đọc, theo thứ tự pad):
 
 ```wgsl
@@ -229,6 +217,36 @@ fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad của input i
 ```
 
 Xem `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
+
+### Kích thước output
+
+Mặc định output có kích thước input đầu. Shader đặt kích thước khác bằng cách định nghĩa, trong shader của pass ghi output đó, một hàm
+(`out_index` là chỉ số của output trong mảng `output` của manifest):
+
+```wgsl
+fn gpufx_output_size(out_index: u32) -> vec2u        // WGSL
+```
+
+```glsl
+uvec2 gpufx_output_size(uint out_index)              // GLSL
+```
+
+Quy tắc:
+
+- Hàm chỉ được đọc `params` và các helper của prelude `gpufx_input_count()`, `gpufx_input_size(i)` (kích thước input `i`,
+  có cả trong WGSL và GLSL): không đọc texture, không đọc `globals`.
+- Hàm là tuỳ chọn. Không có thì output có kích thước input đầu.
+- Kích thước được tính một lần, bằng một dispatch GPU riêng lúc cấu hình filter, từ giá trị param tại thời điểm đó:
+  giá trị mặc định và các giá trị inline hằng của graph. Biểu thức theo từng frame không được tính lúc này, param của chúng giữ giá trị mặc định.
+- Kích thước 0, hoặc lớn hơn cạnh texture lớn nhất của thiết bị (`max_texture_dimension_2d`, từ 8192 trở lên trên GPU desktop) là lỗi.
+  `hstack` các input khác chiều cao trả về 0, nên lỗi hiện `gpufx_output_size gives 0x0`.
+- Hiệu ứng phía sau trong chain hoặc graph thấy kích thước này, và filter FFmpeg đặt kích thước đó cho output link (frame rate và aspect
+  ratio vẫn lấy từ input đầu).
+- Nếu sau đó một param đổi làm kích thước đổi, việc xử lý báo lỗi nêu rõ kích thước lệch
+  (kích thước từ `gpufx_output_size` không được đổi khi stream đang chạy).
+
+Ví dụ: `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl` (các input cạnh nhau) và
+`packages/gpufx/ffmpeg/scale/shaders/scale.wgsl` (kích thước từ param `w`, `h`).
 
 ## Nhóm pass và yêu cầu thiết bị
 
@@ -380,7 +398,7 @@ Dạng ngắn của prelude nằm ở [Viết shader WGSL](#viết-shader-wgsl);
 
 | Field | Kiểu WGSL | Kiểu GLSL | Offset | Ý nghĩa |
 |-------|-----------|-----------|--------|---------|
-| `size` | `vec2f` | `vec2` | 0 | Size output tính bằng pixel (rộng, cao) dạng float. Là kích thước pass đang chạy: kích thước output effect mà pass ghi (của input đầu, hoặc size xếp chồng với `size` `hstack`/`vstack`), xem [Nhiều output](#nhiều-output) |
+| `size` | `vec2f` | `vec2` | 0 | Size output tính bằng pixel (rộng, cao) dạng float. Là kích thước pass đang chạy: kích thước output effect mà pass ghi (của input đầu, hoặc size từ `gpufx_output_size`), xem [Nhiều output](#nhiều-output) |
 | `time` | `f32` | `float` | 8 | Thời điểm hiển thị tính bằng giây (`t` của filter). Mất độ chính xác với clip dài (bước khoảng 0.008 s sau một ngày) |
 | `frame` | `u32` | `uint` | 12 | Số frame của instance filter này (cũng là `n` trong expression); về 0 khi seek, nên không dùng cho chuyển động theo thời gian |
 | `time_int` | `i32` | `int` | 16 | Số giây nguyên của thời gian (floor; bão hòa ngoài khoảng i32) |
@@ -619,7 +637,8 @@ Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmp
 | `packages/gpufx/ffmpeg/fade` | Fade về một màu |
 | `packages/gpufx/ffmpeg/chroma-key` | Phông xanh → alpha; **quy tắc** `formats` input, output `rgba`/`yuva420p`/`yuva444p` |
 | `packages/gpufx/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
-| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `size` của output là `hstack`/`vstack`, output lớn hơn input |
+| `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `gpufx_output_size` xếp các input lại (output lớn hơn input) |
+| `packages/gpufx/ffmpeg/scale` | `scale` của FFmpeg (`w`, `h` với quy tắc `0` và `-n`, bilinear): `gpufx_output_size` tính kích thước từ param và input, ví dụ `scale.zip=w=1280:h=-2` |
 | `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/crossfade`, `packages/gpufx/ffmpeg/slide-transition`, `packages/gpufx/ffmpeg/circle-reveal` | Chuyển cảnh 2 input; **quy tắc** `same_size` |
 | `packages/gpufx/tqk2811/TqkLibrary.FFmpegTransition/clock-wipe` | Chuyển cảnh kim đồng hồ, tham số `bool` `reverse` |
 | `packages/gpufx/ffmpeg/blend` | 2 input, tham số `int` `mode` chọn 1 trong 40 công thức |

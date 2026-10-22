@@ -13,8 +13,8 @@ Related filters: [gpufx_upload / gpufx_download](gpufx_transfer.md), [gpufx_ai_f
 ## Syntax
 
 ```
-gpufx=graph='<zip|directory>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
-gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>][:passthrough=auto|off]
+gpufx=graph='<zip|directory>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off]
+gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off]
 ```
 
 | Form | Example | Meaning |
@@ -37,7 +37,7 @@ Paths in a graph must not contain `[`, `]`, `;` or `|`.
 | `graph` | string | none | an effect path, a `\|` chain or a labelled graph | Required: the filter fails at init without it. The number of input pads is the number of inputs of the first effect for an unlabelled chain (for a `repeat` input, `default`), else the highest pad read (labelled or bound implicitly) plus one; the number of output pads is the number of graph outputs |
 | `backend` | string | `auto` | `auto`, `vulkan` (`vk`), `dx12` (`d3d12`, `directx`), `metal` (`mtl`); not case sensitive | Testing only: `auto` follows the device of the frames. `gl` is refused; `metal` is refused unless the build has VideoToolbox support (macOS). Any other name fails when the graph is opened |
 | `shortest` | bool | `0` | `0`, `1` | `0`: only input 0 decides the end (other inputs hold their last frame, and show a blank frame before their first frame). `1`: the output ends when any input ends |
-| `out_format` | pix_fmt | none (chosen from the input) | any FFmpeg pixel format name | Forces the format of every output (the `sw_format` of GPU frames). It must be in the effect's `output.formats`, written by libgpufx and storable by the device, else configuration fails. One format for all outputs |
+| `out_format` | string | none (chosen from the input) | an FFmpeg pixel format name, or one per output pad separated by `\|` | Forces the format of the outputs (the `sw_format` of GPU frames). One name applies to every output (`out_format=rgba`); several give one per output pad in order (`out_format=yuva420p\|nv12`), an empty entry keeps that pad's default (`out_format=\|nv12`). Each must be in the `formats` of its manifest output, written by libgpufx and storable by the device, else configuration fails. Errors: `unknown pixel format 'x'`, `has 3 entries` (neither 1 nor the number of output pads) |
 | `passthrough` | int (enum) | `auto` | `auto`, `off` | While `enable=` turns the filter off: `auto` relabels the input textures as output frames without a GPU copy when that leaves the pixels unchanged and the next filter is `gpufx`, `gpufx_download` or `hwdownload`; `off` always copies |
 | `bypass` | int (enum) | `0` | `0`, `auto` | Input passed on while the filter is disabled by `enable=`: `0` the source input pad of each output, `auto` that pad until the filter has been enabled for one frame, then the last input pad. The chosen pad must have the output's size, else `EINVAL` |
 | `enable` | string (expression) | none | FFmpeg timeline expression | The generic FFmpeg timeline option (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): when it is 0 the filter takes the disabled path described under `passthrough`/`bypass`. Not the same as the inline `enable=` of an effect |
@@ -63,7 +63,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   The filter's inputs are the inputs of the first effect; only the first effect may have multiple inputs. The output
   follows the rules of the last effect. The rules of the later effects are checked as when chaining filters:
   the format is the first one in the previous effect's `output.formats` that the next effect accepts,
-  and the size is the one the previous effect writes (the first input's, or the stacked size with `output.size`). The frame stays RGBA on the GPU and is not converted to that format.
+  and the size is the one the previous effect writes (the first input's, or the size from `gpufx_output_size`). The frame stays RGBA on the GPU and is not converted to that format.
   Each effect takes its own inline parameters (`graph='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, see
   "Inline parameters" below). Spaces around `|` are ignored.
 - **GPU frames out only**, like the `*_cuda` filters: every output is a Vulkan, D3D12, D3D11 or VideoToolbox frame, so
@@ -127,7 +127,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   (`grayscale.zip|vignette.zip`) put `enable` on each effect that should switch. It is not the filter's own
   timeline option `enable=`, which stays outside the effect string. No package may declare a parameter named
   `enable`. An effect switched off copies its first input into its output texture
-  (its output has the first input's size; with `output.size` `hstack`/`vstack` it does not, and switching off fails), so the plan, the pooled textures and the bindings of the
+  (its output has the first input's size; with a `gpufx_output_size` that gives another size it does not, and switching off fails), so the plan, the pooled textures and the bindings of the
   rest of the graph stay as they are and toggling allocates nothing. Switching an effect off saves
   its shader work but not all of it: the copy is still one compute pass, and the effect keeps its
   output texture. With every effect off, the event is handled as a disabled filter (relabel when
@@ -136,7 +136,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   input; `auto` its first input until its `enable` expression has been true once, then its last input (an effect
   of one input keeps it); any other value is an error. Any input may be copied, so the plan keeps every input of
   an effect alive until the effect's last pass. An input of another size than the effect's output makes the
-  frame fail (so an effect with `output.size` `hstack`/`vstack` cannot be bypassed). With every effect off, the outputs are the input pads the chosen inputs lead to. No package may
+  frame fail (so an effect with a `gpufx_output_size` that changes the size cannot be bypassed). With every effect off, the outputs are the input pads the chosen inputs lead to. No package may
   declare a parameter named `bypass`. This is not the filter option `bypass=` (which sets the input a filter
   disabled by `enable=` passes).
   `auto` rests on the history of the frames processed: an `enable` window shorter than one frame
@@ -148,7 +148,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
 - Multiple inputs use `framesync`: the first input decides the length and frame rate (an input with a
   different fps has its frames repeated or dropped). Another input that has not started yet is a black GPU frame (opaque for formats with alpha); one that has
   ended holds its last frame (or use `shortest=1`).
-- The output takes the SAR and frame rate of the first input (in a graph, of the input pad its source comes from) and its size from `gpufx_effect_output_size` (the first input's, or the stacked size of a `hstack`/`vstack` effect); colorspace/range/alpha are the values
+- The output takes the SAR and frame rate of the first input (in a graph, of the input pad its source comes from) and its size from `gpufx_effect_output_size` (the first input's, or the size an effect's `gpufx_output_size` gives); colorspace/range/alpha are the values
   negotiated on the output link. Color-dependent side data (HDR metadata, film grain...), motion
   vectors and video enc params are dropped because the pixels have changed.
 - If an input's size or pixel format changes midstream, that is an error (`ffmpeg` rebuilds the
@@ -225,12 +225,13 @@ gpufx@fx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.
   example `hstack.zip`. The count is the number of labels the node reads (`[0][1][2]hstack.zip[out]` has 3 inputs), or the
   manifest `default` when the node names no labels (`graph=hstack.zip`). Manifest details:
   [Variable number of inputs](../../EFFECT_FORMAT.md#variable-number-of-inputs).
-- **Output `size`** (manifest, `first` / `hstack` / `vstack`, per output): by default an output has the size of the first input.
-  `hstack` / `vstack` stack the inputs side by side / on top of each other, so the output is larger than every input
-  (up to the GPU's largest texture side). Downstream effects and the filter's output link see the stacked size; the
-  frame rate and aspect ratio still come from the first input. An effect stacking inputs cannot be switched off
-  (`enable=`), because the copy would need the output size. Manifest details:
-  [Input/output rules](../../EFFECT_FORMAT.md#inputoutput-rules).
+- **Output size** (`gpufx_output_size`, an optional function in the shader of the pass that writes the output): by default an output has
+  the size of the first input. The function (it reads only `params`, `gpufx_input_count()` and `gpufx_input_size(i)`) gives another size,
+  e.g. `hstack`/`vstack` stack the inputs, `scale` resizes. The sizes are computed once, by a one-off GPU dispatch at configure, from
+  the param values then (defaults and constant inline values); 0 or above the GPU's largest texture side is an error, and a size that
+  changes later fails processing. Downstream effects and the filter's output link see that size; the frame rate and aspect ratio still
+  come from the first input. An effect whose size differs from its input cannot be switched off (`enable=`), because the copy would need
+  the output size. Manifest details: [Output size](../../EFFECT_FORMAT.md#output-size).
 - **Formats and sizes** are checked per effect where it sits, at configuration: the manifest rules of every node, with the
   size and format its producer gives it. A mismatch is an error naming the input and the rule.
 - **Checked when the filter is created:** cycles, labels read but never written, written twice or read twice,

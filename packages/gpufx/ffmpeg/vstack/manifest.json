@@ -14,8 +14,7 @@
   ],
   "output": [
     {
-      "name": "out",
-      "size": "vstack"
+      "name": "out"
     }
   ],
   "groups": [
