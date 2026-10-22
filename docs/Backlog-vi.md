@@ -463,5 +463,6 @@ Vấn đề: đưa file yuv thô không gắn `colorspace`/`range` qua `gpufx_up
   - Giữ 1–2 frame trong queue để readback không làm GPU đứng chờ.
 - **Cần chốt khi lên kế hoạch**: tính SAD trên plane gốc 8-bit để ngưỡng khớp FFmpeg hay trên RGBA sau convert; backend Vulkan + D3D12.
 - **Hướng mở rộng sau**: manifest khai output dạng số (`"stats"`) để gói tự định nghĩa thước đo cho select.
+- **Nên dùng khi nào**: chỉ khi biểu thức cần pixel (`scene`) và frame đang ở GPU, chuỗi phía sau vẫn chạy trên GPU (gpufx, encoder phần cứng). Chọn theo `n`/`t`/`pts`/`key`/`pict_type` thì dùng `select` gốc (chạy được với frame GPU, không cần filter mới). Frame đã ở CPU, hoặc đằng nào cũng `gpufx_download` ngay sau đó, thì `select` gốc cũng đủ.
 - **Vì sao**: chọn frame theo chuyển cảnh mà không phải tải frame về CPU.
 - **Ngày ghi**: 2026-10-23.
