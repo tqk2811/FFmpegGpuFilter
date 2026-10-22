@@ -229,7 +229,7 @@ initialize the graph instead of running incorrectly.
   [`LayoutConvert`](../../crates/gpufx-core/src/convert.rs#L1376) run right before the effect, alive through its passes and shared by
   the readers of the same source in the same layout; sources of the same layout are bound as they are (no pass). A
   graph output with planes not written straight into its frame (B2) reads a convert to `rgba` after every effect. The shader is generated per (from, to, deep, 16-bit planes) ([`layout_source`](../../crates/gpufx-core/src/convert.rs#L1271)):
-  planes hold the stored Y'CbCr codes (0..1) in the matrix and range of the first input frame, chroma is the mean of
+  planes hold the stored Y'CbCr codes (0..1) in the matrix and range of the first input frame (BT.601 limited range, the default of `ColorInfo`, for a graph without inputs), chroma is the mean of
   a UV texel's pixels going down and the nearest texel going up, and plane to plane converts skip RGBA.
 - **Pool keys of planes**: a pooled texture is (size, mips, plane) ([`Slot`](../../crates/gpufx-core/src/graph.rs#L324)), its format
   `plane_format`; a pass output takes one per plane under its plane key, sized by `plane_size`, while its liveness

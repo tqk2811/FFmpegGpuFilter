@@ -466,3 +466,11 @@ Vấn đề: đưa file yuv thô không gắn `colorspace`/`range` qua `gpufx_up
 - **Nên dùng khi nào**: chỉ khi biểu thức cần pixel (`scene`) và frame đang ở GPU, chuỗi phía sau vẫn chạy trên GPU (gpufx, encoder phần cứng). Chọn theo `n`/`t`/`pts`/`key`/`pict_type` thì dùng `select` gốc (chạy được với frame GPU, không cần filter mới). Frame đã ở CPU, hoặc đằng nào cũng `gpufx_download` ngay sau đó, thì `select` gốc cũng đủ.
 - **Vì sao**: chọn frame theo chuyển cảnh mà không phải tải frame về CPU.
 - **Ngày ghi**: 2026-10-23.
+
+### [Thấp] Plane dùng `r32float`/`rg32float` khi adapter không có storage `r16float`: tốn VRAM gấp đôi rgba8 với yuv420
+
+Vấn đề: [`plane_format`](../crates/gpufx-core/src/runtime.rs#L80) chọn `r16float`/`rg16float` khi adapter cho storage, không thì rơi xuống `r32float`/`rg32float`; texture yuv420 khi đó tốn 6 byte/pixel so với 4 của `rgba8unorm`. Nên làm: với plane 8 bit, cân nhắc `r8unorm`/`rg8unorm` khi adapter cho storage các format đó (đổi cả `wgsl_format` và binding `filterable`), kèm test giữ mã. Vì sao: plane là để tiết kiệm băng thông/VRAM, rơi xuống 32 bit làm ngược mục tiêu. Ghi ngày 2026-10-23.
+
+### [Thấp] Layout convert ghi uniform bằng `queue.write_buffer` ở mỗi lần encode
+
+Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423) gọi `queue.write_buffer` cho uniform (matrix/range) mỗi lần encode; nếu encode vài frame trước một lần submit thì mọi lần chạy đều thấy giá trị ghi cuối cùng (sai matrix/range khi các frame khác tag màu). Nên làm: ghi uniform một lần khi tạo/khi `ColorInfo` đổi, hoặc mỗi frame một buffer riêng. Vì sao: hợp đồng `encode_gpu` cho phép nhiều lần encode trước submit. Ghi ngày 2026-10-23.

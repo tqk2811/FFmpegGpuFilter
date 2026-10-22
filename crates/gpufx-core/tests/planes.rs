@@ -82,6 +82,12 @@ impl Packages {
             r#"{"id":"t.keyed","name":"keyed","api":1,"used_for":["gpufx"],"inputs":[{"name":"src","pixel_layout":"yuv420"}],"outputs":[{"name":"color","pixel_layout":"yuv420"},{"name":"matte","pixel_layout":"y","optional":true}],"groups":[{"passes":[{"shader":"a.wgsl","outputs":["color","matte"]}]}]}"#,
             &[("a.wgsl", wgsl(&format!("{}\n    gpufx_write1_y(p, 1.0);", copy_planes("src", "", false))))],
         );
+        // Two yuv420 inputs, the first one copied.
+        pkgs.add(
+            "pick420",
+            r#"{"id":"t.pick420","name":"pick420","api":1,"used_for":["gpufx"],"inputs":[{"name":"a","pixel_layout":"yuv420"},{"name":"b","pixel_layout":"yuv420"}],"outputs":[{"name":"out","pixel_layout":"yuv420"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
+            &[("a.wgsl", wgsl(&copy_planes("a", "", false)))],
+        );
         pkgs
     }
 
@@ -240,6 +246,38 @@ fn an_effect_with_planes_switched_off_passes_its_input() {
     g.set_node_enabled(1, true).unwrap();
     let out = run(&mut g, &src, w, h);
     assert_near(&out[0], &src, 2, Some(255), "id444 on again");
+}
+
+#[test]
+fn the_input_convert_of_an_effect_switched_off_does_not_run() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let (w, h) = (10, 6);
+    let src = blocks(w, h);
+    let mut g = pkgs.graph(&ctx, "id420.zip|id444.zip").unwrap();
+    run(&mut g, &src, w, h);
+    assert_eq!(g.layout_converts(), 3, "in, yuv420 to yuv444, out");
+    g.set_node_enabled(1, false).unwrap();
+    let out = run(&mut g, &src, w, h);
+    // Off, id444 copies yuv420 through its own convert: the one to its input has no reader.
+    assert_eq!(g.layout_converts(), 2, "in, out");
+    assert_near(&out[0], &src, 2, Some(255), "id444 off");
+}
+
+#[test]
+fn an_effect_with_planes_switched_off_rejects_an_input_of_another_size() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let (w, h) = (10, 6);
+    let (a, b) = (blocks(w, h), blocks(4, 2));
+    let mut g = pkgs.graph(&ctx, "[0][1]pick420.zip[out]").unwrap();
+    g.set_node_enabled(0, false).unwrap();
+    g.set_node_bypass(0, 1).unwrap();
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    let ins = [Image { data: &a, width: w, height: h, stride: w * 4 }, Image { data: &b, width: 4, height: 2, stride: 16 }];
+    let targets = vec![ImageMut { data: &mut out, width: w, height: h, stride: w * 4 }];
+    let err = g.process(&ins, targets, &FrameInfo::new(0.0, 0)).unwrap_err().to_string();
+    assert!(err.contains("passes its input 1") && err.contains("4x2"), "{err}");
 }
 
 // Frames loaded and written straight as planes (no RGBA in between) when the format is of

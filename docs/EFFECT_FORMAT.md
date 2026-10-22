@@ -289,7 +289,7 @@ fn gpufx_output_enabled(i: u32) -> bool   // pass output i (0 = out_tex, k = out
 
 > Frames still come in and go out as RGBA: the core converts on the GPU between the layout of a source and the layout
 > an effect input asks for (none between effects of the same layout), and an output with planes back to RGBA for the
-> frame. Planes hold the Y'CbCr codes of the matrix and range of the first input (0..1), chroma averaged going down to
+> frame. Planes hold the Y'CbCr codes of the matrix and range of the first input (0..1; BT.601 limited range for a graph without inputs, a generator), chroma averaged going down to
 > 4:2:0/4:2:2 and repeated going up. Loading and writing frame planes directly comes later. An output with planes cannot
 > feed a `mipmaps` input.
 

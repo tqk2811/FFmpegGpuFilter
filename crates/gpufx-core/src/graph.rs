@@ -169,9 +169,9 @@ pub(crate) struct FrameIo {
     off_converts: Vec<Vec<Option<OffConvert>>>,
 }
 
-/// A layout convert standing for the copy of an effect switched off, with the source
-/// textures it was made for.
-type OffConvert = (Vec<wgpu::Texture>, LayoutConvert);
+/// A layout convert standing for the copy of an effect switched off, with the source and
+/// destination textures it was made for.
+type OffConvert = ((Vec<wgpu::Texture>, Vec<wgpu::Texture>), LayoutConvert);
 
 /// The planned textures of a graph for one set of inputs.
 struct Layout {
@@ -199,6 +199,14 @@ impl FrameIo {
             Some(i) => i,
             None => effects[k].package().manifest.output_bypass(o),
         }
+    }
+
+    /// Whether layout convert `n` of the plan has a reader this frame: an effect that is on,
+    /// or a graph output. An effect switched off copies its sources, not its converts.
+    fn convert_read(&self, n: usize) -> bool {
+        let Some(plan) = self.layout.as_ref().map(|l| &l.plan) else { return true };
+        plan.output_convert.contains(&Some(n))
+            || plan.input_convert.iter().enumerate().any(|(k, ins)| self.enabled(k) && ins.contains(&Some(n)))
     }
 
     /// The input pad output `k` passes when the whole graph is bypassed.
@@ -266,16 +274,18 @@ impl FrameIo {
                 if planes {
                     // Through a layout convert, from the planes of the source to those of the
                     // output (the same values when the layouts are the same).
-                    let fresh = !matches!(&self.off_converts[k][o], Some((made, _)) if *made == srcs);
+                    // Made again when either side was bound to other textures. The sizes of
+                    // Y (or RGBA) were checked equal above, as for the RGBA copy, so the
+                    // convert reads no texel outside the source.
+                    let fresh = !matches!(&self.off_converts[k][o], Some(((s, d), _)) if *s == srcs && *d == dsts);
                     if fresh {
                         let size = (dst.width(), dst.height());
                         let c = LayoutConvert::new(&ctx.device, &ctx.conv, (from, to), &srcs, &dsts, size, self.deep, ctx.plane_f16);
-                        self.off_converts[k][o] = Some((srcs, c));
+                        self.off_converts[k][o] = Some(((srcs, dsts), c));
                         self.frame_binds += 1;
                     }
                     continue;
                 }
-                let _ = dsts;
                 let made = self.copies[k].get_or_make((src, dst), |(src, dst)| Ok::<_, Error>(ctx.mips.copy_group(&ctx.device, src, dst)));
                 let (made_group, made) = made.expect("infallible");
                 *group = Some(made_group.clone());
@@ -1187,7 +1197,7 @@ fn encode_nodes(effects: &[Effect], topo: &Topology, io: &FrameIo, info: Option<
     let Some(info) = info else { return };
     let before = |n: usize| io.layout.as_ref().and_then(|l| l.plan.converts.get(n)).and_then(|c| c.before);
     for &k in &topo.order {
-        for (_, c) in io.converts.iter().filter(|(n, _)| before(*n) == Some(k)) {
+        for (_, c) in io.converts.iter().filter(|(n, _)| before(*n) == Some(k) && io.convert_read(*n)) {
             c.encode(&ctx.queue, &io.color, cpass);
         }
         let groups = io.copy_groups.get(k).filter(|g| g.iter().any(Option::is_some));
@@ -2646,7 +2656,7 @@ impl EffectGraph {
     /// counting those standing for the copies of effects switched off. For tests.
     #[doc(hidden)]
     pub fn layout_converts(&self) -> usize {
-        self.io.converts.len()
+        self.io.converts.iter().filter(|(n, _)| self.io.convert_read(*n)).count()
     }
 
     /// How many frame conversions to or from RGBA the current frames run: input slots

@@ -246,7 +246,7 @@ tạo graph thay vì chạy sai.
   các bên đọc cùng nguồn cùng layout; nguồn cùng layout thì bind thẳng (không có pass). Output của graph có plane mà
   không ghi thẳng vào frame (B2) đọc một convert sang `rgba` sau mọi effect. Shader sinh theo (from, to, deep,
   plane 16 bit) ([`layout_source`](../../crates/gpufx-core/src/convert.rs#L1271)): plane giữ mã Y'CbCr lưu trữ (0..1) theo matrix và
-  range của frame input đầu, chroma lấy trung bình các pixel của một texel UV khi giảm và texel gần nhất khi tăng,
+  range của frame input đầu (graph không có input dùng BT.601 limited range, mặc định của `ColorInfo`), chroma lấy trung bình các pixel của một texel UV khi giảm và texel gần nhất khi tăng,
   convert plane sang plane không đi qua RGBA.
 - **Khoá pool của plane**: texture trong pool là (kích thước, mips, plane) ([`Slot`](../../crates/gpufx-core/src/graph.rs#L324)), format
   theo `plane_format`; output của pass lấy một texture mỗi plane theo plane key, kích thước theo `plane_size`, còn

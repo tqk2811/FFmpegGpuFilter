@@ -287,7 +287,7 @@ fn gpufx_output_enabled(i: u32) -> bool   // output i của pass (0 = out_tex, k
 
 > Frame vẫn vào và ra dạng RGBA: core convert trên GPU giữa layout của nguồn và layout mà input của effect yêu cầu
 > (không convert giữa các effect cùng layout), và convert output có plane về RGBA cho frame. Plane giữ mã Y'CbCr theo
-> matrix và range của input đầu (0..1), chroma lấy trung bình khi giảm xuống 4:2:0/4:2:2 và lặp lại khi tăng. Nạp và
+> matrix và range của input đầu (0..1; graph không có input, tức generator, dùng BT.601 limited range), chroma lấy trung bình khi giảm xuống 4:2:0/4:2:2 và lặp lại khi tăng. Nạp và
 > ghi plane của frame trực tiếp làm sau. Output có plane không cấp được cho input `mipmaps`.
 
 `pixel_layout` trên input, output, hoặc texture giữa các pass (`intermediates`) chọn bộ texture mà shader thấy. Đây

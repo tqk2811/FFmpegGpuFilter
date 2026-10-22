@@ -1293,28 +1293,29 @@ fn layout_source(from: PixelLayout, to: PixelLayout, deep: bool, f16: bool) -> S
     let mut store = String::new();
     for &plane in to.planes() {
         store.push_str(match plane {
-            Plane::Rgba => "    textureStore(dst_rgba, p, from_codes(load_src(p)));\n",
-            Plane::Y => "    textureStore(dst_y, p, vec4f(load_src(p).x, 0.0, 0.0, 1.0));\n",
-            Plane::A => "    textureStore(dst_a, p, vec4f(load_src(p).w, 0.0, 0.0, 1.0));\n",
-            Plane::Uv => "    store_uv(p);\n",
+            Plane::Rgba => "    textureStore(dst_rgba, p, from_codes(v));\n",
+            Plane::Y => "    textureStore(dst_y, p, vec4f(v.x, 0.0, 0.0, 1.0));\n",
+            Plane::A => "    textureStore(dst_a, p, vec4f(v.w, 0.0, 0.0, 1.0));\n",
+            Plane::Uv => "    store_uv(p, v.yz);\n",
         });
     }
     if to.planes().contains(&Plane::Uv) {
         s.push_str(
-            "// The mean chroma of the luma pixels of a UV texel, written by its first pixel.\n\
-             fn store_uv(p: vec2i) {\n    \
+            "// The mean chroma of the luma pixels of a UV texel, written by its first pixel, whose\n\
+             // chroma `c` the caller loaded already.\n\
+             fn store_uv(p: vec2i, c: vec2f) {\n    \
              let s = vec2i(lc.dst_scale);\n    \
              if (any(p % s != vec2i(0))) { return; }\n    \
-             var sum = vec2f(0.0);\n    var n = 0.0;\n    \
+             var sum = c;\n    var n = 1.0;\n    \
              for (var dy = 0; dy < s.y; dy++) {\n        for (var dx = 0; dx < s.x; dx++) {\n            \
              let q = p + vec2i(dx, dy);\n            \
-             if (all(q < vec2i(lc.size))) { sum += load_src(q).yz; n += 1.0; }\n        }\n    }\n    \
+             if ((dx != 0 || dy != 0) && all(q < vec2i(lc.size))) { sum += load_src(q).yz; n += 1.0; }\n        }\n    }\n    \
              textureStore(dst_uv, p / s, vec4f(sum / n, 0.0, 1.0));\n}\n",
         );
     }
     s.push_str(&format!(
         "@compute @workgroup_size({WORKGROUP}, {WORKGROUP})\nfn main(@builtin(global_invocation_id) id: vec3u) {{\n    \
-         if (any(id.xy >= lc.size)) {{ return; }}\n    let p = vec2i(id.xy);\n{store}}}\n"
+         if (any(id.xy >= lc.size)) {{ return; }}\n    let p = vec2i(id.xy);\n    let v = load_src(p);\n{store}}}\n"
     ));
     format!("{}{s}", include_str!("convert_layout.wgsl"))
 }
