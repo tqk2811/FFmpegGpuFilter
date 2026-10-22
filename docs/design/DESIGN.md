@@ -98,6 +98,23 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   `gpufx_output_size(out_index)` of the pass that writes the output (it reads only `params`, `gpufx_input_count()` and
   `gpufx_input_size(i)`). Computed once by a one-off GPU dispatch at configure, from the param values then; 0 or above the GPU's
   `max_texture_dimension_2d` is an error, and a later change of the size fails processing. Downstream graph nodes see the propagated size.
+  How it works, for programmers:
+  - **Finding the function**: a pass sizes its outputs when the naga module of its compiled shader has a function named exactly
+    `gpufx_output_size` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1263)), not when the text contains the name (a comment does not count). Such a pass
+    gets a second, one-thread pipeline calling it ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L540)).
+  - **Params it reads**: `params_read` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1418)) walks the naga IR of the size entry point and of every function
+    it calls (`Statement::Call`, nested blocks included, [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1456)), and records each `AccessIndex` on the `params`
+    global (group 0, binding 1) as one field read. A field is a whole param: a `vec2`/`color` param counts as one. When the access
+    cannot be resolved to a field (the block loaded whole, e.g. passed or copied as a struct, or a dynamic `Access`), every param
+    counts as read: conservative, never misses one.
+  - **When**: `Effect::output_sizes` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L711)) computes the sizes once, by a dispatch + readback, and keeps them with
+    the input sizes and the values of the params read ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L604)). It never dispatches on the noop device (it errors
+    instead, [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L748)); the C API, while the effect is still on the noop device, opens it once on its backend's device
+    to size the outputs and reuses that graph when the effect moves there ([lib.rs](../../crates/gpufx-ffi/src/lib.rs#L562), [lib.rs](../../crates/gpufx-ffi/src/lib.rs#L396)). The FFmpeg
+    filter sets its param expressions at `t=0`, `n=0` before asking ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2539)).
+  - **Per frame**: no GPU work. The values of the params read are compared on the CPU with the kept ones; one differing fails with
+    "parameter `w` sets the size of the output ... and must not change while the stream runs", even when the size would be the
+    same. Other params change freely. Other input sizes compute the sizes again (then the graph's size check fails on a change).
 - `params` are **generated automatically** by the runtime into a `params` struct in the shader, following the
   WGSL/std140 uniform alignment rules; the author just uses `params.radius`.
 - `passes` run sequentially; the output of one pass is a readable texture in the next; the last pass is the

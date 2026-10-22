@@ -202,14 +202,17 @@ Gói được biên dịch cho đúng số đó; số input pad của filter `gp
 tên input này thì đọc mọi pad của nó. `gpufx pack --precompile` chỉ biên dịch sẵn cho số `default`; số khác thì
 biên dịch shader lúc nạp graph.
 
-Shader không biết trước tên pad, nên prelude của gói có input `repeat` (hoặc có shader định nghĩa `gpufx_output_size`) khai báo thêm (trên các input của
-hiệu ứng mà pass đọc, theo thứ tự pad):
+Shader không biết trước tên pad, nên prelude khai báo thêm các helper trên input của hiệu ứng. `i` là chỉ số của input trong
+các input của hiệu ứng, theo thứ tự pad, bất kể pass bind những input nào; texture của gói không được tính:
 
 ```wgsl
-fn gpufx_input_count() -> u32                       // số input
-fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions của input i (0 khi ngoài khoảng)
-fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad của input i ở mức 0 (0 khi ngoài khoảng)
+fn gpufx_input_count() -> u32                       // số input của hiệu ứng
+fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions của input i (0 khi ngoài khoảng hoặc pass không bind)
+fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad của input i ở mức 0 (0 khi ngoài khoảng hoặc không bind); chỉ gói có input `repeat`
 ```
+
+Shader GLSL có `uint gpufx_input_count()` và `uvec2 gpufx_input_size(uint i)` cùng nghĩa. Trong `gpufx_output_size` (xem dưới)
+`gpufx_input_size(i)` trả kích thước của mọi input hiệu ứng, pass có bind hay không.
 
 Xem `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 
@@ -232,13 +235,16 @@ Quy tắc:
   có cả trong WGSL và GLSL): không đọc texture, không đọc `globals`.
 - Hàm là tuỳ chọn. Không có thì output có kích thước input đầu.
 - Kích thước được tính một lần, bằng một dispatch GPU riêng lúc cấu hình filter, từ giá trị param tại thời điểm đó:
-  giá trị mặc định và các giá trị inline hằng của graph. Biểu thức theo từng frame không được tính lúc này, param của chúng giữ giá trị mặc định.
+  giá trị mặc định, giá trị inline của graph, và biểu thức param của filter FFmpeg tính tại `t=0`, `n=0` (`w`, `h`, `a`, `sar`,
+  `dar` của input đầu), nên `w='640+0'` chạy được. Mỗi frame không chạy việc GPU nào cho kích thước.
+- Chỉ hàm tên đúng `gpufx_output_size` mới tính (comment hay tên khác có chứa chuỗi đó thì không).
 - Kích thước 0, hoặc lớn hơn cạnh texture lớn nhất của thiết bị (`max_texture_dimension_2d`, từ 8192 trở lên trên GPU desktop) là lỗi.
   `hstack` các input khác chiều cao trả về 0, nên lỗi hiện `gpufx_output_size gives 0x0`.
 - Hiệu ứng phía sau trong chain hoặc graph thấy kích thước này, và filter FFmpeg đặt kích thước đó cho output link (frame rate và aspect
   ratio vẫn lấy từ input đầu).
-- Nếu sau đó một param đổi làm kích thước đổi, việc xử lý báo lỗi nêu rõ kích thước lệch
-  (kích thước từ `gpufx_output_size` không được đổi khi stream đang chạy).
+- Các param mà hàm đọc (tìm trong shader đã biên dịch) phải giữ giá trị lúc tính kích thước: một param đổi, kể cả sang giá trị
+  cho cùng kích thước, thì việc xử lý báo lỗi nêu tên nó (`parameter `w` sets the size of the output of `scale` and must not
+  change while the stream runs`). Param khác đổi thoải mái.
 
 Ví dụ: `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl` (các input cạnh nhau) và
 `packages/gpufx/ffmpeg/scale/shaders/scale.wgsl` (kích thước từ param `w`, `h`).

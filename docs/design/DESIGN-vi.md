@@ -115,6 +115,22 @@ Tóm tắt `manifest.json`:
 - Kích thước output: mặc định bằng input đầu; shader đặt khác bằng hàm tuỳ chọn `gpufx_output_size(out_index)` của pass
   ghi output đó (chỉ đọc `params`, `gpufx_input_count()`, `gpufx_input_size(i)`). Tính một lần bằng một dispatch GPU lúc configure,
   từ giá trị param khi đó; 0 hoặc quá `max_texture_dimension_2d` của GPU là lỗi, đổi kích thước về sau thì xử lý báo lỗi. Các node graph phía sau thấy size đã lan truyền.
+  Cách làm, cho lập trình viên:
+  - **Tìm hàm**: pass có định kích thước output khi module naga của shader đã biên dịch có function tên đúng `gpufx_output_size`
+    ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1263)), không dò chuỗi trong source (comment không tính). Pass đó có thêm một pipeline một thread gọi hàm
+    ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L540)).
+  - **Param hàm đọc**: `params_read` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1418)) duyệt IR naga của entry point kích thước và mọi function nó gọi
+    (`Statement::Call`, kể cả block lồng, [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1456)), ghi mỗi `AccessIndex` trên global `params` (group 0, binding 1)
+    là đọc một field. Một field là cả một param: param `vec2`/`color` tính là một. Khi không quy được về field (đọc cả block,
+    vd truyền hoặc copy cả struct, hay `Access` chỉ số động) thì coi như đọc mọi param: an toàn, không sót.
+  - **Khi nào**: `Effect::output_sizes` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L711)) tính kích thước một lần bằng dispatch + readback, giữ lại cùng kích
+    thước input và giá trị các param đã đọc ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L604)). Không bao giờ dispatch trên noop device (báo lỗi,
+    [runtime.rs](../../crates/gpufx-core/src/runtime.rs#L748)); C API, khi effect còn trên noop device, mở nó một lần trên device của backend để tính kích thước rồi
+    dùng lại graph đó khi effect chuyển sang ([lib.rs](../../crates/gpufx-ffi/src/lib.rs#L562), [lib.rs](../../crates/gpufx-ffi/src/lib.rs#L396)). Filter FFmpeg đặt biểu thức param tại
+    `t=0`, `n=0` trước khi hỏi ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2539)).
+  - **Mỗi frame**: không có việc GPU. Giá trị các param đã đọc được so trên CPU với giá trị đã giữ; khác thì lỗi "parameter `w`
+    sets the size of the output ... and must not change while the stream runs", kể cả khi kích thước vẫn như cũ. Param khác đổi
+    thoải mái. Kích thước input khác thì tính lại (rồi bước kiểm kích thước của graph báo lỗi nếu đổi).
 - `params` được runtime **tự sinh** thành struct `params` trong shader, đúng quy tắc căn lề
   uniform của WGSL/std140; tác giả chỉ việc dùng `params.radius`.
 - `passes` chạy tuần tự; output của pass trước là texture đọc được ở pass sau; pass cuối là

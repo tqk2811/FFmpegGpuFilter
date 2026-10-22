@@ -129,6 +129,9 @@ pub struct GpufxEffect {
     /// Backend of the device the effect runs on unless given a shared one; `Some` while
     /// the effect is on the noop device it was opened on.
     pending: Option<Backend>,
+    /// While pending, the effect opened on its backend's device to size outputs whose
+    /// shaders give their size: compiled once, then taken by [`move_to`].
+    sizing: std::sync::Mutex<Option<EffectGraph>>,
     name: CString,
     device: CString,
     inputs: Vec<CString>,
@@ -343,6 +346,7 @@ fn wrap(graph: EffectGraph, spec: Spec, pending: Backend, name: String) -> *mut 
     let out = GpufxEffect {
         spec,
         pending: Some(pending),
+        sizing: Default::default(),
         name: cstring(&name),
         device: cstring(NO_DEVICE),
         inputs: strings(graph.input_names()),
@@ -389,8 +393,13 @@ unsafe fn open(spec: Spec, backend: *const c_char) -> Result<*mut GpufxEffect, S
 
 /// Opens the effect again on `ctx` with its parameter values, unless it runs there.
 fn move_to(fx: &mut GpufxEffect, ctx: &Arc<GpuContext>, device: String) -> Result<(), String> {
+    let sizing = fx.sizing.get_mut().ok().and_then(Option::take);
     if !Arc::ptr_eq(fx.graph.context(), ctx) {
-        let (mut graph, _) = open_spec(&fx.spec, ctx)?;
+        let mut graph = match sizing {
+            // Keeps the output sizes it computed: the parameters they read are checked.
+            Some(graph) if Arc::ptr_eq(graph.context(), ctx) => graph,
+            _ => open_spec(&fx.spec, ctx)?.0,
+        };
         graph.copy_params_from(&fx.graph).map_err(|e| e.to_string())?;
         fx.graph = graph;
         fx.device = cstring(&device);
@@ -548,9 +557,14 @@ pub unsafe extern "C" fn gpufx_effect_output_size(
         let (w, h) = match fx.pending {
             // A shader sizes an output: it runs on a GPU, not the noop device the effect is
             // still on. Any device gives the same sizes; the parameters are the current ones.
+            // The graph is opened there once, and its sizes computed once (see move_to).
             Some(backend) if fx.graph.has_size_functions() => {
-                let ctx = context(backend).map_err(|e| e.to_string())?;
-                let (mut graph, _) = open_spec(&fx.spec, &ctx)?;
+                let mut sizing = fx.sizing.lock().map_err(|_| "poisoned".to_string())?;
+                if sizing.is_none() {
+                    let ctx = context(backend).map_err(|e| e.to_string())?;
+                    *sizing = Some(open_spec(&fx.spec, &ctx)?.0);
+                }
+                let graph = sizing.as_mut().expect("just set");
                 graph.copy_params_from(&fx.graph).map_err(|e| e.to_string())?;
                 graph.output_size(output as usize, &pads)
             }
