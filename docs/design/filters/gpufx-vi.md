@@ -203,7 +203,7 @@ gpufx@fx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.
 - **Output pad.** Các nhãn không câu lệnh nào đọc là output của filter, theo thứ tự được ghi; không có danh sách output
   tường minh, nên nhãn viết sai hiện thành một output pad thừa mà FFmpeg báo là chưa nối. Output pad k nhận SAR và frame
   rate của input pad mà nguồn của nó đi ra.
-- **Effect có nhiều output** (manifest `output` có hơn một phần tử, ví dụ `color` và `matte`). Một effect đứng một
+- **Effect có nhiều output** (manifest `outputs` có hơn một phần tử, ví dụ `color` và `matte`). Một effect đứng một
   mình (`graph=key.zip`) có mỗi output manifest một output pad, mang tên output đó; effect một output giữ tên pad
   `default`. Trong graph, các label sau một effect đặt tên output của nó từ output đầu: `[0]key.zip[c][m]`. Trong
   chain (`a.zip|b.zip`), output đầu tiên chưa có label đi vào effect kế tiếp, như `split[a],scale` của FFmpeg:

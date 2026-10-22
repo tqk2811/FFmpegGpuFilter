@@ -32,17 +32,17 @@
         {
           "shader": "shaders/bright.wgsl",
           "inputs": ["first", "second"],
-          "output": ["bright"]
+          "outputs": ["bright"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": ["bright"],
-          "output": ["glow_h"]
+          "outputs": ["glow_h"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "inputs": ["glow_h"],
-          "output": ["glow"]
+          "outputs": ["glow"]
         },
         {
           "shader": "shaders/finish.wgsl",

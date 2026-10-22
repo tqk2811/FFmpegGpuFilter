@@ -35,21 +35,21 @@
             "first",
             "second"
           ],
-          "output": ["spun"]
+          "outputs": ["spun"]
         },
         {
           "shader": "shaders/prism.wgsl",
           "inputs": [
             "spun"
           ],
-          "output": ["prismed"]
+          "outputs": ["prismed"]
         },
         {
           "shader": "shaders/blur_x.wgsl",
           "inputs": [
             "prismed"
           ],
-          "output": ["blur_x"]
+          "outputs": ["blur_x"]
         },
         {
           "shader": "shaders/final.wgsl",

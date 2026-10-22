@@ -34,14 +34,14 @@
           "inputs": [
             "first"
           ],
-          "output": ["spun"]
+          "outputs": ["spun"]
         },
         {
           "shader": "shaders/zoom-blur.wgsl",
           "inputs": [
             "second"
           ],
-          "output": ["zoomed"]
+          "outputs": ["zoomed"]
         },
         {
           "shader": "shaders/composite.wgsl",

@@ -14,7 +14,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/median.wgsl", "inputs": ["src"], "output": ["out"] }
+        { "shader": "shaders/median.wgsl", "inputs": ["src"], "outputs": ["out"] }
       ]
     }
   ]

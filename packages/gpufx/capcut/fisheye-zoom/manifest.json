@@ -32,7 +32,7 @@
         {
           "shader": "shaders/lens.wgsl",
           "inputs": ["first"],
-          "output": ["disc"]
+          "outputs": ["disc"]
         },
         {
           "shader": "shaders/zoom.wgsl",

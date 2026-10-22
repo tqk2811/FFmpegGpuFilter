@@ -35,14 +35,14 @@
             "first",
             "second"
           ],
-          "output": ["zoomed"]
+          "outputs": ["zoomed"]
         },
         {
           "shader": "shaders/warp.wgsl",
           "inputs": [
             "zoomed"
           ],
-          "output": ["warped"]
+          "outputs": ["warped"]
         },
         {
           "shader": "shaders/shake.wgsl",

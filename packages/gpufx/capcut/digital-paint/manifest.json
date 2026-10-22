@@ -32,32 +32,32 @@
         {
           "shader": "shaders/hl-first.wgsl",
           "inputs": ["first"],
-          "output": ["lit_a"]
+          "outputs": ["lit_a"]
         },
         {
           "shader": "shaders/blur-h-first.wgsl",
           "inputs": ["lit_a"],
-          "output": ["blur_a"]
+          "outputs": ["blur_a"]
         },
         {
           "shader": "shaders/blur-v-first.wgsl",
           "inputs": ["blur_a"],
-          "output": ["glow_a"]
+          "outputs": ["glow_a"]
         },
         {
           "shader": "shaders/hl-second.wgsl",
           "inputs": ["second"],
-          "output": ["lit_b"]
+          "outputs": ["lit_b"]
         },
         {
           "shader": "shaders/blur-h-second.wgsl",
           "inputs": ["lit_b"],
-          "output": ["blur_b"]
+          "outputs": ["blur_b"]
         },
         {
           "shader": "shaders/blur-v-second.wgsl",
           "inputs": ["blur_b"],
-          "output": ["glow_b"]
+          "outputs": ["glow_b"]
         },
         {
           "shader": "shaders/composite.wgsl",

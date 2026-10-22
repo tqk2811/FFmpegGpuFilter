@@ -32,22 +32,22 @@
         {
           "shader": "shaders/sparkle.wgsl",
           "inputs": ["first", "second"],
-          "output": ["lit"]
+          "outputs": ["lit"]
         },
         {
           "shader": "shaders/blur-v.wgsl",
           "inputs": ["lit"],
-          "output": ["soft_v"]
+          "outputs": ["soft_v"]
         },
         {
           "shader": "shaders/blur-h.wgsl",
           "inputs": ["soft_v"],
-          "output": ["soft"]
+          "outputs": ["soft"]
         },
         {
           "shader": "shaders/bokeh.wgsl",
           "inputs": ["soft"],
-          "output": ["bokeh"]
+          "outputs": ["bokeh"]
         },
         {
           "shader": "shaders/finish.wgsl",

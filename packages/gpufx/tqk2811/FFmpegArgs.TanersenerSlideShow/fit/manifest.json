@@ -53,7 +53,7 @@
           "inputs": [
             "src"
           ],
-          "output": ["blurred_h"]
+          "outputs": ["blurred_h"]
         },
         {
           "shader": "shaders/fit.wgsl",

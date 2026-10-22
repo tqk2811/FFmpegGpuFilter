@@ -32,7 +32,7 @@
         {
           "shader": "shaders/fade.wgsl",
           "inputs": ["first", "second"],
-          "output": ["mixed"]
+          "outputs": ["mixed"]
         },
         {
           "shader": "shaders/tv.wgsl",

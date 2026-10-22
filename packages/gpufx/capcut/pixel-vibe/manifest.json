@@ -43,14 +43,14 @@
             "first",
             "second"
           ],
-          "output": ["lit"]
+          "outputs": ["lit"]
         },
         {
           "shader": "shaders/zoom.wgsl",
           "inputs": [
             "lit"
           ],
-          "output": ["zoomed"]
+          "outputs": ["zoomed"]
         },
         {
           "shader": "shaders/shake.wgsl",

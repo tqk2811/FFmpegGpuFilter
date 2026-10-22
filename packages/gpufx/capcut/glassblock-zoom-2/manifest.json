@@ -32,12 +32,12 @@
         {
           "shader": "shaders/fringe.wgsl",
           "inputs": ["first", "second"],
-          "output": ["fringed"]
+          "outputs": ["fringed"]
         },
         {
           "shader": "shaders/zoom.wgsl",
           "inputs": ["fringed"],
-          "output": ["zoomed"]
+          "outputs": ["zoomed"]
         },
         {
           "shader": "shaders/panes.wgsl",

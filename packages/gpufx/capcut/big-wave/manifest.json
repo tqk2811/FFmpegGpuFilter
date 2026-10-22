@@ -35,35 +35,35 @@
             "first",
             "second"
           ],
-          "output": ["bent"]
+          "outputs": ["bent"]
         },
         {
           "shader": "shaders/zoom.wgsl",
           "inputs": [
             "bent"
           ],
-          "output": ["zoomed"]
+          "outputs": ["zoomed"]
         },
         {
           "shader": "shaders/wave.wgsl",
           "inputs": [
             "zoomed"
           ],
-          "output": ["waved"]
+          "outputs": ["waved"]
         },
         {
           "shader": "shaders/prism.wgsl",
           "inputs": [
             "waved"
           ],
-          "output": ["prismed"]
+          "outputs": ["prismed"]
         },
         {
           "shader": "shaders/glow.wgsl",
           "inputs": [
             "prismed"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/final.wgsl",

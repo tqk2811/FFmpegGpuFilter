@@ -206,7 +206,7 @@ gpufx@fx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.
 - **Output pads.** The labels no statement reads are the filter's outputs, in the order written; there is no explicit
   output list, so a misspelled label shows up as an extra output pad that FFmpeg reports as unconnected. Output pad k takes
   the SAR and frame rate of the input pad its source comes from.
-- **Effects with several outputs** (manifest `output` with more than one element, e.g. `color` and `matte`). One
+- **Effects with several outputs** (manifest `outputs` with more than one element, e.g. `color` and `matte`). One
   effect alone (`graph=key.zip`) has one output pad per manifest output, named after it; an effect with one output
   keeps the pad name `default`. In a graph the labels after an effect name its outputs from the first:
   `[0]key.zip[c][m]`. Inside a chain (`a.zip|b.zip`) the first output without a label goes on to the next effect, as

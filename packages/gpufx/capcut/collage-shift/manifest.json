@@ -34,14 +34,14 @@
           "inputs": [
             "first"
           ],
-          "output": ["strip_top"]
+          "outputs": ["strip_top"]
         },
         {
           "shader": "shaders/strip-bottom.wgsl",
           "inputs": [
             "first"
           ],
-          "output": ["strip_bottom"]
+          "outputs": ["strip_bottom"]
         },
         {
           "shader": "shaders/compose.wgsl",

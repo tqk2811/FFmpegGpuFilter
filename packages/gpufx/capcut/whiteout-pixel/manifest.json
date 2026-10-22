@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": ["dots"]
+          "outputs": ["dots"]
         },
         {
           "shader": "shaders/composite.wgsl",
@@ -44,7 +44,7 @@
             "second",
             "dots"
           ],
-          "output": ["out"]
+          "outputs": ["out"]
         }
       ]
     }

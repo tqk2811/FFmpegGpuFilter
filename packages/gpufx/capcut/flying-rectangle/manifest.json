@@ -34,56 +34,56 @@
           "inputs": [
             "second"
           ],
-          "output": ["soft"]
+          "outputs": ["soft"]
         },
         {
           "shader": "shaders/box-x.wgsl",
           "inputs": [
             "soft"
           ],
-          "output": ["soft_x"]
+          "outputs": ["soft_x"]
         },
         {
           "shader": "shaders/box-y.wgsl",
           "inputs": [
             "soft_x"
           ],
-          "output": ["soft"]
+          "outputs": ["soft"]
         },
         {
           "shader": "shaders/box-x.wgsl",
           "inputs": [
             "soft"
           ],
-          "output": ["soft_x"]
+          "outputs": ["soft_x"]
         },
         {
           "shader": "shaders/box-y.wgsl",
           "inputs": [
             "soft_x"
           ],
-          "output": ["soft"]
+          "outputs": ["soft"]
         },
         {
           "shader": "shaders/box-x.wgsl",
           "inputs": [
             "soft"
           ],
-          "output": ["soft_x"]
+          "outputs": ["soft_x"]
         },
         {
           "shader": "shaders/box-y.wgsl",
           "inputs": [
             "soft_x"
           ],
-          "output": ["soft"]
+          "outputs": ["soft"]
         },
         {
           "shader": "shaders/glow-lift.wgsl",
           "inputs": [
             "soft"
           ],
-          "output": ["glow_a"]
+          "outputs": ["glow_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -91,7 +91,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-a.wgsl",
@@ -100,7 +100,7 @@
             "glow_x",
             "glow_a"
           ],
-          "output": ["glow_b"]
+          "outputs": ["glow_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -108,7 +108,7 @@
           "inputs": [
             "glow_b"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-b.wgsl",
@@ -117,7 +117,7 @@
             "glow_x",
             "glow_b"
           ],
-          "output": ["glow_a"]
+          "outputs": ["glow_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -125,7 +125,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-a.wgsl",
@@ -134,7 +134,7 @@
             "glow_x",
             "glow_a"
           ],
-          "output": ["glow_b"]
+          "outputs": ["glow_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -142,7 +142,7 @@
           "inputs": [
             "glow_b"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-b.wgsl",
@@ -151,7 +151,7 @@
             "glow_x",
             "glow_b"
           ],
-          "output": ["glow_a"]
+          "outputs": ["glow_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -159,7 +159,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-a.wgsl",
@@ -168,7 +168,7 @@
             "glow_x",
             "glow_a"
           ],
-          "output": ["glow_b"]
+          "outputs": ["glow_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -176,7 +176,7 @@
           "inputs": [
             "glow_b"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-b.wgsl",
@@ -185,7 +185,7 @@
             "glow_x",
             "glow_b"
           ],
-          "output": ["glow_a"]
+          "outputs": ["glow_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -193,7 +193,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": ["glow_x"]
+          "outputs": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y-a.wgsl",
@@ -202,7 +202,7 @@
             "glow_x",
             "glow_a"
           ],
-          "output": ["glow_b"]
+          "outputs": ["glow_b"]
         },
         {
           "shader": "shaders/final.wgsl",

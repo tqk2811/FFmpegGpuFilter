@@ -14,9 +14,9 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/blur.wgsl", "inputs": ["src"], "output": ["tmp"] },
-        { "shader": "shaders/nms.wgsl", "inputs": ["tmp"], "output": ["tmp2"] },
-        { "shader": "shaders/threshold.wgsl", "inputs": ["tmp2", "src"], "output": ["out"] }
+        { "shader": "shaders/blur.wgsl", "inputs": ["src"], "outputs": ["tmp"] },
+        { "shader": "shaders/nms.wgsl", "inputs": ["tmp"], "outputs": ["tmp2"] },
+        { "shader": "shaders/threshold.wgsl", "inputs": ["tmp2", "src"], "outputs": ["out"] }
       ]
     }
   ]

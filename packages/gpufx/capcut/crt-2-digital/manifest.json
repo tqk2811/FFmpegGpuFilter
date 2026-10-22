@@ -34,21 +34,21 @@
           "inputs": [
             "first"
           ],
-          "output": ["signal"]
+          "outputs": ["signal"]
         },
         {
           "shader": "shaders/smear.wgsl",
           "inputs": [
             "signal"
           ],
-          "output": ["smeared"]
+          "outputs": ["smeared"]
         },
         {
           "shader": "shaders/glow.wgsl",
           "inputs": [
             "smeared"
           ],
-          "output": ["glowed"]
+          "outputs": ["glowed"]
         },
         {
           "shader": "shaders/finish.wgsl",

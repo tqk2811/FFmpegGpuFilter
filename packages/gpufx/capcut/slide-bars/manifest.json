@@ -40,7 +40,7 @@
         {
           "shader": "shaders/bars.wgsl",
           "inputs": ["first", "second"],
-          "output": ["stack"]
+          "outputs": ["stack"]
         },
         {
           "shader": "shaders/shake.wgsl",

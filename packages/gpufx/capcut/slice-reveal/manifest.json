@@ -34,14 +34,14 @@
           "inputs": [
             "first"
           ],
-          "output": ["left"]
+          "outputs": ["left"]
         },
         {
           "shader": "shaders/slice-right.wgsl",
           "inputs": [
             "first"
           ],
-          "output": ["right"]
+          "outputs": ["right"]
         },
         {
           "shader": "shaders/shadow.wgsl",
@@ -49,7 +49,7 @@
             "left",
             "right"
           ],
-          "output": ["shade_x"]
+          "outputs": ["shade_x"]
         },
         {
           "shader": "shaders/final.wgsl",

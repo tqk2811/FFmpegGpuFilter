@@ -46,7 +46,7 @@
         {
           "shader": "shaders/ripple.wgsl",
           "inputs": ["first", "second"],
-          "output": ["rippled"]
+          "outputs": ["rippled"]
         },
         {
           "shader": "shaders/shake.wgsl",

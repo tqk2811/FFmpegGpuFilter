@@ -43,14 +43,14 @@
             "first",
             "second"
           ],
-          "output": ["graded"]
+          "outputs": ["graded"]
         },
         {
           "shader": "shaders/smear.wgsl",
           "inputs": [
             "graded"
           ],
-          "output": ["smeared"]
+          "outputs": ["smeared"]
         },
         {
           "shader": "shaders/signal.wgsl",

@@ -34,14 +34,14 @@
           "inputs": [
             "first"
           ],
-          "output": ["card_first"]
+          "outputs": ["card_first"]
         },
         {
           "shader": "shaders/card-second.wgsl",
           "inputs": [
             "second"
           ],
-          "output": ["card_second"]
+          "outputs": ["card_second"]
         },
         {
           "shader": "shaders/screen-switch.wgsl",

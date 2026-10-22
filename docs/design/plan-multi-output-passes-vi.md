@@ -7,7 +7,7 @@ Ngày ghi: 2026-10-22. Branch làm việc: tạo mới từ `master`, ví dụ `
 Một pass trong `manifest.json` ghi được nhiều texture trong cùng một dispatch:
 
 ```json
-{ "shader": "split.wgsl", "inputs": ["src"], "output": ["base", "detail"] }
+{ "shader": "split.wgsl", "inputs": ["src"], "outputs": ["base", "detail"] }
 ```
 
 Các pass sau đọc `base` và `detail` qua `inputs` như output bình thường. Bỏ trống `output` vẫn là `["out"]`; dạng chuỗi `"output": "tmp"` bị từ chối.

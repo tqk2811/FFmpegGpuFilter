@@ -35,21 +35,21 @@
             "first",
             "second"
           ],
-          "output": ["composed"]
+          "outputs": ["composed"]
         },
         {
           "shader": "shaders/smear.wgsl",
           "inputs": [
             "composed"
           ],
-          "output": ["smeared"]
+          "outputs": ["smeared"]
         },
         {
           "shader": "shaders/detail.wgsl",
           "inputs": [
             "smeared"
           ],
-          "output": ["graded"]
+          "outputs": ["graded"]
         },
         {
           "shader": "shaders/contrast-split.wgsl",

@@ -34,14 +34,14 @@
           "inputs": [
             "first"
           ],
-          "output": ["dust_first"]
+          "outputs": ["dust_first"]
         },
         {
           "shader": "shaders/dust-second.wgsl",
           "inputs": [
             "second"
           ],
-          "output": ["dust_second"]
+          "outputs": ["dust_second"]
         },
         {
           "shader": "shaders/slide.wgsl",
@@ -49,21 +49,21 @@
             "dust_first",
             "dust_second"
           ],
-          "output": ["slid"]
+          "outputs": ["slid"]
         },
         {
           "shader": "shaders/lens.wgsl",
           "inputs": [
             "slid"
           ],
-          "output": ["lensed"]
+          "outputs": ["lensed"]
         },
         {
           "shader": "shaders/smooth.wgsl",
           "inputs": [
             "lensed"
           ],
-          "output": ["smoothed"]
+          "outputs": ["smoothed"]
         },
         {
           "shader": "shaders/pinch.wgsl",

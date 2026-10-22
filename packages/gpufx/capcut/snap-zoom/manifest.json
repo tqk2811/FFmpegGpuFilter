@@ -32,12 +32,12 @@
         {
           "shader": "shaders/scene.wgsl",
           "inputs": ["first", "second"],
-          "output": ["scene"]
+          "outputs": ["scene"]
         },
         {
           "shader": "shaders/trail.wgsl",
           "inputs": ["scene"],
-          "output": ["trail"]
+          "outputs": ["trail"]
         },
         {
           "shader": "shaders/finish.wgsl",

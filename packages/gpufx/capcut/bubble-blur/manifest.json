@@ -34,28 +34,28 @@
           "inputs": [
             "first"
           ],
-          "output": ["first_h"]
+          "outputs": ["first_h"]
         },
         {
           "shader": "shaders/soften-h-second.wgsl",
           "inputs": [
             "second"
           ],
-          "output": ["second_h"]
+          "outputs": ["second_h"]
         },
         {
           "shader": "shaders/soften-v-first.wgsl",
           "inputs": [
             "first_h"
           ],
-          "output": ["first_v"]
+          "outputs": ["first_v"]
         },
         {
           "shader": "shaders/soften-v-second.wgsl",
           "inputs": [
             "second_h"
           ],
-          "output": ["second_v"]
+          "outputs": ["second_v"]
         },
         {
           "shader": "shaders/bokeh.wgsl",

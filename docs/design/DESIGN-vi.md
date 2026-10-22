@@ -96,12 +96,12 @@ Tóm tắt `manifest.json`:
         {
           "shader": "shaders/blur_h.wgsl",
           "inputs": ["src"],
-          "output": ["tmp"]
+          "outputs": ["tmp"]
         },
         {
           "shader": "shaders/blur_v.wgsl",
           "inputs": ["tmp"],
-          "output": ["out"]
+          "outputs": ["out"]
         }
       ]
     }
@@ -217,7 +217,7 @@ các pass của hiệu ứng → pass chuyển đổi dựng sẵn → copy về
   số đó); input có `formats` nhận nguyên frame. Format, ma trận (FCC, SMPTE 240M, YCgCo…) và BT.2020
   constant luminance mà libgpufx không xử lý thì vẫn đổi bằng `swscale` sang `rgba` (hoặc `rgba64le`
   khi trên 8 bit) như trước. Output không bao giờ qua swscale: filter chỉ xuất frame GPU (xem "Format GPU không chuyển
-  được"). Manifest không có `output` thì được xuất mọi format này (`rgba` đứng đầu), nên encoder CPU nhận `yuv420p`
+  được"). Manifest không có `outputs` thì được xuất mọi format này (`rgba` đứng đầu), nên encoder CPU nhận `yuv420p`
   cần `hwdownload` sau `gpufx` nhưng không cần `scale`. Output đó có thể là YUV không alpha, bỏ alpha mà hiệu ứng ghi:
   hiệu ứng tạo ra alpha nên khai báo `output.formats` (khuyến nghị, code không kiểm).
 - Vị trí chroma không rõ thì là center với frame full range (JPEG/MJPEG), còn lại là left.
@@ -506,7 +506,7 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
   FFmpeg báo là chưa nối.
 - Nút là `split` (một nhãn vào, bao nhiêu nhãn ra cũng được), `null` (một vào, một ra), hoặc các gói
   nối bằng `|` như `graph=`, đọc số nhãn bằng số input của gói đầu. Hiệu ứng có thể có nhiều output
-  (mảng `output` của manifest): nhãn sau nó đặt tên output theo vị trí hoặc `[tên=nhãn]`, output đầu chưa
+  (mảng `outputs` của manifest): nhãn sau nó đặt tên output theo vị trí hoặc `[tên=nhãn]`, output đầu chưa
   có nhãn đi tiếp theo chuỗi, hiệu ứng cuối không nhãn ghi mọi output, output khác không nhãn bị bỏ cùng các
   pass chỉ phục vụ nó. Trong engine một cạnh là `Source::Node(effect, output)`; mỗi output có texture, kích
   thước, format, input bypass và frame ghi tại chỗ riêng. `split` và

@@ -32,17 +32,17 @@
         {
           "shader": "shaders/strip.wgsl",
           "inputs": ["first", "second"],
-          "output": ["strip"]
+          "outputs": ["strip"]
         },
         {
           "shader": "shaders/rank.wgsl",
           "inputs": ["strip"],
-          "output": ["ranks"]
+          "outputs": ["ranks"]
         },
         {
           "shader": "shaders/sort.wgsl",
           "inputs": ["strip", "ranks"],
-          "output": ["sorted"]
+          "outputs": ["sorted"]
         },
         {
           "shader": "shaders/finish.wgsl",

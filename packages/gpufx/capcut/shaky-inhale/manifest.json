@@ -32,12 +32,12 @@
         {
           "shader": "shaders/scene.wgsl",
           "inputs": ["first", "second"],
-          "output": ["streaks"]
+          "outputs": ["streaks"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": ["streaks"],
-          "output": ["glow_h"]
+          "outputs": ["glow_h"]
         },
         {
           "shader": "shaders/glow-v.wgsl",

@@ -37,7 +37,7 @@
           "inputs": [
             "first"
           ],
-          "output": ["band"]
+          "outputs": ["band"]
         },
         {
           "shader": "shaders/glow-x-first.wgsl",
@@ -45,7 +45,7 @@
           "inputs": [
             "band"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -53,7 +53,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-first.wgsl",
@@ -62,7 +62,7 @@
             "band",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -70,7 +70,7 @@
           "inputs": [
             "g_b"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -78,7 +78,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-b.wgsl",
@@ -87,7 +87,7 @@
             "g_b",
             "g_y"
           ],
-          "output": ["g_a"]
+          "outputs": ["g_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -95,7 +95,7 @@
           "inputs": [
             "g_a"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -103,7 +103,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-a.wgsl",
@@ -112,7 +112,7 @@
             "g_a",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -120,7 +120,7 @@
           "inputs": [
             "g_b"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -128,7 +128,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-b.wgsl",
@@ -137,7 +137,7 @@
             "g_b",
             "g_y"
           ],
-          "output": ["g_a"]
+          "outputs": ["g_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -145,7 +145,7 @@
           "inputs": [
             "g_a"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -153,7 +153,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-a.wgsl",
@@ -162,7 +162,7 @@
             "g_a",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -170,7 +170,7 @@
           "inputs": [
             "g_b"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -178,7 +178,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-b.wgsl",
@@ -187,7 +187,7 @@
             "g_b",
             "g_y"
           ],
-          "output": ["g_a"]
+          "outputs": ["g_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -195,7 +195,7 @@
           "inputs": [
             "g_a"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -203,7 +203,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-a.wgsl",
@@ -212,7 +212,7 @@
             "g_a",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-post.wgsl",
@@ -220,7 +220,7 @@
             "band",
             "g_b"
           ],
-          "output": ["glow_upper"]
+          "outputs": ["glow_upper"]
         },
         {
           "shader": "shaders/band.wgsl",
@@ -228,7 +228,7 @@
           "inputs": [
             "first"
           ],
-          "output": ["band"]
+          "outputs": ["band"]
         },
         {
           "shader": "shaders/glow-x-first.wgsl",
@@ -236,7 +236,7 @@
           "inputs": [
             "band"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -244,7 +244,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-first.wgsl",
@@ -253,7 +253,7 @@
             "band",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -261,7 +261,7 @@
           "inputs": [
             "g_b"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -269,7 +269,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-b.wgsl",
@@ -278,7 +278,7 @@
             "g_b",
             "g_y"
           ],
-          "output": ["g_a"]
+          "outputs": ["g_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -286,7 +286,7 @@
           "inputs": [
             "g_a"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -294,7 +294,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-a.wgsl",
@@ -303,7 +303,7 @@
             "g_a",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -311,7 +311,7 @@
           "inputs": [
             "g_b"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -319,7 +319,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-b.wgsl",
@@ -328,7 +328,7 @@
             "g_b",
             "g_y"
           ],
-          "output": ["g_a"]
+          "outputs": ["g_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -336,7 +336,7 @@
           "inputs": [
             "g_a"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -344,7 +344,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-a.wgsl",
@@ -353,7 +353,7 @@
             "g_a",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-x-b.wgsl",
@@ -361,7 +361,7 @@
           "inputs": [
             "g_b"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -369,7 +369,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-b.wgsl",
@@ -378,7 +378,7 @@
             "g_b",
             "g_y"
           ],
-          "output": ["g_a"]
+          "outputs": ["g_a"]
         },
         {
           "shader": "shaders/glow-x-a.wgsl",
@@ -386,7 +386,7 @@
           "inputs": [
             "g_a"
           ],
-          "output": ["g_x"]
+          "outputs": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -394,7 +394,7 @@
           "inputs": [
             "g_x"
           ],
-          "output": ["g_y"]
+          "outputs": ["g_y"]
         },
         {
           "shader": "shaders/glow-comp-a.wgsl",
@@ -403,7 +403,7 @@
             "g_a",
             "g_y"
           ],
-          "output": ["g_b"]
+          "outputs": ["g_b"]
         },
         {
           "shader": "shaders/glow-post.wgsl",
@@ -411,7 +411,7 @@
             "band",
             "g_b"
           ],
-          "output": ["glow_lower"]
+          "outputs": ["glow_lower"]
         },
         {
           "shader": "shaders/finish.wgsl",
