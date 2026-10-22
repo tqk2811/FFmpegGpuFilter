@@ -497,7 +497,11 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
   (several are allowed; the pad names are the labels). There is no explicit output list: a misspelled
   label shows up as an extra output pad, which FFmpeg reports as unconnected.
 - A node is `split` (one label in, any number out), `null` (one in, one out), or packages chained with
-  `|` as in `graph=`, which take as many labels as the first package has inputs and write one.
+  `|` as in `graph=`, which take as many labels as the first package has inputs. An effect may have several
+  outputs (manifest `output` array): labels after it name them by position or as `[name=label]`, the first
+  unlabelled one goes on along the chain, a last effect without labels writes all of them, other unlabelled
+  outputs are dropped with the passes only they need. In the engine an edge is `Source::Node(effect, output)`;
+  each output has its own texture, size, formats, bypass input and in-place frame.
   `split` and `null` cost nothing: their outputs *are* their input (two edges reading one texture).
 - An effect writes the size of its first input (the stacked size with `output.size` `hstack`/`vstack`, propagated to
   downstream nodes); output pad k takes the SAR and frame rate of the

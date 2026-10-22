@@ -800,7 +800,7 @@ unsafe fn outs_arg<'a>(outs: *const GpufxFrameOut, nb_outputs: u32) -> Result<Ve
 fn single(fx: &GpufxEffect) -> Result<(), String> {
     match fx.graph.output_count() {
         1 => Ok(()),
-        n => Err(format!("the graph has {n} outputs; use gpufx_effect_process_graph()")),
+        n => Err(format!("the effect or graph has {n} outputs; use gpufx_effect_process_graph()")),
     }
 }
 
@@ -1717,6 +1717,65 @@ mod tests {
         let bad = CString::new("[0]split[a]; [a]nothing.zip[b]").unwrap();
         assert!(unsafe { gpufx_effect_open_graph(bad.as_ptr(), ptr::null()) }.is_null());
         assert!(name(gpufx_last_error()).contains("nothing.zip"), "{}", name(gpufx_last_error()));
+    }
+
+    #[test]
+    fn an_effect_has_one_output_pad_per_manifest_output() {
+        let _serial = serial();
+        if GpuContext::new(Backend::Auto).is_err() {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        }
+        let pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx/ffmpeg/luma-matte");
+        let text = CString::new(format!("{}=threshold=0.5&tolerance=0.5", pkg.display())).unwrap();
+        let fx = unsafe { gpufx_effect_open_graph(text.as_ptr(), ptr::null()) };
+        assert!(!fx.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        let name = |s: *const c_char| unsafe { CStr::from_ptr(s) }.to_str().unwrap().to_string();
+        let formats = |k: u32| {
+            (0..unsafe { gpufx_effect_output_pad_format_count(fx, k) })
+                .map(|i| name(unsafe { gpufx_effect_output_pad_format(fx, k, i) }))
+                .collect::<Vec<_>>()
+        };
+        unsafe {
+            assert_eq!(gpufx_effect_output_count(fx), 2);
+            assert_eq!((name(gpufx_effect_output_name(fx, 0)), name(gpufx_effect_output_name(fx, 1))), ("color".into(), "matte".into()));
+            assert_eq!(formats(0), ["rgba", "yuva420p", "yuva444p"]);
+            assert_eq!(formats(1), ["yuv420p", "nv12", "rgba"]);
+            assert_eq!((gpufx_effect_output_source(fx, 0), gpufx_effect_output_source(fx, 1)), (0, 0));
+            let streams = [GpufxStreamInfo { format: c"rgba".as_ptr(), width: 6, height: 5 }];
+            let (mut w, mut h) = (0, 0);
+            assert_eq!(gpufx_effect_output_size(fx, 1, streams.as_ptr(), 1, &mut w, &mut h), 0);
+            assert_eq!((w, h), (6, 5));
+        }
+        // Every pixel is in the keyed range (0 to 1): the color is transparent, the matte black.
+        let src = [200u8; 4 * 4 * 4];
+        let (mut color, mut matte) = ([1u8; 64], [1u8; 64]);
+        let input = GpufxFrame {
+            format: c"rgba".as_ptr(),
+            width: 4,
+            height: 4,
+            data: [src.as_ptr(), ptr::null(), ptr::null(), ptr::null()],
+            stride: [16, 0, 0, 0],
+            color: GpufxColor { matrix: 0, range: 1, chroma_location: 0, flags: 0 },
+        };
+        let out = |data: &mut [u8; 64]| GpufxFrameOut {
+            format: c"rgba".as_ptr(),
+            width: 4,
+            height: 4,
+            data: [data.as_mut_ptr(), ptr::null_mut(), ptr::null_mut(), ptr::null_mut()],
+            stride: [16, 0, 0, 0],
+            color: input.color,
+        };
+        let outs = [out(&mut color), out(&mut matte)];
+        let info = GpufxFrameInfo { time: 0.0, frame: 0, pixel_aspect: 1.0 };
+        assert_eq!(unsafe { gpufx_effect_process_graph(fx, &input, 1, outs.as_ptr(), 2, &info) }, 0, "{:?}", unsafe {
+            CStr::from_ptr(gpufx_last_error())
+        });
+        assert_eq!((color[0], color[3]), (200, 0));
+        assert_eq!(&matte[..4], [0, 0, 0, 255]);
+        assert!(unsafe { gpufx_effect_process_frames(fx, &input, 1, &outs[0], &info) } < 0);
+        assert!(name(gpufx_last_error()).contains("has 2 outputs; use gpufx_effect_process_graph()"), "{}", name(gpufx_last_error()));
+        unsafe { gpufx_effect_free(fx) };
     }
 
     #[test]

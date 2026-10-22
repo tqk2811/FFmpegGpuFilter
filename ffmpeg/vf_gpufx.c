@@ -13,7 +13,8 @@
  * uploaded by the filter on the device of its GPU inputs, or on -filter_hw_device.
  * graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip[out]' runs a whole effect graph in
  * one GPU submission, with one input pad per [N] and one output pad per label that no
- * statement reads.
+ * statement reads. An effect with several outputs (manifest "output" array, e.g. color
+ * and matte) alone or at the end of a chain has one output pad per output, named after it.
  * Vulkan frames with one image per plane (hwupload on a device opened with
  * disable_multiplane=1) are processed in place on FFmpeg's own Vulkan device, without a
  * trip through RAM: libgpufx shares the device and reads and writes the VkImages,
@@ -2511,7 +2512,8 @@ static int config_output(AVFilterLink *outlink)
  * framesync only looks at the first output: it requests input frames only when that
  * output wants one, stops the inputs when it is closed and ends only that one. Request
  * frames for the other outputs too, close them with output 0, and keep running while
- * output 0 is open even when others are closed (their frames are dropped).
+ * output 0 is open even when others are closed (their frames are dropped: the effect
+ * still computes them, which wastes GPU time but stays correct).
  */
 static int activate(AVFilterContext *ctx)
 {
@@ -2573,7 +2575,7 @@ AVFILTER_DEFINE_CLASS(gpufx);
 
 const FFFilter ff_vf_gpufx = {
     .p.name          = "gpufx",
-    .p.description   = NULL_IF_CONFIG_SMALL("Apply a GPU effect package (manifest + WGSL shaders)."),
+    .p.description   = NULL_IF_CONFIG_SMALL("Apply GPU effect packages (manifest + WGSL shaders), with any number of inputs and outputs."),
     .p.priv_class    = &gpufx_class,
     /* HWDEVICE: ffmpeg gives the filter -filter_hw_device, which software inputs go up to. */
     .p.flags         = AVFILTER_FLAG_DYNAMIC_INPUTS | AVFILTER_FLAG_DYNAMIC_OUTPUTS |

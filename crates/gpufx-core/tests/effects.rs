@@ -70,13 +70,18 @@ fn every_example_compiles_and_runs() {
     let (w, h) = (67, 41); // not a multiple of the workgroup size on purpose
     let src = gradient(w, h);
     for dir in example_dirs() {
-        let mut fx = Effect::new(ctx.clone(), Package::open(&dir).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+        let fx = Effect::new(ctx.clone(), Package::open(&dir).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
         let inputs = vec![Image { data: &src, width: w, height: h, stride: w * 4 }; fx.input_count()];
-        // Stacking effects write a larger frame than their inputs.
-        let (ow, oh) = fx.package().manifest.output_size(0, &vec![(w, h); fx.input_count()]).unwrap();
-        let mut out = vec![0u8; (ow * oh * 4) as usize];
-        fx.process(&inputs, target(&mut out, ow, oh, ow * 4), &FrameInfo::new(0.5, 3)).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-        assert!(out.chunks(4).any(|p| p != [0, 0, 0, 0]), "{} produced an empty frame", dir.display());
+        // Every output, in a chain of one effect; stacking effects write a larger frame than their inputs.
+        let mut g = common::chain(vec![("fx".into(), fx)]).unwrap();
+        let pads = vec![(w, h); g.input_count()];
+        let sizes: Vec<(u32, u32)> = (0..g.output_count()).map(|k| g.output_size(k, &pads).unwrap()).collect();
+        let mut outs: Vec<Vec<u8>> = sizes.iter().map(|&(ow, oh)| vec![0u8; (ow * oh * 4) as usize]).collect();
+        let targets = outs.iter_mut().zip(&sizes).map(|(o, &(ow, oh))| target(o, ow, oh, ow * 4)).collect();
+        g.process(&inputs, targets, &FrameInfo::new(0.5, 3)).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+        for out in &outs {
+            assert!(out.chunks(4).any(|p| p != [0, 0, 0, 0]), "{} produced an empty frame", dir.display());
+        }
     }
 }
 
