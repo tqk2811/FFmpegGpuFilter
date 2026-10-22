@@ -46,7 +46,7 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
 
 | Mục | Giá trị |
 |-----|---------|
-| Tên pad | Do libgpufx đặt (`gpufx_effect_input_name`, `gpufx_effect_output_name`) |
+| Tên pad | Do libgpufx đặt (`gpufx_effect_input_name`, `gpufx_effect_output_name`): một effect hoặc chain lấy tên input của manifest, và `default` khi có một output, tên output của manifest khi có nhiều; graph có label lấy `in0`... và các label output |
 | Lệnh runtime (`process_command`, `sendcmd`, zmq) | Chỉ có `params`; lệnh khác trả `ENOSYS` (lệnh timeline chung `enable` do FFmpeg tự xử lý) |
 | Tham số của `params` | Cặp `node.name=value` phân tách bằng `\|`; thêm `node.enable=<expr>` và `node.bypass=0\|auto`, hoặc `enable`/`bypass` trần (xem [Lệnh runtime `params`](#lệnh-runtime-params)) |
 | Frame output | Chỉ GPU frame (Vulkan, D3D12, D3D11, VideoToolbox) |
@@ -203,11 +203,26 @@ gpufx@fx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.
 - **Output pad.** Các nhãn không câu lệnh nào đọc là output của filter, theo thứ tự được ghi; không có danh sách output
   tường minh, nên nhãn viết sai hiện thành một output pad thừa mà FFmpeg báo là chưa nối. Output pad k nhận SAR và frame
   rate của input pad mà nguồn của nó đi ra.
+- **Effect có nhiều output** (manifest `output` có hơn một phần tử, ví dụ `color` và `matte`). Một effect đứng một
+  mình (`graph=key.zip`) có mỗi output manifest một output pad, mang tên output đó; effect một output giữ tên pad
+  `default`. Trong graph, các label sau một effect đặt tên output của nó từ output đầu: `[0]key.zip[c][m]`. Trong
+  chain (`a.zip|b.zip`), output đầu tiên chưa có label đi vào effect kế tiếp, như `split[a],scale` của FFmpeg:
+  `[0]key.zip[matte=m]|blur.zip[out]` làm mờ ảnh màu và ghi matte vào `[m]`. Câu lệnh mà effect cuối không có label
+  thì mọi output của effect đó thành output của graph. Output khác không có label thì **bị bỏ** (khác FFmpeg, FFmpeg
+  báo lỗi pad chưa nối): không cấp texture, pass chỉ phục vụ nó không chạy. Vì vậy ghi ít label hơn số output là hợp
+  lệ, ghi nhiều hơn là lỗi. Lỗi: `every output has a label, so none goes on to `b``,
+  `` `key` writes 2 outputs (color, matte), got 3 labels``.
+- **Label theo tên** (chỉ gpufx có): `[tên=label]` gán label cho output, hoặc lấy label cho input, có tên đó trong
+  manifest: `[0]key.zip[matte=m][color=c]`, `[bg=1][src=0]mix.zip[out]`. Mỗi phía của một node chỉ dùng một kiểu:
+  `[0][bg=1]x.zip` hay `x.zip[matte=m][c]` là lỗi (`use either positional labels or `[name=label]``). Tên không có,
+  tên gán hai lần, và với input thì input không có label, đều là lỗi. Input `repeat` nhận số pad theo các tên được
+  ghi, `[src0=a][src1=b]` (từ 0, không thiếu số). Label input chỉ đứng đầu câu lệnh: `a.zip|[c]b.zip` là lỗi, hãy
+  viết `[c]b.zip` thành câu lệnh riêng.
 - **Input `repeat`** (manifest `inputs[].repeat`, chỉ input cuối): một input đại diện cho số pad thay đổi, ví dụ
   `hstack.zip`. Số pad là số nhãn mà node đọc (`[0][1][2]hstack.zip[out]` có 3 input), hoặc `default` của manifest khi
   node không ghi nhãn input (`graph=hstack.zip`). Chi tiết manifest:
   [Số input thay đổi](../../EFFECT_FORMAT-vi.md#số-input-thay-đổi-được).
-- **`output.size`** (manifest, `first` / `hstack` / `vstack`): mặc định output có kích thước input đầu. `hstack` /
+- **`size` của output** (manifest, theo từng output, `first` / `hstack` / `vstack`): mặc định output có kích thước input đầu. `hstack` /
   `vstack` xếp các input cạnh nhau / chồng lên nhau, nên output lớn hơn mọi input (tối đa cạnh texture lớn nhất của GPU).
   Các effect phía sau và link output của filter thấy size đã xếp; frame rate và tỉ lệ khung vẫn lấy từ input đầu. Effect
   xếp input không tắt được (`enable=`), vì bước copy cần size output. Chi tiết manifest:

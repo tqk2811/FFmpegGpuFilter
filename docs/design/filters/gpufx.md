@@ -46,7 +46,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
 
 | Item | Value |
 |------|-------|
-| Pad names | Named by libgpufx (`gpufx_effect_input_name`, `gpufx_effect_output_name`) |
+| Pad names | Named by libgpufx (`gpufx_effect_input_name`, `gpufx_effect_output_name`): one effect or chain has the manifest input names and `default` for one output, the manifest output names for several; a labelled graph has `in0`... and its output labels |
 | Runtime commands (`process_command`, `sendcmd`, zmq) | Only `params`; any other command returns `ENOSYS` (the generic timeline command `enable` is handled by FFmpeg itself) |
 | `params` argument | `node.name=value` pairs separated by `\|`; also `node.enable=<expr>` and `node.bypass=0\|auto`, or a bare `enable`/`bypass` (see [Runtime command `params`](#runtime-command-params)) |
 | Output frames | GPU frames only (Vulkan, D3D12, D3D11, VideoToolbox) |
@@ -206,11 +206,26 @@ gpufx@fx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.
 - **Output pads.** The labels no statement reads are the filter's outputs, in the order written; there is no explicit
   output list, so a misspelled label shows up as an extra output pad that FFmpeg reports as unconnected. Output pad k takes
   the SAR and frame rate of the input pad its source comes from.
+- **Effects with several outputs** (manifest `output` with more than one element, e.g. `color` and `matte`). One
+  effect alone (`graph=key.zip`) has one output pad per manifest output, named after it; an effect with one output
+  keeps the pad name `default`. In a graph the labels after an effect name its outputs from the first:
+  `[0]key.zip[c][m]`. Inside a chain (`a.zip|b.zip`) the first output without a label goes on to the next effect, as
+  `split[a],scale` does in FFmpeg: `[0]key.zip[matte=m]|blur.zip[out]` blurs the color and writes the matte to `[m]`.
+  A statement whose last effect has no labels writes every output of it as graph outputs. Any other output without a
+  label is **dropped** (unlike FFmpeg, which refuses an unconnected pad): it gets no texture, and passes that only
+  serve it do not run. Fewer labels than outputs is therefore fine; more is an error. Errors: `every output has a
+  label, so none goes on to `b``, `` `key` writes 2 outputs (color, matte), got 3 labels``.
+- **Labels by name** (gpufx only): `[name=label]` gives the label to the output, or takes it for the input, of that
+  manifest name: `[0]key.zip[matte=m][color=c]`, `[bg=1][src=0]mix.zip[out]`. A side of a node uses one style:
+  `[0][bg=1]x.zip` or `x.zip[matte=m][c]` is an error (`use either positional labels or `[name=label]``). Unknown
+  names, a name given twice and, for inputs, an input without a label are errors. A repeated input takes the pads its
+  names give, `[src0=a][src1=b]` (from 0, no gap). Input labels only open a statement: `a.zip|[c]b.zip` is an error,
+  write `[c]b.zip` as its own statement.
 - **Input `repeat`** (manifest `inputs[].repeat`, last input only): one input stands for a variable number of pads, for
   example `hstack.zip`. The count is the number of labels the node reads (`[0][1][2]hstack.zip[out]` has 3 inputs), or the
   manifest `default` when the node names no labels (`graph=hstack.zip`). Manifest details:
   [Variable number of inputs](../../EFFECT_FORMAT.md#variable-number-of-inputs).
-- **`output.size`** (manifest, `first` / `hstack` / `vstack`): by default the output has the size of the first input.
+- **Output `size`** (manifest, `first` / `hstack` / `vstack`, per output): by default an output has the size of the first input.
   `hstack` / `vstack` stack the inputs side by side / on top of each other, so the output is larger than every input
   (up to the GPU's largest texture side). Downstream effects and the filter's output link see the stacked size; the
   frame rate and aspect ratio still come from the first input. An effect stacking inputs cannot be switched off

@@ -77,6 +77,16 @@ impl Package {
         }
     }
 
+    /// The name of the repeated input as written (`src` for pads `src0`, `src1`...), if any.
+    pub fn repeated_input(&self) -> Option<&str> {
+        self.template.as_ref().and_then(|t| t.inputs.last()).map(|i| i.name.as_str())
+    }
+
+    /// Number of inputs of the manifest as written, a repeated one counting once.
+    pub fn template_inputs(&self) -> usize {
+        self.template.as_ref().map_or(self.manifest.inputs.len(), |t| t.inputs.len())
+    }
+
     /// The manifest has a repeated input (see [`Package::with_input_count`]).
     pub fn has_repeated_input(&self) -> bool {
         self.template.is_some()

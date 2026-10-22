@@ -18,8 +18,9 @@ use crate::Error;
 pub enum Source {
     /// An input pad of the graph (`[0]`, `[1]`...).
     Input(usize),
-    /// The output of an effect, by its index in [`EffectGraph::effects`].
-    Node(usize),
+    /// Output `o` (manifest order) of effect `k`, by its index in [`EffectGraph::effects`]:
+    /// `Node(k, o)`.
+    Node(usize, usize),
 }
 
 /// The input pad the outputs of a bypassed graph pass (see [`EffectGraph::set_bypass_pad`]).
@@ -46,13 +47,13 @@ pub(crate) struct Topology {
 }
 
 impl Topology {
-    /// One effect reading every input pad.
+    /// One effect of one output reading every input pad.
     pub fn single(nb_inputs: usize) -> Self {
         Topology {
             nb_inputs,
             node_inputs: vec![(0..nb_inputs).map(Source::Input).collect()],
             order: vec![0],
-            outputs: vec![Source::Node(0)],
+            outputs: vec![Source::Node(0, 0)],
         }
     }
 
@@ -61,17 +62,24 @@ impl Topology {
     pub fn pad_of(&self, src: Source) -> usize {
         match src {
             Source::Input(i) => i,
-            Source::Node(j) => self.pad_of(self.node_inputs[j][0]),
+            Source::Node(j, _) => self.pad_of(self.node_inputs[j][0]),
         }
     }
 
-    /// The input pad output `src` passes when bypassed: an effect hands on input
-    /// `bypass[k]` (0 when not given), down to a pad.
-    pub fn bypass_pad(&self, src: Source, bypass: &[usize]) -> usize {
+    /// The input pad output `src` passes when bypassed: output `o` of effect `j` hands on
+    /// its input `bypass(j, o)`, down to a pad.
+    pub fn bypass_pad(&self, src: Source, bypass: &dyn Fn(usize, usize) -> usize) -> usize {
         match src {
             Source::Input(i) => i,
-            Source::Node(j) => self.bypass_pad(self.node_inputs[j][bypass.get(j).copied().unwrap_or(0)], bypass),
+            Source::Node(j, o) => self.bypass_pad(self.node_inputs[j][bypass(j, o)], bypass),
         }
+    }
+
+    /// Output `o` of effect `k` is read by an effect or is an output of the graph. The
+    /// others are dropped: no texture, and no pass runs only for them.
+    pub fn used(&self, k: usize, o: usize) -> bool {
+        let src = Source::Node(k, o);
+        self.outputs.contains(&src) || self.node_inputs.iter().flatten().any(|s| *s == src)
     }
 }
 
@@ -107,9 +115,10 @@ pub(crate) struct FrameIo {
     readback_size: u64,
     readback_id: Option<u64>,
     memory: MemoryStats,
-    /// Mip chains of the input pads and effect outputs an effect input wants mipmapped.
+    /// Mip chains of the input pads and effect outputs (by effect, by output) an effect
+    /// input wants mipmapped.
     input_mips: Vec<Option<MipChain>>,
-    node_mips: Vec<Option<MipChain>>,
+    node_mips: Vec<Vec<Option<MipChain>>>,
     /// What `prepare` planned for the current inputs; the textures come from the pool.
     layout: Option<Layout>,
     /// Ids of the pooled resources the bind groups were made for: the input slots and
@@ -133,16 +142,18 @@ pub(crate) struct FrameIo {
     /// bound to frames in place); those of a recent frame are reused.
     frame_binds: usize,
     /// Effects switched off (`<effect>.enable`), by index; empty when all are on. An
-    /// effect switched off copies its first input into its output texture instead of
-    /// running, so the plan and the bindings of the others stay as they are.
+    /// effect switched off copies an input into each output texture instead of running,
+    /// so the plan and the bindings of the others stay as they are.
     enabled: Vec<bool>,
-    /// The copies of the effects switched off for the frame being recorded, and those
-    /// made for recent textures (frames read or written in place change every frame).
-    copy_groups: Vec<Option<wgpu::BindGroup>>,
+    /// The copies of the effects switched off for the frame being recorded (by effect, by
+    /// output), and those made for recent textures (frames read or written in place
+    /// change every frame).
+    copy_groups: Vec<Vec<Option<wgpu::BindGroup>>>,
     copies: Vec<crate::lru::Lru<(wgpu::Texture, wgpu::Texture), wgpu::BindGroup>>,
-    /// The input each effect switched off copies (`<effect>.bypass`), by index; empty
-    /// when every one copies its first input.
-    bypass: Vec<usize>,
+    /// The input each effect switched off copies into every output (`<effect>.bypass`),
+    /// by index; `None` (or empty) when each output copies the input its manifest
+    /// `bypass` names.
+    bypass: Vec<Option<usize>>,
     /// The input pad every output passes when the whole graph is bypassed.
     bypass_pad: BypassPad,
     /// The pad each output slot is bound to in bypass, to rebind when it changes.
@@ -153,11 +164,12 @@ pub(crate) struct FrameIo {
 struct Layout {
     keys: Vec<InputKey>,
     plan: Plan,
-    sizes: Vec<(u32, u32)>,
+    /// Size of every effect output, by effect, by output.
+    sizes: Vec<Vec<(u32, u32)>>,
     pad_mips: Vec<bool>,
-    node_mips: Vec<bool>,
-    /// For each effect, the output frame its last pass writes in place, if any.
-    direct_out: Vec<Option<usize>>,
+    node_mips: Vec<Vec<bool>>,
+    /// For each output of each effect, the output frame its pass writes in place, if any.
+    direct_out: Vec<Vec<Option<usize>>>,
 }
 
 impl FrameIo {
@@ -165,27 +177,31 @@ impl FrameIo {
         self.enabled.get(k).copied().unwrap_or(true)
     }
 
-    /// The input effect `k` copies when switched off.
-    fn bypass(&self, k: usize) -> usize {
-        self.bypass.get(k).copied().unwrap_or(0)
+    /// The input output `o` of effect `k` copies when the effect is switched off: the one
+    /// `<effect>.bypass` picked, else the one its manifest `bypass` names.
+    fn bypass(&self, effects: &[Effect], k: usize, o: usize) -> usize {
+        match self.bypass.get(k).copied().flatten() {
+            Some(i) => i,
+            None => effects[k].package().manifest.output_bypass(o),
+        }
     }
 
     /// The input pad output `k` passes when the whole graph is bypassed.
-    fn out_pad(&self, topo: &Topology, k: usize) -> usize {
+    fn out_pad(&self, effects: &[Effect], topo: &Topology, k: usize) -> usize {
         match self.bypass_pad {
             BypassPad::First => topo.pad_of(topo.outputs[k]),
-            BypassPad::Nodes => topo.bypass_pad(topo.outputs[k], &self.bypass),
+            BypassPad::Nodes => topo.bypass_pad(topo.outputs[k], &|j, o| self.bypass(effects, j, o)),
             BypassPad::Pad(p) => p,
         }
     }
 
-    /// Picks the copy of every effect switched off, once the effects are bound for the
-    /// frame: from its chosen input (`bypass`) to its output texture. Effects that are on
-    /// get none. Fails when that input has another size than the output.
+    /// Picks the copies of every effect switched off, once the effects are bound for the
+    /// frame: for each output in use, from its chosen input (`bypass`) to its texture.
+    /// Effects that are on get none. Fails when that input has another size than the output.
     fn bind_copies(&mut self, effects: &[Effect], topo: &Topology) -> Result<(), Error> {
         let ctx = &effects[0].program.ctx;
         self.copy_groups.clear();
-        self.copy_groups.resize(effects.len(), None);
+        self.copy_groups.resize(effects.len(), Vec::new());
         if self.enabled.iter().all(|&on| on) {
             return Ok(());
         }
@@ -194,22 +210,34 @@ impl FrameIo {
             if self.enabled(k) {
                 continue;
             }
-            let i = self.bypass(k);
-            let src = source_texture(effects, &self.inputs, topo.node_inputs[k][i]);
-            let dst = effects[k].output().clone();
-            if (src.width(), src.height()) != (dst.width(), dst.height()) {
-                return Err(Error::Frame(format!(
-                    "effect {k} is switched off and passes its input {i}, which is {}x{} while its output is {}x{}",
-                    src.width(),
-                    src.height(),
-                    dst.width(),
-                    dst.height()
-                )));
+            let mut groups = vec![None; effects[k].output_count()];
+            for (o, group) in groups.iter_mut().enumerate() {
+                if !topo.used(k, o) {
+                    continue;
+                }
+                let i = self.bypass(effects, k, o);
+                let src = source_texture(effects, &self.inputs, topo.node_inputs[k][i]);
+                let dst = effects[k].output(o).clone();
+                if (src.width(), src.height()) != (dst.width(), dst.height()) {
+                    let what = if effects[k].output_count() == 1 {
+                        "its output".to_string()
+                    } else {
+                        format!("its output `{}`", effects[k].package().manifest.outputs[o].name)
+                    };
+                    return Err(Error::Frame(format!(
+                        "effect {k} is switched off and passes its input {i}, which is {}x{} while {what} is {}x{}",
+                        src.width(),
+                        src.height(),
+                        dst.width(),
+                        dst.height()
+                    )));
+                }
+                let made = self.copies[k].get_or_make((src, dst), |(src, dst)| Ok::<_, Error>(ctx.mips.copy_group(&ctx.device, src, dst)));
+                let (made_group, made) = made.expect("infallible");
+                *group = Some(made_group.clone());
+                self.frame_binds += made as usize;
             }
-            let made = self.copies[k].get_or_make((src, dst), |(src, dst)| Ok::<_, Error>(ctx.mips.copy_group(&ctx.device, src, dst)));
-            let (group, made) = made.expect("infallible");
-            self.copy_groups[k] = Some(group.clone());
-            self.frame_binds += made as usize;
+            self.copy_groups[k] = groups;
         }
         Ok(())
     }
@@ -230,16 +258,17 @@ impl Drop for FrameIo {
     }
 }
 
-/// Which input pads and effect outputs some effect reads through a `mipmaps` input.
-fn mip_sources(effects: &[Effect], topo: &Topology) -> (Vec<bool>, Vec<bool>) {
+/// Which input pads and effect outputs (by effect, by output) some effect reads through
+/// a `mipmaps` input.
+fn mip_sources(effects: &[Effect], topo: &Topology) -> (Vec<bool>, Vec<Vec<bool>>) {
     let mut pads = vec![false; topo.nb_inputs];
-    let mut nodes = vec![false; effects.len()];
+    let mut nodes: Vec<Vec<bool>> = effects.iter().map(|fx| vec![false; fx.output_count()]).collect();
     for (k, sources) in topo.node_inputs.iter().enumerate() {
         for (def, src) in effects[k].package().manifest.inputs.iter().zip(sources) {
             if def.mipmaps {
                 match *src {
                     Source::Input(i) => pads[i] = true,
-                    Source::Node(j) => nodes[j] = true,
+                    Source::Node(j, o) => nodes[j][o] = true,
                 }
             }
         }
@@ -264,28 +293,27 @@ impl Plan {
     }
 }
 
-/// For each effect, the output frame its last pass may write in place of a pooled
-/// texture and a copy: a straight RGBA8 output (the storage format of a pass that is not
-/// deep) that is the only use of the effect: read by no other effect, by no mip chain
-/// and by no other pass of the effect, nor written by another pass.
-fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips: &[bool]) -> Vec<Option<usize>> {
-    let mut direct = vec![None; effects.len()];
+/// For each output of each effect, the output frame its pass may write in place of a
+/// pooled texture and a copy: a straight RGBA8 output (the storage format of a pass that
+/// is not deep) that is the only use of that effect output: read by no other effect, by
+/// no mip chain and by no other pass of the effect, nor written by another pass.
+fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips: &[Vec<bool>]) -> Vec<Vec<Option<usize>>> {
+    let mut direct: Vec<Vec<Option<usize>>> = effects.iter().map(|fx| vec![None; fx.output_count()]).collect();
     for (j, (src, out)) in topo.outputs.iter().zip(outs).enumerate() {
-        let Source::Node(k) = *src else { continue };
-        if out.format != PixelFormat::Rgba || out.premultiplied || node_mips[k] {
+        let Source::Node(k, o) = *src else { continue };
+        if out.format != PixelFormat::Rgba || out.premultiplied || node_mips[k][o] {
             continue;
         }
-        if topo.outputs.iter().filter(|s| **s == Source::Node(k)).count() != 1
-            || topo.node_inputs.iter().flatten().any(|s| *s == Source::Node(k))
-        {
+        if topo.outputs.iter().filter(|s| **s == *src).count() != 1 || topo.node_inputs.iter().flatten().any(|s| s == src) {
             continue;
         }
-        // The compiled passes: their inputs are resolved (a pass without any reads the one before).
+        // The compiled passes that run: their inputs are resolved.
         let Ok(passes) = effects[k].passes(false) else { continue };
-        let name = &effects[k].package().manifest.outputs[0].name;
-        let elsewhere = passes.iter().any(|p| p.inputs.contains(name)) || passes.iter().filter(|p| p.outputs.contains(name)).count() != 1;
+        let running: Vec<&crate::runtime::Pass> = passes.iter().enumerate().filter(|(i, _)| effects[k].runs(*i)).map(|(_, p)| p).collect();
+        let name = &effects[k].package().manifest.outputs[o].name;
+        let elsewhere = running.iter().any(|p| p.inputs.contains(name)) || running.iter().filter(|p| p.outputs.contains(name)).count() != 1;
         if !elsewhere {
-            direct[k] = Some(j);
+            direct[k][o] = Some(j);
         }
     }
     direct
@@ -293,17 +321,19 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
 
 /// Assigns the pass outputs of every effect to pooled textures: a texture goes back to
 /// the pool (per size) after the last pass that reads it, counted over the whole graph
-/// in execution order. Graph outputs stay alive until they are read back. The outputs of
-/// the effects in `mips` get pooled textures with a mip chain, kept apart from the others.
+/// in execution order. Graph outputs stay alive until they are read back. The effect
+/// outputs in `mips` get pooled textures with a mip chain, kept apart from the others.
+/// Passes that do not run (outputs nobody uses) get nothing.
 fn plan(
     effects: &[Effect],
     topo: &Topology,
-    sizes: &[(u32, u32)],
-    mips: &[bool],
-    direct_out: &[Option<usize>],
+    sizes: &[Vec<(u32, u32)>],
+    mips: &[Vec<bool>],
+    direct_out: &[Vec<Option<usize>>],
     deep: bool,
 ) -> Result<Plan, Error> {
-    let finals: Vec<&str> = effects.iter().map(|fx| fx.program.package.manifest.outputs[0].name.as_str()).collect();
+    let finals: Vec<Vec<&str>> =
+        effects.iter().map(|fx| fx.program.package.manifest.outputs.iter().map(|o| o.name.as_str()).collect()).collect();
     let mut last: HashMap<(usize, &str), usize> = HashMap::new();
     fn bump<'a>(last: &mut HashMap<(usize, &'a str), usize>, key: (usize, &'a str), g: usize) {
         let end = last.entry(key).or_insert(g);
@@ -313,23 +343,26 @@ fn plan(
     for &k in &topo.order {
         let m = &effects[k].program.package.manifest;
         let passes = effects[k].passes(deep)?;
+        let runs = (0..passes.len()).filter(|&i| effects[k].runs(i)).count();
         for &src in &topo.node_inputs[k] {
-            if let Source::Node(j) = src {
-                // Any input may be read by the copy of the effect when it is switched off
-                // (`bypass`), even if no pass reads it. The copy writes the output of the last
-                // pass: keep the input alive until then so the pool cannot give its texture
-                // to that output.
-                bump(&mut last, (j, finals[j]), g + passes.len() - 1);
+            if let Source::Node(j, o) = src {
+                // Any input may be read by the copies of the effect when it is switched off
+                // (`bypass`), even if no pass reads it. The copies write the outputs: keep the
+                // input alive up to the last pass so the pool cannot give its texture to one.
+                bump(&mut last, (j, finals[j][o]), g + runs.max(1) - 1);
             }
         }
-        for pass in passes {
+        for (i, pass) in passes.iter().enumerate() {
+            if !effects[k].runs(i) {
+                continue;
+            }
             for name in &pass.inputs {
                 if let Some(out) = passes.iter().flat_map(|p| &p.outputs).find(|o| *o == name) {
                     bump(&mut last, (k, out.as_str()), g);
                 } else if let Some(i) = m.inputs.iter().position(|d| d.name == *name) {
                     // The output of another effect is this effect's input.
-                    if let Source::Node(j) = topo.node_inputs[k][i] {
-                        bump(&mut last, (j, finals[j]), g);
+                    if let Source::Node(j, o) = topo.node_inputs[k][i] {
+                        bump(&mut last, (j, finals[j][o]), g);
                     }
                 }
             }
@@ -341,9 +374,9 @@ fn plan(
         }
     }
     for src in &topo.outputs {
-        if let Source::Node(j) = *src {
+        if let Source::Node(j, o) = *src {
             // Read by the output conversion, after every effect.
-            last.insert((j, finals[j]), usize::MAX);
+            last.insert((j, finals[j][o]), usize::MAX);
         }
     }
 
@@ -353,18 +386,23 @@ fn plan(
     let mut assign = vec![HashMap::new(); effects.len()];
     let mut g = 0;
     for &k in &topo.order {
-        for pass in effects[k].passes(deep)? {
+        for (i, pass) in effects[k].passes(deep)?.iter().enumerate() {
+            if !effects[k].runs(i) {
+                continue;
+            }
             live.retain(|&(end, slot)| {
                 if end < g {
                     free.entry(slots[slot]).or_default().push(slot);
                 }
                 end >= g
             });
+            let (w, h) = sizes[k][pass.size_of];
             for out in &pass.outputs {
+                let o = finals[k].iter().position(|n| n == out);
                 // An output frame written in place takes no pooled texture.
-                let in_place = direct_out[k].is_some() && *out == finals[k];
+                let in_place = o.is_some_and(|o| direct_out[k][o].is_some());
                 if !in_place && !assign[k].contains_key(out) {
-                    let key = (sizes[k].0, sizes[k].1, mips[k] && *out == finals[k]);
+                    let key = (w, h, o.is_some_and(|o| mips[k][o]));
                     let slot = free.get_mut(&key).and_then(|f| f.pop()).unwrap_or_else(|| {
                         slots.push(key);
                         slots.len() - 1
@@ -380,7 +418,7 @@ fn plan(
 }
 
 /// Checks every effect against its manifest rules: an input pad gives its stream, an
-/// edge the size of the effect writing it and the format negotiated for it (`links`).
+/// edge the size of the effect output writing it and the format negotiated for it (`links`).
 fn check_nodes<'a>(
     effects: &[Effect],
     topo: &Topology,
@@ -388,14 +426,16 @@ fn check_nodes<'a>(
     streams: &[StreamInfo<'a>],
 ) -> Result<(), Error> {
     let max = effects[0].program.ctx.device.limits().max_texture_dimension_2d;
-    let mut sizes = vec![(0, 0); topo.node_inputs.len()];
+    let mut sizes: Vec<Vec<(u32, u32)>> = vec![Vec::new(); topo.node_inputs.len()];
     for &k in &topo.order {
         let infos: Vec<StreamInfo> = topo.node_inputs[k]
             .iter()
             .enumerate()
             .map(|(i, src)| match *src {
                 Source::Input(p) => streams[p],
-                Source::Node(j) => StreamInfo { format: links.and_then(|l| l[k][i].as_deref()), width: sizes[j].0, height: sizes[j].1 },
+                Source::Node(j, o) => {
+                    StreamInfo { format: links.and_then(|l| l[k][i].as_deref()), width: sizes[j][o].0, height: sizes[j][o].1 }
+                }
             })
             .collect();
         effects[k].package().manifest.check_inputs(&infos)?;
@@ -405,25 +445,34 @@ fn check_nodes<'a>(
     Ok(())
 }
 
-/// Size of the output of `fx` for its input sizes: its manifest output size rule, within
-/// the `max` texture side of the device.
-fn node_size(fx: &Effect, ins: &[(u32, u32)], max: u32) -> Result<(u32, u32), Error> {
+/// Size of every output of `fx` for its input sizes: its manifest output size rules,
+/// within the `max` texture side of the device.
+fn node_size(fx: &Effect, ins: &[(u32, u32)], max: u32) -> Result<Vec<(u32, u32)>, Error> {
     let m = &fx.package().manifest;
-    let Some((w, h)) = m.output_size(0, ins) else {
-        let streams: Vec<StreamInfo> = ins.iter().map(|&(width, height)| StreamInfo { format: None, width, height }).collect();
-        m.check_inputs(&streams)?;
-        return Err(Error::Unsupported(format!("output of `{}`: the size overflows", m.name)));
-    };
-    if w > max || h > max {
-        return Err(Error::Unsupported(format!("output of `{}` would be {w}x{h}; this GPU allows at most {max} a side", m.name)));
-    }
-    Ok((w, h))
+    (0..m.outputs.len())
+        .map(|o| {
+            let what = if m.outputs.len() == 1 {
+                format!("output of `{}`", m.name)
+            } else {
+                format!("output `{}` of `{}`", m.outputs[o].name, m.name)
+            };
+            let Some((w, h)) = m.output_size(o, ins) else {
+                let streams: Vec<StreamInfo> = ins.iter().map(|&(width, height)| StreamInfo { format: None, width, height }).collect();
+                m.check_inputs(&streams)?;
+                return Err(Error::Unsupported(format!("{what}: the size overflows")));
+            };
+            if w > max || h > max {
+                return Err(Error::Unsupported(format!("{what} would be {w}x{h}; this GPU allows at most {max} a side")));
+            }
+            Ok((w, h))
+        })
+        .collect()
 }
 
 /// Size of every effect output for the given pad sizes (see [`node_size`]).
-fn node_sizes(effects: &[Effect], topo: &Topology, pads: &[(u32, u32)]) -> Result<Vec<(u32, u32)>, Error> {
+fn node_sizes(effects: &[Effect], topo: &Topology, pads: &[(u32, u32)]) -> Result<Vec<Vec<(u32, u32)>>, Error> {
     let max = effects[0].program.ctx.device.limits().max_texture_dimension_2d;
-    let mut sizes = vec![(0, 0); topo.node_inputs.len()];
+    let mut sizes: Vec<Vec<(u32, u32)>> = vec![Vec::new(); topo.node_inputs.len()];
     for &k in &topo.order {
         let ins: Vec<(u32, u32)> = topo.node_inputs[k].iter().map(|s| source_size(*s, pads, &sizes)).collect();
         sizes[k] = node_size(&effects[k], &ins, max)?;
@@ -431,17 +480,17 @@ fn node_sizes(effects: &[Effect], topo: &Topology, pads: &[(u32, u32)]) -> Resul
     Ok(sizes)
 }
 
-fn source_size(src: Source, pads: &[(u32, u32)], sizes: &[(u32, u32)]) -> (u32, u32) {
+fn source_size(src: Source, pads: &[(u32, u32)], sizes: &[Vec<(u32, u32)>]) -> (u32, u32) {
     match src {
         Source::Input(p) => pads[p],
-        Source::Node(j) => sizes[j],
+        Source::Node(j, o) => sizes[j][o],
     }
 }
 
 fn source_texture(effects: &[Effect], inputs: &[InputSlot], src: Source) -> wgpu::Texture {
     match src {
         Source::Input(i) => inputs[i].texture.clone(),
-        Source::Node(j) => effects[j].output().clone(),
+        Source::Node(j, o) => effects[j].output(o).clone(),
     }
 }
 
@@ -490,7 +539,7 @@ fn prepare(
         return Err(Error::Frame(format!("effect writes {} outputs, got {}", topo.outputs.len(), outs.len())));
     }
     // Effects that stack their inputs write a size no input pad has.
-    let stacked = if effects.iter().any(|fx| fx.package().manifest.outputs[0].size != OutputSize::First) {
+    let stacked = if effects.iter().any(|fx| fx.package().manifest.outputs.iter().any(|o| o.size != OutputSize::First)) {
         let planned: &[InputKey] = io.layout.as_ref().map_or(&[], |l| &l.keys);
         let pads: Vec<(u32, u32)> = (0..topo.nb_inputs)
             .map(|i| match (inputs.get(i), planned.get(i)) {
@@ -550,8 +599,12 @@ fn prepare(
             k.direct = k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i];
         }
     }
-    // And the last pass of an effect writes a straight RGBA8 output frame in place.
-    let direct_out = if in_place { direct_outputs(effects, topo, outs, &node_mips) } else { vec![None; effects.len()] };
+    // And the pass writing an effect output writes a straight RGBA8 output frame in place.
+    let direct_out = if in_place {
+        direct_outputs(effects, topo, outs, &node_mips)
+    } else {
+        effects.iter().map(|fx| vec![None; fx.output_count()]).collect()
+    };
     let stale = io.deep != deep
         || io.layout.as_ref().is_some_and(|l| l.direct_out != direct_out)
         || if bypass { planned.len() < keys.len() } else { planned.len() != keys.len() }
@@ -642,20 +695,23 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
         let sources: Vec<wgpu::Texture> = topo.node_inputs[k].iter().map(|&s| source_texture(effects, &io.inputs, s)).collect();
         let mut outputs: HashMap<String, wgpu::Texture> =
             layout.plan.assign[k].iter().map(|(name, &slot)| (name.clone(), pool[slot].clone())).collect();
-        if let Some(j) = layout.direct_out[k] {
+        for (o, j) in layout.direct_out[k].iter().enumerate() {
+            let Some(j) = *j else { continue };
             // Written in place: the frame being recorded, bound again for each frame.
-            let last = effects[k].package().manifest.outputs[0].name.clone();
+            let name = effects[k].package().manifest.outputs[o].name.clone();
             let frame = io.frame_outs.get(j).cloned().flatten();
-            outputs.insert(last, frame.unwrap_or_else(|| crate::convert::stand_in(device, wgpu::TextureUsages::STORAGE_BINDING)));
+            outputs.insert(name, frame.unwrap_or_else(|| crate::convert::stand_in(device, wgpu::TextureUsages::STORAGE_BINDING)));
         }
-        if let Err(e) = effects[k].bind(&sources.iter().collect::<Vec<_>>(), outputs, layout.sizes[k], deep) {
+        if let Err(e) = effects[k].bind(&sources.iter().collect::<Vec<_>>(), outputs, &layout.sizes[k], deep) {
             io.release();
             io.layout = Some(layout);
             return Err(e);
         }
     }
     io.input_mips = io.inputs.iter().zip(&layout.pad_mips).map(|(slot, &m)| m.then(|| ctx.mips.chain(device, &slot.texture))).collect();
-    io.node_mips = (0..effects.len()).map(|k| layout.node_mips[k].then(|| ctx.mips.chain(device, effects[k].output()))).collect();
+    io.node_mips = (0..effects.len())
+        .map(|k| layout.node_mips[k].iter().enumerate().map(|(o, &m)| m.then(|| ctx.mips.chain(device, effects[k].output(o)))).collect())
+        .collect();
     for slot in &mut io.outputs {
         slot.unbind();
     }
@@ -743,7 +799,7 @@ pub(crate) fn run(
     let mut bound = false;
     io.bypass_bound.resize(outs.len(), usize::MAX);
     for (k, out_desc) in out_descs.iter().enumerate() {
-        let pad = io.out_pad(topo, k);
+        let pad = io.out_pad(effects, topo, k);
         if bypass {
             check_bypass_pad(&ins, out_desc, pad)?;
         }
@@ -824,15 +880,19 @@ fn encode_nodes(effects: &[Effect], topo: &Topology, io: &FrameIo, info: Option<
     let ctx = &effects[0].program.ctx;
     if let Some(info) = info {
         for &k in &topo.order {
-            match (io.copy_groups.get(k).and_then(Option::as_ref), &io.layout) {
-                // Switched off: its first input copied into its output (see `bind_copies`).
-                (Some(group), Some(layout)) => {
-                    let format = effects[k].output().format();
-                    ctx.mips.encode_copy(&ctx.device, format, group, layout.sizes[k], cpass);
+            match (io.copy_groups.get(k).filter(|g| g.iter().any(Option::is_some)), &io.layout) {
+                // Switched off: an input copied into each output (see `bind_copies`).
+                (Some(groups), Some(layout)) => {
+                    for (o, group) in groups.iter().enumerate() {
+                        if let Some(group) = group {
+                            let format = effects[k].output(o).format();
+                            ctx.mips.encode_copy(&ctx.device, format, group, layout.sizes[k][o], cpass);
+                        }
+                    }
                 }
                 _ => effects[k].encode(cpass, info),
             }
-            if let Some(Some(chain)) = io.node_mips.get(k) {
+            for chain in io.node_mips.get(k).into_iter().flatten().flatten() {
                 chain.encode(&ctx.device, &ctx.mips, cpass);
             }
         }
@@ -926,22 +986,23 @@ fn record_gpu(
     if !bypass {
         for &k in &topo.order {
             let reads = topo.node_inputs[k].iter().any(|s| matches!(*s, Source::Input(i) if direct[i]));
-            let writes = direct_out[k].map(|j| &outs[j].planes[0]);
-            if reads || writes.is_some() {
+            let writes: Vec<Option<&wgpu::Texture>> =
+                direct_out.get(k).into_iter().flatten().map(|j| j.map(|j| &outs[j].planes[0])).collect();
+            if reads || writes.iter().any(Option::is_some) {
                 let sources: Vec<wgpu::Texture> = topo.node_inputs[k].iter().map(|&s| source_texture(effects, &io.inputs, s)).collect();
-                io.frame_binds += effects[k].rebind(&sources.iter().collect::<Vec<_>>(), writes)? as usize;
+                io.frame_binds += effects[k].rebind(&sources.iter().collect::<Vec<_>>(), &writes)? as usize;
             }
         }
         io.bind_copies(effects, topo)?;
     }
     for (k, out) in outs.iter().enumerate() {
-        if !bypass && direct_out.contains(&Some(k)) {
+        if !bypass && direct_out.iter().flatten().any(|d| *d == Some(k)) {
             // Written by the effect itself: no conversion pass.
             io.gpu_outputs[k].unbind();
             continue;
         }
         let src = if bypass {
-            let pad = io.out_pad(topo, k);
+            let pad = io.out_pad(effects, topo, k);
             let desc = |width, height| Desc { format: out.format, width, height, premultiplied: false };
             let ins: Vec<Desc> = inputs.iter().map(|f| desc(f.width, f.height)).collect();
             check_bypass_pad(&ins, &desc(out.width, out.height), pad)?;
@@ -982,12 +1043,36 @@ fn record_gpu(
     Ok(())
 }
 
-/// One `[in]...body[out]...` statement of a graph description. Labels left out are
-/// empty until [`EffectGraph::parse`] binds them.
+/// A label of a statement: `[x]` by position, or `[name=x]` naming the input or output of
+/// the effect it goes with.
+#[derive(Debug, Clone)]
+struct Label {
+    name: Option<String>,
+    label: String,
+}
+
+/// One package of a statement and the labels written right after it.
+struct ItemSpec<'a> {
+    text: &'a str,
+    outputs: Vec<Label>,
+}
+
+/// One `[in]...a.zip[x]|b.zip[out]...` statement of a graph description. Labels left out
+/// are empty until [`EffectGraph::parse`] binds them.
 struct NodeSpec<'a> {
-    inputs: Vec<String>,
-    body: &'a str,
-    outputs: Vec<String>,
+    statement: &'a str,
+    inputs: Vec<Label>,
+    items: Vec<ItemSpec<'a>>,
+}
+
+impl NodeSpec<'_> {
+    /// `split` or `null`, the node's only item.
+    fn split(&self) -> Option<&str> {
+        match self.items.as_slice() {
+            [item] if matches!(item.text, "split" | "null") => Some(item.text),
+            _ => None,
+        }
+    }
 }
 
 fn graph_err(msg: impl Into<String>) -> Error {
@@ -1112,8 +1197,8 @@ fn apply_constants(fx: &mut Effect, options: &InlineOptions) {
     }
 }
 
-/// `[label]` lists at the start of `rest`, which is advanced past them.
-fn parse_labels<'a>(rest: &mut &'a str, statement: &str) -> Result<Vec<&'a str>, Error> {
+/// `[label]` or `[name=label]` lists at the start of `rest`, which is advanced past them.
+fn parse_labels(rest: &mut &str, statement: &str) -> Result<Vec<Label>, Error> {
     let mut labels = Vec::new();
     loop {
         let s = rest.trim_start();
@@ -1122,14 +1207,19 @@ fn parse_labels<'a>(rest: &mut &'a str, statement: &str) -> Result<Vec<&'a str>,
             return Ok(labels);
         };
         let end = inner.find(']').ok_or_else(|| graph_err(format!("unclosed `[` in `{statement}`")))?;
-        let label = inner[..end].trim();
-        if label.is_empty() || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        let text = inner[..end].trim();
+        let (name, label) = match text.split_once('=') {
+            Some((n, l)) => (Some(n.trim()), l.trim()),
+            None => (None, text),
+        };
+        let plain = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !plain(label) || name.is_some_and(|n| !plain(n)) {
             return Err(graph_err(format!(
-                "bad label `[{}]` in `{statement}`: use letters, digits, `_` or `-` (`.` would clash with `label.param`)",
+                "bad label `[{}]` in `{statement}`: use letters, digits, `_` or `-` (`.` would clash with `label.param`), or `[name=label]`",
                 &inner[..end]
             )));
         }
-        labels.push(label);
+        labels.push(Label { name: name.map(String::from), label: label.to_string() });
         *rest = &inner[end + 1..];
     }
 }
@@ -1138,18 +1228,28 @@ fn parse_spec(text: &str) -> Result<Vec<NodeSpec<'_>>, Error> {
     let mut nodes = Vec::new();
     for statement in split_unquoted(text, b';').into_iter().map(str::trim).filter(|s| !s.is_empty()) {
         let mut rest = statement;
-        let inputs = parse_labels(&mut rest, statement)?.into_iter().map(String::from).collect();
-        let end = find_unquoted(rest, b'[').unwrap_or(rest.len());
-        let body = rest[..end].trim();
-        rest = &rest[end..];
-        let outputs = parse_labels(&mut rest, statement)?.into_iter().map(String::from).collect();
-        if !rest.trim().is_empty() {
-            return Err(graph_err(format!("unexpected `{}` after the output labels of `{statement}`", rest.trim())));
+        let inputs = parse_labels(&mut rest, statement)?;
+        let mut items = Vec::new();
+        for (n, part) in split_unquoted(rest, b'|').into_iter().enumerate() {
+            if n > 0 && part.trim_start().starts_with('[') {
+                return Err(graph_err(format!(
+                    "`{statement}`: input labels go at the start of a statement, not after `|`; write `[{}]...` as a statement of its own",
+                    part.trim_start()[1..].split(']').next().unwrap_or("")
+                )));
+            }
+            let end = find_unquoted(part, b'[').unwrap_or(part.len());
+            let text = part[..end].trim();
+            let mut after = &part[end..];
+            let outputs = parse_labels(&mut after, statement)?;
+            if !after.trim().is_empty() {
+                return Err(graph_err(format!("unexpected `{}` after the output labels of `{statement}`", after.trim())));
+            }
+            if text.is_empty() {
+                return Err(graph_err(format!("`{statement}` names no effect")));
+            }
+            items.push(ItemSpec { text, outputs });
         }
-        if body.is_empty() {
-            return Err(graph_err(format!("`{statement}` names no effect")));
-        }
-        nodes.push(NodeSpec { inputs, body, outputs });
+        nodes.push(NodeSpec { statement, inputs, items });
     }
     if nodes.is_empty() {
         return Err(graph_err("the graph is empty"));
@@ -1171,27 +1271,31 @@ fn pad_label(label: &str) -> Option<Result<usize, Error>> {
 /// An effect opened for a graph: its parameter label, the effect and its inline options.
 type Opened = (String, Effect, InlineOptions);
 
-/// Opens the packages of a node, `a.zip=key=value|b.zip`, in order. Only the first may
+/// Opens the packages of a node, `a.zip=key=value[x]|b.zip`, in order. Only the first may
 /// take more than one input.
-fn open_items(body: &str, open: &mut impl FnMut(&str) -> Result<(String, Effect), Error>) -> Result<Vec<Opened>, Error> {
-    let mut items: Vec<Opened> = Vec::new();
-    for item in split_unquoted(body, b'|').into_iter().map(str::trim).filter(|p| !p.is_empty()) {
-        let (path, options) = parse_effect_item(item)?;
+fn open_items(
+    items: &[ItemSpec],
+    statement: &str,
+    open: &mut impl FnMut(&str) -> Result<(String, Effect), Error>,
+) -> Result<Vec<Opened>, Error> {
+    let mut opened: Vec<Opened> = Vec::new();
+    for item in items {
+        let (path, options) = parse_effect_item(item.text)?;
         let (label, mut fx) = open(&path)?;
         check_options(&path, &fx, &options)?;
         apply_constants(&mut fx, &options);
-        if !items.is_empty() && fx.input_count() != 1 {
+        if !opened.is_empty() && fx.input_count() != 1 {
             return Err(graph_err(format!(
-                "`{path}` takes {} inputs; only the first effect of `{body}` may take more than one",
+                "`{path}` takes {} inputs; only the first effect of `{statement}` may take more than one",
                 fx.input_count()
             )));
         }
-        items.push((label, fx, options));
+        opened.push((label, fx, options));
     }
-    if items.is_empty() {
-        return Err(graph_err(format!("`{body}` names no package")));
+    if opened.is_empty() {
+        return Err(graph_err(format!("`{statement}` names no package")));
     }
-    Ok(items)
+    Ok(opened)
 }
 
 enum NodeKind {
@@ -1199,6 +1303,13 @@ enum NodeKind {
     Split,
     /// Effects of an `a.zip|b.zip` node, by index.
     Effects(Vec<usize>),
+}
+
+/// What writes a label: output `o` of effect `k`, or the `split`/`null` of statement `n`.
+#[derive(Clone, Copy)]
+enum Producer {
+    Node(usize, usize),
+    Split(usize),
 }
 
 /// Effects wired as a directed acyclic graph and run in one GPU submission. Effects
@@ -1256,9 +1367,11 @@ impl EffectGraph {
     pub fn parse(text: &str, mut open: impl FnMut(&str) -> Result<(String, Effect), Error>) -> Result<Self, Error> {
         let mut specs = parse_spec(text)?;
         if let [spec] = specs.as_slice() {
-            if spec.inputs.is_empty() && spec.outputs.is_empty() && !matches!(spec.body, "split" | "null") {
-                let (effects, options): (Vec<_>, Vec<_>) =
-                    open_items(spec.body, &mut open)?.into_iter().map(|(label, fx, options)| ((label, fx), options)).unzip();
+            if spec.inputs.is_empty() && spec.items.iter().all(|i| i.outputs.is_empty()) && spec.split().is_none() {
+                let (effects, options): (Vec<_>, Vec<_>) = open_items(&spec.items, spec.statement, &mut open)?
+                    .into_iter()
+                    .map(|(label, fx, options)| ((label, fx), options))
+                    .unzip();
                 let mut graph = Self::linear(effects)?;
                 graph.options = options;
                 return Ok(graph);
@@ -1270,11 +1383,16 @@ impl EffectGraph {
         let mut effects = Vec::new();
         let mut labels = Vec::new();
         for spec in &specs {
-            kinds.push(match spec.body {
-                "split" | "null" => NodeKind::Split,
-                body => {
+            kinds.push(match spec.split() {
+                Some(body) => {
+                    if spec.inputs.iter().chain(&spec.items[0].outputs).any(|l| l.name.is_some()) {
+                        return Err(graph_err(format!("`{body}` takes plain labels, not `[name=label]`")));
+                    }
+                    NodeKind::Split
+                }
+                None => {
                     let mut ks = Vec::new();
-                    for (label, fx, item_options) in open_items(body, &mut open)? {
+                    for (label, fx, item_options) in open_items(&spec.items, spec.statement, &mut open)? {
                         ks.push(effects.len());
                         effects.push(fx);
                         labels.push(label);
@@ -1285,11 +1403,75 @@ impl EffectGraph {
             });
         }
 
+        // Input labels by name, `[src=0][bg=m]x.zip`: put in the input order of the first
+        // effect. A repeated input takes as many pads as `<name>0`, `<name>1`... are named.
+        for (spec, kind) in specs.iter_mut().zip(&kinds) {
+            let NodeKind::Effects(ks) = kind else { continue };
+            let named = spec.inputs.iter().filter(|l| l.name.is_some()).count();
+            if named == 0 {
+                continue;
+            }
+            let k = ks[0];
+            if named != spec.inputs.len() {
+                return Err(graph_err(format!("`{}`: use either positional labels or `[name=label]` for its inputs, not both", labels[k])));
+            }
+            if let Some(base) = effects[k].package().repeated_input().map(String::from) {
+                let pads = spec
+                    .inputs
+                    .iter()
+                    .filter(|l| {
+                        l.name
+                            .as_deref()
+                            .and_then(|n| n.strip_prefix(base.as_str()))
+                            .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+                    })
+                    .count();
+                let fixed = effects[k].package().template_inputs() - 1;
+                for i in 0..pads {
+                    if !spec.inputs.iter().any(|l| l.name.as_deref() == Some(format!("{base}{i}").as_str())) {
+                        return Err(graph_err(format!(
+                            "`{}` names {pads} `{base}` inputs: they go from `{base}0` to `{base}{}`",
+                            labels[k],
+                            pads - 1
+                        )));
+                    }
+                }
+                if pads > 0 && fixed + pads != effects[k].input_count() {
+                    let package = effects[k]
+                        .package()
+                        .with_input_count(pads as u32)
+                        .map_err(|e| graph_err(format!("`{}` names {pads} `{base}` inputs: {e}", labels[k])))?;
+                    let mut rebuilt = Effect::new(effects[k].program.ctx.clone(), package)?;
+                    apply_constants(&mut rebuilt, &options[k]);
+                    effects[k] = rebuilt;
+                }
+            }
+            let m = &effects[k].package().manifest;
+            let mut placed: Vec<Option<Label>> = vec![None; m.inputs.len()];
+            for l in &spec.inputs {
+                let name = l.name.as_deref().expect("named");
+                let Some(i) = m.inputs.iter().position(|d| d.name == name) else {
+                    let known: Vec<&str> = m.inputs.iter().map(|d| d.name.as_str()).collect();
+                    return Err(graph_err(format!("`{}` has no input `{name}` (inputs: {})", labels[k], known.join(", "))));
+                };
+                if placed[i].is_some() {
+                    return Err(graph_err(format!("input `{name}` of `{}` is given two labels", labels[k])));
+                }
+                placed[i] = Some(Label { name: None, label: l.label.clone() });
+            }
+            if let Some(i) = placed.iter().position(Option::is_none) {
+                return Err(graph_err(format!("input `{}` of `{}` has no label", m.inputs[i].name, labels[k])));
+            }
+            spec.inputs = placed.into_iter().flatten().collect();
+        }
+
         // Labels left out: inputs read the pads no label names, in order; outputs are
         // outputs of the graph, under names no statement uses.
-        let named_pads: HashSet<usize> = specs.iter().flat_map(|s| &s.inputs).filter_map(|l| pad_label(l).and_then(Result::ok)).collect();
-        let used: HashSet<String> = specs.iter().flat_map(|s| s.inputs.iter().chain(&s.outputs)).cloned().collect();
-        let (mut next_pad, mut next_out) = (0, 0);
+        let named_pads: HashSet<usize> =
+            specs.iter().flat_map(|s| &s.inputs).filter_map(|l| pad_label(&l.label).and_then(Result::ok)).collect();
+        let used: HashSet<String> =
+            specs.iter().flat_map(|s| s.inputs.iter().chain(s.items.iter().flat_map(|i| &i.outputs))).map(|l| l.label.clone()).collect();
+        let mut next_pad = 0;
         for (spec, kind) in specs.iter_mut().zip(&kinds) {
             if spec.inputs.is_empty() {
                 let wanted = match kind {
@@ -1300,23 +1482,19 @@ impl EffectGraph {
                     while named_pads.contains(&next_pad) {
                         next_pad += 1;
                     }
-                    spec.inputs.push(next_pad.to_string());
+                    spec.inputs.push(Label { name: None, label: next_pad.to_string() });
                     next_pad += 1;
                 }
             }
-            if spec.outputs.is_empty() {
-                for _ in 0..if spec.body == "split" { 2 } else { 1 } {
-                    let label = loop {
-                        let label = format!("out{next_out}");
-                        next_out += 1;
-                        if !used.contains(&label) {
-                            break label;
-                        }
-                    };
-                    spec.outputs.push(label);
-                }
-            }
         }
+        let mut next_out = 0;
+        let mut fresh = || loop {
+            let label = format!("out{next_out}");
+            next_out += 1;
+            if !used.contains(&label) {
+                break label;
+            }
+        };
         let specs = specs;
 
         // A repeated input (hstack, vstack) takes every label the node reads, as FFmpeg's
@@ -1328,45 +1506,121 @@ impl EffectGraph {
             if !fx.package().has_repeated_input() || fx.input_count() == spec.inputs.len() {
                 continue;
             }
+            // The repeated input takes the labels after the fixed inputs before it.
+            let pads = spec.inputs.len().saturating_sub(fx.package().template_inputs() - 1);
             let package = fx
                 .package()
-                .with_input_count(spec.inputs.len() as u32)
+                .with_input_count(pads as u32)
                 .map_err(|e| graph_err(format!("`{}` reads {} labels: {e}", labels[k], spec.inputs.len())))?;
             let mut rebuilt = Effect::new(fx.program.ctx.clone(), package)?;
             apply_constants(&mut rebuilt, &options[k]);
             effects[k] = rebuilt;
         }
 
-        let mut producers: HashMap<&str, usize> = HashMap::new();
-        let mut defined: Vec<&str> = Vec::new();
-        for (n, (spec, kind)) in specs.iter().zip(&kinds).enumerate() {
-            for label in &spec.outputs {
-                let label = label.as_str();
-                if pad_label(label).is_some() {
-                    return Err(graph_err(format!("`[{label}]` names an input pad; output labels must not be numbers")));
-                }
-                if producers.insert(label, n).is_some() {
-                    return Err(graph_err(format!("label `[{label}]` is written twice")));
-                }
-                defined.push(label);
+        // Output labels. The labels after an effect name its outputs from the first, or by
+        // name (`[matte=m]`). In a chain the first output without a label goes on to the
+        // next effect; a last effect without labels writes outputs of the graph; any other
+        // output without a label is dropped (FFmpeg would refuse it).
+        let mut producers: HashMap<String, Producer> = HashMap::new();
+        let mut defined: Vec<String> = Vec::new();
+        let mut define = |label: String, p: Producer, defined: &mut Vec<String>| -> Result<(), Error> {
+            if pad_label(&label).is_some() {
+                return Err(graph_err(format!("`[{label}]` names an input pad; output labels must not be numbers")));
             }
-            let (ins, outs) = (spec.inputs.len(), spec.outputs.len());
+            if producers.insert(label.clone(), p).is_some() {
+                return Err(graph_err(format!("label `[{label}]` is written twice")));
+            }
+            defined.push(label);
+            Ok(())
+        };
+        let mut chain_links: Vec<(usize, Source)> = Vec::new();
+        let mut nodes = Vec::new();
+        for (n, (spec, kind)) in specs.iter().zip(&kinds).enumerate() {
+            let ins = spec.inputs.len();
             match kind {
                 NodeKind::Split => {
+                    let body = spec.items[0].text;
                     if ins != 1 {
-                        return Err(graph_err(format!("`{}` reads one label, got {ins}", spec.body)));
+                        return Err(graph_err(format!("`{body}` reads one label, got {ins}")));
                     }
-                    if spec.body == "null" && outs != 1 {
-                        return Err(graph_err(format!("`null` writes one label, got {outs}")));
+                    let mut outs: Vec<String> = spec.items[0].outputs.iter().map(|l| l.label.clone()).collect();
+                    if outs.is_empty() {
+                        outs = (0..if body == "split" { 2 } else { 1 }).map(|_| fresh()).collect();
+                    }
+                    if body == "null" && outs.len() != 1 {
+                        return Err(graph_err(format!("`null` writes one label, got {}", outs.len())));
+                    }
+                    for l in outs {
+                        define(l, Producer::Split(n), &mut defined)?;
                     }
                 }
                 NodeKind::Effects(ks) => {
-                    if outs != 1 {
-                        return Err(graph_err(format!("`{}` writes one label, got {outs}; split it to use it twice", spec.body)));
-                    }
                     let fx = &effects[ks[0]];
                     if fx.input_count() != ins {
                         return Err(graph_err(format!("`{}` takes {} inputs, the node gives it {ins}", labels[ks[0]], fx.input_count())));
+                    }
+                    let mut written = Vec::new();
+                    for (t, &k) in ks.iter().enumerate() {
+                        let item = &spec.items[t];
+                        let m = &effects[k].package().manifest;
+                        let n_out = m.outputs.len();
+                        let named = item.outputs.iter().filter(|l| l.name.is_some()).count();
+                        if named != 0 && named != item.outputs.len() {
+                            return Err(graph_err(format!("`{}`: use either positional labels or `[name=label]`, not both", labels[k])));
+                        }
+                        let mut assigned: Vec<bool> = vec![false; n_out];
+                        let mut mine: Vec<(String, usize)> = Vec::new();
+                        if named == 0 {
+                            if item.outputs.len() > n_out {
+                                return Err(graph_err(format!(
+                                    "`{}` writes {n_out} output{} ({}), got {} labels{}",
+                                    labels[k],
+                                    if n_out == 1 { "" } else { "s" },
+                                    m.output_names(),
+                                    item.outputs.len(),
+                                    if n_out == 1 { "; split it to use it twice" } else { "" }
+                                )));
+                            }
+                            for (o, l) in item.outputs.iter().enumerate() {
+                                mine.push((l.label.clone(), o));
+                            }
+                        } else {
+                            for l in &item.outputs {
+                                let name = l.name.as_deref().expect("named");
+                                let Some(o) = m.output_index(name) else {
+                                    return Err(graph_err(format!(
+                                        "`{}` has no output `{name}` (outputs: {})",
+                                        labels[k],
+                                        m.output_names()
+                                    )));
+                                };
+                                if mine.iter().any(|&(_, x)| x == o) {
+                                    return Err(graph_err(format!("output `{name}` of `{}` is given two labels", labels[k])));
+                                }
+                                mine.push((l.label.clone(), o));
+                            }
+                        }
+                        for &(_, o) in &mine {
+                            assigned[o] = true;
+                        }
+                        if let Some(&next) = ks.get(t + 1) {
+                            let Some(o) = assigned.iter().position(|a| !a) else {
+                                return Err(graph_err(format!(
+                                    "`{}`: every output has a label, so none goes on to `{}`",
+                                    labels[k], labels[next]
+                                )));
+                            };
+                            chain_links.push((next, Source::Node(k, o)));
+                        } else if item.outputs.is_empty() {
+                            mine = (0..n_out).map(|o| (fresh(), o)).collect();
+                        }
+                        for (l, o) in mine {
+                            written.push(l.clone());
+                            define(l, Producer::Node(k, o), &mut defined)?;
+                        }
+                    }
+                    for l in written {
+                        nodes.push((l, ks.clone()));
                     }
                 }
             }
@@ -1376,7 +1630,7 @@ impl EffectGraph {
         let mut nb_inputs = 0;
         for spec in &specs {
             for label in &spec.inputs {
-                let label = label.as_str();
+                let label = label.label.as_str();
                 match pad_label(label) {
                     Some(pad) => nb_inputs = nb_inputs.max(pad? + 1),
                     None if !producers.contains_key(label) => {
@@ -1396,39 +1650,30 @@ impl EffectGraph {
             return Err(graph_err(format!("input pad `[{pad}]` is not read (pads [0] to [{}] must all be)", nb_inputs - 1)));
         }
 
-        // Labels resolve to a pad or an effect; split and null are no node of their own.
-        fn resolve(
-            label: &str,
-            specs: &[NodeSpec],
-            producers: &HashMap<&str, usize>,
-            kinds: &[NodeKind],
-            depth: usize,
-        ) -> Result<Source, Error> {
+        // Labels resolve to a pad or an effect output; split and null are no node of their own.
+        fn resolve(label: &str, specs: &[NodeSpec], producers: &HashMap<String, Producer>, depth: usize) -> Result<Source, Error> {
             if let Some(pad) = pad_label(label) {
                 return Ok(Source::Input(pad?));
             }
-            let n = producers[label];
-            match &kinds[n] {
-                NodeKind::Effects(ks) => Ok(Source::Node(*ks.last().expect("at least one"))),
-                NodeKind::Split if depth > specs.len() => Err(graph_err(format!("the graph has a cycle through `[{label}]`"))),
-                NodeKind::Split => resolve(&specs[n].inputs[0], specs, producers, kinds, depth + 1),
+            match producers[label] {
+                Producer::Node(k, o) => Ok(Source::Node(k, o)),
+                Producer::Split(_) if depth > specs.len() => Err(graph_err(format!("the graph has a cycle through `[{label}]`"))),
+                Producer::Split(n) => resolve(&specs[n].inputs[0].label, specs, producers, depth + 1),
             }
         }
         let mut node_inputs = vec![Vec::new(); effects.len()];
-        let mut nodes = Vec::new();
-        for (n, spec) in specs.iter().enumerate() {
-            if let NodeKind::Effects(ks) = &kinds[n] {
-                node_inputs[ks[0]] = spec.inputs.iter().map(|l| resolve(l, &specs, &producers, &kinds, 0)).collect::<Result<_, _>>()?;
-                for w in ks.windows(2) {
-                    node_inputs[w[1]] = vec![Source::Node(w[0])];
-                }
-                nodes.push((spec.outputs[0].to_string(), ks.clone()));
+        for (spec, kind) in specs.iter().zip(&kinds) {
+            if let NodeKind::Effects(ks) = kind {
+                node_inputs[ks[0]] = spec.inputs.iter().map(|l| resolve(&l.label, &specs, &producers, 0)).collect::<Result<_, _>>()?;
             }
+        }
+        for (k, src) in chain_links {
+            node_inputs[k] = vec![src];
         }
         let outputs: Vec<(String, Source)> = defined
             .iter()
-            .filter(|l| !readers.contains(*l))
-            .map(|l| Ok((l.to_string(), resolve(l, &specs, &producers, &kinds, 0)?)))
+            .filter(|l| !readers.contains(l.as_str()))
+            .map(|l| Ok((l.to_string(), resolve(l, &specs, &producers, 0)?)))
             .collect::<Result<_, Error>>()?;
         if outputs.is_empty() {
             return Err(graph_err("the graph has no output: every label it writes is read again"));
@@ -1442,11 +1687,12 @@ impl EffectGraph {
         let mut done = vec![false; effects.len()];
         while order.len() < effects.len() {
             let ready = (0..effects.len()).find(|&k| {
-                !done[k] && node_inputs[k].iter().all(|s| matches!(*s, Source::Input(_)) || matches!(*s, Source::Node(j) if done[j]))
+                !done[k] && node_inputs[k].iter().all(|s| matches!(*s, Source::Input(_)) || matches!(*s, Source::Node(j, _) if done[j]))
             });
             let Some(k) = ready else {
-                let stuck: Vec<String> =
+                let mut stuck: Vec<String> =
                     nodes.iter().filter(|(_, ks)| ks.iter().any(|&k| !done[k])).map(|(l, _)| format!("[{l}]")).collect();
+                stuck.dedup();
                 return Err(graph_err(format!("the graph has a cycle through {}", stuck.join(", "))));
             };
             done[k] = true;
@@ -1476,17 +1722,22 @@ impl EffectGraph {
     }
 
     /// Effects run one after the other, as if each fed the next through its own filter:
-    /// the inputs are those of the first effect, named as in its manifest, and the one
-    /// output is `default`.
+    /// the inputs are those of the first effect, named as in its manifest. Each effect
+    /// hands its first output on; the outputs are those of the last effect: one is named
+    /// `default`, several take their manifest names.
     fn linear(effects: Vec<(String, Effect)>) -> Result<Self, Error> {
         let first = &effects[0].1;
         let nb_inputs = first.input_count();
         let input_names = first.package().manifest.inputs.iter().map(|d| d.name.clone()).collect();
         let n = effects.len();
         let mut node_inputs = vec![(0..nb_inputs).map(Source::Input).collect::<Vec<_>>()];
-        node_inputs.extend((1..n).map(|k| vec![Source::Node(k - 1)]));
-        let topo = Topology { nb_inputs, node_inputs, order: (0..n).collect(), outputs: vec![Source::Node(n - 1)] };
-        Self::from_parts(effects, topo, input_names, vec!["default".into()], Vec::new(), "chain")
+        node_inputs.extend((1..n).map(|k| vec![Source::Node(k - 1, 0)]));
+        let last = &effects[n - 1].1.package().manifest;
+        let outputs = (0..last.outputs.len()).map(|o| Source::Node(n - 1, o)).collect();
+        let output_names =
+            if last.outputs.len() == 1 { vec!["default".to_string()] } else { last.outputs.iter().map(|o| o.name.clone()).collect() };
+        let topo = Topology { nb_inputs, node_inputs, order: (0..n).collect(), outputs };
+        Self::from_parts(effects, topo, input_names, output_names, Vec::new(), "chain")
     }
 
     pub(crate) fn from_parts(
@@ -1497,12 +1748,20 @@ impl EffectGraph {
         nodes: Vec<(String, Vec<usize>)>,
         what: &'static str,
     ) -> Result<Self, Error> {
-        let (labels, effects): (Vec<String>, Vec<Effect>) = effects.into_iter().unzip();
+        let (labels, mut effects): (Vec<String>, Vec<Effect>) = effects.into_iter().unzip();
         let ctx = &effects[0].program.ctx;
         for (k, fx) in effects.iter().enumerate() {
             if !Arc::ptr_eq(&fx.program.ctx, ctx) {
                 return Err(Error::Unsupported(format!("effect {k} (`{}`) runs on another GPU device", labels[k])));
             }
+        }
+        // Outputs nobody reads are dropped, with the passes only they need.
+        for (k, fx) in effects.iter_mut().enumerate() {
+            let used: Vec<bool> = (0..fx.output_count()).map(|o| topo.used(k, o)).collect();
+            if !used.contains(&true) {
+                return Err(Error::Graph(format!("no output of `{}` is used", labels[k])));
+            }
+            fx.set_used_outputs(&used);
         }
         // What gpufx=a,gpufx=b would negotiate: the first output format of `a` that `b` accepts.
         let mut links = Vec::with_capacity(effects.len());
@@ -1513,18 +1772,20 @@ impl EffectGraph {
             for (i, src) in topo.node_inputs[k].iter().enumerate() {
                 let accepted = &m.inputs[i].formats;
                 match *src {
-                    Source::Node(j) => {
+                    Source::Node(j, o) => {
                         let prev = &effects[j].package().manifest;
-                        let link =
-                            prev.outputs[0].formats.iter().find(|f| accepted.is_empty() || accepted.contains(f)).ok_or_else(|| {
-                                Error::Unsupported(format!(
-                                    "`{}` outputs {} but `{}` accepts {}",
-                                    labels[j],
-                                    prev.outputs[0].formats.join(", "),
-                                    labels[k],
-                                    accepted.join(", ")
-                                ))
-                            })?;
+                        let formats = &prev.outputs[o].formats;
+                        let link = formats.iter().find(|f| accepted.is_empty() || accepted.contains(f)).ok_or_else(|| {
+                            let what =
+                                if prev.outputs.len() == 1 { String::new() } else { format!(" (output `{}`)", prev.outputs[o].name) };
+                            Error::Unsupported(format!(
+                                "`{}`{what} outputs {} but `{}` accepts {}",
+                                labels[j],
+                                formats.join(", "),
+                                labels[k],
+                                accepted.join(", ")
+                            ))
+                        })?;
                         row.push(Some(link.clone()));
                     }
                     Source::Input(p) => {
@@ -1558,7 +1819,7 @@ impl EffectGraph {
             .outputs
             .iter()
             .map(|s| match *s {
-                Source::Node(j) => effects[j].package().manifest.outputs[0].formats.clone(),
+                Source::Node(j, o) => effects[j].package().manifest.outputs[o].formats.clone(),
                 Source::Input(_) => crate::manifest::default_output_formats(),
             })
             .collect();
@@ -1777,9 +2038,10 @@ impl EffectGraph {
         Ok(())
     }
 
-    /// Picks the input effect `k` passes through when switched off (0, its first, by
-    /// default). Any input may be chosen; when it has another size than the effect's
-    /// output, processing fails while the effect is off.
+    /// Picks the input every output of effect `k` passes through when switched off
+    /// (without it, each output passes the input its manifest `bypass` names, the first by
+    /// default). Any input may be chosen; when it has another size than an output,
+    /// processing fails while the effect is off.
     pub fn set_node_bypass(&mut self, k: usize, input: usize) -> Result<(), Error> {
         let Some(inputs) = self.topo.node_inputs.get(k) else {
             return Err(Error::Param(format!("the {} has no effect {k}", self.what)));
@@ -1793,15 +2055,16 @@ impl EffectGraph {
             )));
         }
         if self.io.bypass.len() != self.effects.len() {
-            self.io.bypass = vec![0; self.effects.len()];
+            self.io.bypass = vec![None; self.effects.len()];
         }
-        self.io.bypass[k] = input;
+        self.io.bypass[k] = Some(input);
         Ok(())
     }
 
-    /// The input effect `k` passes through when switched off.
-    pub fn node_bypass(&self, k: usize) -> usize {
-        self.io.bypass(k)
+    /// The input output `o` of effect `k` passes through when the effect is switched off:
+    /// the one [`EffectGraph::set_node_bypass`] picked, else its manifest `bypass`.
+    pub fn node_bypass(&self, k: usize, o: usize) -> usize {
+        self.io.bypass(&self.effects, k, o)
     }
 
     /// Picks the input pad every output passes when the whole graph is bypassed (a
@@ -1819,7 +2082,7 @@ impl EffectGraph {
     /// The input pad output `k` passes when the whole graph is bypassed, by the choice of
     /// [`EffectGraph::set_bypass_pad`].
     pub fn bypass_pad(&self, k: usize) -> usize {
-        self.io.out_pad(&self.topo, k)
+        self.io.out_pad(&self.effects, &self.topo, k)
     }
 
     /// Whether effect `k` runs (see [`EffectGraph::set_node_enabled`]).
@@ -1889,8 +2152,8 @@ impl EffectGraph {
             return Err(Error::Unsupported(format!("the {} takes {} input(s), got {}", self.what, self.topo.nb_inputs, sizes.len())));
         }
         let (_, mips) = mip_sources(&self.effects, &self.topo);
-        let plan =
-            plan(&self.effects, &self.topo, &node_sizes(&self.effects, &self.topo, sizes)?, &mips, &vec![None; self.effects.len()], deep)?;
+        let none: Vec<Vec<Option<usize>>> = self.effects.iter().map(|fx| vec![None; fx.output_count()]).collect();
+        let plan = plan(&self.effects, &self.topo, &node_sizes(&self.effects, &self.topo, sizes)?, &mips, &none, deep)?;
         Ok((plan.slots.len(), plan.bytes(deep)))
     }
 
