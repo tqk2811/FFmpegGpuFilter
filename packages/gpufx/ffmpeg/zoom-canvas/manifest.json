@@ -1,5 +1,5 @@
 {
-  "api": 2,
+  "api": 1,
   "id": "io.github.tqk2811.zoom-canvas",
   "name": "Zoom Canvas",
   "used_for": ["gpufx"],

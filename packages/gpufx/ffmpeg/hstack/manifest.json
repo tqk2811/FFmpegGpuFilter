@@ -1,5 +1,5 @@
 {
-  "api": 2,
+  "api": 1,
   "id": "io.github.tqk2811.hstack",
   "name": "Horizontal Stack",
   "used_for": ["gpufx"],

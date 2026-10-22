@@ -6,7 +6,7 @@ use crate::requires::{Requires, Target};
 use crate::Error;
 
 /// Highest manifest `api` version this runtime understands.
-pub const MANIFEST_API: u32 = 2;
+pub const MANIFEST_API: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -78,10 +78,10 @@ pub struct InputDef {
     #[serde(default)]
     pub same_size: bool,
     /// Give the texture of this input a full mip chain, made on the GPU every frame
-    /// (api 2), for shaders that shrink it a lot with `textureSampleLevel`.
+    ///, for shaders that shrink it a lot with `textureSampleLevel`.
     #[serde(default)]
     pub mipmaps: bool,
-    /// The last input stands for a variable number of pads (api 2), named `<name>0`,
+    /// The last input stands for a variable number of pads, named `<name>0`,
     /// `<name>1`...; a graph node sets the number by the labels it reads. See [`Manifest::with_input_count`].
     #[serde(default)]
     pub repeat: Option<RepeatRule>,
@@ -115,9 +115,9 @@ pub enum OutputSize {
     /// The size of the first input.
     #[default]
     First,
-    /// Inputs side by side: same height, widths summed (api 2).
+    /// Inputs side by side: same height, widths summed.
     Hstack,
-    /// Inputs top to bottom: same width, heights summed (api 2).
+    /// Inputs top to bottom: same width, heights summed.
     Vstack,
 }
 
@@ -174,7 +174,7 @@ pub struct OutputDef {
     /// and every other format the runtime writes on the GPU ([`crate::PixelFormat`]).
     #[serde(default = "default_output_formats")]
     pub formats: Vec<String>,
-    /// Size of the output (api 2 for other rules than `first`).
+    /// Size of the output.
     #[serde(default)]
     pub size: OutputSize,
 }
@@ -206,9 +206,9 @@ pub enum ParamType {
     /// RGBA color, `vec4f` in shaders. Accepts `#rrggbb[aa]` or `r,g,b[,a]`.
     Color,
     /// A math expression over `vars`, compiled into the shaders as the function
-    /// `gpufx_expr_<name>` (api 2). Not in the `params` struct.
+    /// `gpufx_expr_<name>`. Not in the `params` struct.
     Expr,
-    /// One of the named `values` (api 2): an `i32` in shaders, set by name or by number.
+    /// One of the named `values`: an `i32` in shaders, set by name or by number.
     Enum,
 }
 
@@ -274,19 +274,19 @@ pub struct TextureDef {
     /// into the layers of a `texture_2d_array`.
     #[serde(default)]
     pub path: Option<String>,
-    /// PNGs of the same size, the layers of a `texture_2d_array` (api 2).
+    /// PNGs of the same size, the layers of a `texture_2d_array`.
     #[serde(default)]
     pub layers: Option<Vec<String>>,
-    /// `[cols, rows]`: cuts the `path` atlas into layers, row by row (api 2).
+    /// `[cols, rows]`: cuts the `path` atlas into layers, row by row.
     #[serde(default)]
     pub grid: Option<[u32; 2]>,
     /// Cells of the grid to use, when the last ones are empty. Defaults to `cols * rows`.
     #[serde(default)]
     pub count: Option<u32>,
-    /// Make the full mip chain on the CPU when loading (api 2).
+    /// Make the full mip chain on the CPU when loading.
     #[serde(default)]
     pub mipmaps: bool,
-    /// Multiply RGB by alpha when loading: shaders read premultiplied colours (api 2).
+    /// Multiply RGB by alpha when loading: shaders read premultiplied colours.
     #[serde(default)]
     pub premultiply: bool,
 }
@@ -318,10 +318,6 @@ impl TextureDef {
             (None, Some([c, r])) => Some(self.count.unwrap_or(c * r)),
             (None, None) => None,
         }
-    }
-
-    fn uses_api2(&self) -> bool {
-        self.is_array() || self.count.is_some() || self.mipmaps || self.premultiply
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -551,9 +547,6 @@ impl Manifest {
                 return bad(format!("input `{}` is the first input; same_size only applies to later inputs", i.name));
             }
             if let Some(r) = i.repeat {
-                if self.api < 2 {
-                    return bad(format!("input `{}`: repeat needs \"api\": 2", i.name));
-                }
                 if idx + 1 != self.inputs.len() {
                     return bad(format!("input `{}`: only the last input may repeat", i.name));
                 }
@@ -568,9 +561,6 @@ impl Manifest {
                 }
             }
         }
-        if self.output.size != OutputSize::First && self.api < 2 {
-            return bad("an output size other than `first` needs \"api\": 2".into());
-        }
         if self.output.formats.is_empty() {
             return bad("output formats must list at least one pixel format".into());
         }
@@ -579,14 +569,6 @@ impl Manifest {
             declare(&t.name, "texture", &mut names)?;
             names.push(&t.name);
             t.validate().map_err(Error::Manifest)?;
-            if t.uses_api2() && self.api < 2 {
-                return bad(format!("texture `{}`: layers, grid, count, mipmaps and premultiply need \"api\": 2", t.name));
-            }
-        }
-        for i in &self.inputs {
-            if i.mipmaps && self.api < 2 {
-                return bad(format!("input `{}`: mipmaps needs \"api\": 2", i.name));
-            }
         }
         let mut param_names: Vec<&str> = Vec::new();
         for p in &self.params {
@@ -600,9 +582,6 @@ impl Manifest {
             }
             param_names.push(&p.name);
             if p.kind == ParamType::Expr {
-                if self.api < 2 {
-                    return bad(format!("param `{}`: type expr needs \"api\": 2", p.name));
-                }
                 if !p.default.as_ref().is_some_and(serde_json::Value::is_string) {
                     return bad(format!("param `{}`: an expr needs a default expression (a string)", p.name));
                 }
@@ -626,7 +605,7 @@ impl Manifest {
                 return bad(format!("param `{}`: only an expr has vars", p.name));
             }
             if p.kind == ParamType::Enum {
-                check_enum(p, self.api)?;
+                check_enum(p)?;
             } else if p.values.is_some() {
                 return bad(format!("param `{}`: only an enum has values", p.name));
             }
@@ -812,11 +791,8 @@ impl Manifest {
 }
 
 /// Checks the rules of an `enum` parameter.
-fn check_enum(p: &ParamDef, api: u32) -> Result<(), Error> {
+fn check_enum(p: &ParamDef) -> Result<(), Error> {
     let bad = |m: String| Err(Error::Manifest(format!("param `{}`: {m}", p.name)));
-    if api < 2 {
-        return bad("type enum needs \"api\": 2".into());
-    }
     if p.min.is_some() || p.max.is_some() {
         return bad("an enum has no min or max".into());
     }
@@ -924,7 +900,7 @@ mod tests {
         let parse = |inputs: &str, extra: &str| {
             Manifest::parse(
                 format!(
-                    r#"{{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":{inputs}{extra},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}]}}"#
+                    r#"{{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":{inputs}{extra},"groups":[{{"passes":[{{"shader":"a.wgsl","inputs":["a","s"]}}]}}]}}"#
                 )
                 .as_bytes(),
             )
@@ -946,8 +922,6 @@ mod tests {
         assert!(parse(r#"[{"name":"s","repeat":{"default":2}},{"name":"a"}]"#, "").unwrap_err().to_string().contains("only the last"));
         assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":5,"max":3}}]"#, "").is_err());
         assert!(parse(r#"[{"name":"a"},{"name":"s","repeat":{"default":2,"max":17}}]"#, "").is_err());
-        assert!(manifest(r#"[{"name":"s","repeat":{"default":2}}]"#, "").unwrap_err().to_string().contains(r#""api": 2"#));
-        assert!(manifest(r#"[{"name":"s"}]"#, r#","output":{"size":"vstack"}"#).unwrap_err().to_string().contains(r#""api": 2"#));
         assert!(manifest(r#"[{"name":"s"}]"#, "").unwrap().with_input_count(Some(2)).is_err());
     }
 
@@ -960,34 +934,25 @@ mod tests {
 
     #[test]
     fn texture_arrays_follow_their_rules() {
-        let m = textures(2, r#"{"name":"a","layers":["x.png","y.png"],"mipmaps":true},{"name":"b","path":"g.png","grid":[4,2],"count":7,"premultiply":true},{"name":"c","path":"p.png"}"#).unwrap();
+        let m = textures(1, r#"{"name":"a","layers":["x.png","y.png"],"mipmaps":true},{"name":"b","path":"g.png","grid":[4,2],"count":7,"premultiply":true},{"name":"c","path":"p.png"}"#).unwrap();
         assert_eq!(m.textures[0].layer_count(), Some(2));
         assert_eq!(m.textures[1].layer_count(), Some(7));
         assert_eq!(m.textures[2].layer_count(), None);
         assert!(m.textures[0].is_array() && m.textures[1].is_array() && !m.textures[2].is_array());
         let err = |api: u32, t: &str| textures(api, t).unwrap_err().to_string();
-        assert!(err(2, r#"{"name":"a","path":"x.png","layers":["y.png"]}"#).contains("not both"));
-        assert!(err(2, r#"{"name":"a"}"#).contains("needs `path` or `layers`"));
-        assert!(err(2, r#"{"name":"a","layers":[]}"#).contains("empty"));
-        assert!(err(2, r#"{"name":"a","layers":["x.png"],"grid":[1,1]}"#).contains("does not go with `layers`"));
-        assert!(err(2, r#"{"name":"a","path":"x.png","count":2}"#).contains("only goes with `grid`"));
-        assert!(err(2, r#"{"name":"a","path":"x.png","grid":[2,2],"count":5}"#).contains("more than the 4 cells"));
-        assert!(err(2, r#"{"name":"a","path":"x.png","grid":[0,2]}"#).contains("no cells"));
-        assert!(err(2, r#"{"name":"a","path":"x.png","grid":[32,9]}"#).contains("more than 256 layers"));
-        textures(2, r#"{"name":"a","path":"x.png","grid":[32,9],"count":256}"#).unwrap();
+        assert!(err(1, r#"{"name":"a","path":"x.png","layers":["y.png"]}"#).contains("not both"));
+        assert!(err(1, r#"{"name":"a"}"#).contains("needs `path` or `layers`"));
+        assert!(err(1, r#"{"name":"a","layers":[]}"#).contains("empty"));
+        assert!(err(1, r#"{"name":"a","layers":["x.png"],"grid":[1,1]}"#).contains("does not go with `layers`"));
+        assert!(err(1, r#"{"name":"a","path":"x.png","count":2}"#).contains("only goes with `grid`"));
+        assert!(err(1, r#"{"name":"a","path":"x.png","grid":[2,2],"count":5}"#).contains("more than the 4 cells"));
+        assert!(err(1, r#"{"name":"a","path":"x.png","grid":[0,2]}"#).contains("no cells"));
+        assert!(err(1, r#"{"name":"a","path":"x.png","grid":[32,9]}"#).contains("more than 256 layers"));
+        textures(1, r#"{"name":"a","path":"x.png","grid":[32,9],"count":256}"#).unwrap();
         let many = vec![r#""x.png""#; 257].join(",");
-        assert!(err(2, &format!(r#"{{"name":"a","layers":[{many}]}}"#)).contains("more than 256 layers"));
-        for field in [
-            r#""layers":["x.png"]"#,
-            r#""path":"x.png","grid":[1,1]"#,
-            r#""path":"x.png","mipmaps":true"#,
-            r#""path":"x.png","premultiply":true"#,
-        ] {
-            assert!(err(1, &format!(r#"{{"name":"a",{field}}}"#)).contains(r#""api": 2"#), "{field}");
-        }
-        assert!(manifest(r#"[{"name":"a","mipmaps":true}]"#, "").unwrap_err().to_string().contains(r#""api": 2"#));
+        assert!(err(1, &format!(r#"{{"name":"a","layers":[{many}]}}"#)).contains("more than 256 layers"));
         let var = |v: &str| {
-            Manifest::parse(format!(r#"{{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"params":[{{"name":"e","type":"expr","default":"1","vars":["{v}"]}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes())
+            Manifest::parse(format!(r#"{{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"params":[{{"name":"e","type":"expr","default":"1","vars":["{v}"]}}],"groups":[{{"passes":[{{"shader":"a.wgsl"}}]}}]}}"#).as_bytes())
         };
         var("u_2").unwrap();
         assert!(var("_u").is_err() && var("a__b").is_err() && var("2u").is_err());
@@ -1003,7 +968,8 @@ mod tests {
         param("enabled").unwrap();
         assert!(param("enable").unwrap_err().to_string().contains("`enable` is reserved"));
         assert!(param("bypass").unwrap_err().to_string().contains("`bypass` is reserved"));
-        assert!(err(3, r#"{"name":"a","path":"x.png","colorspace":"linear"}"#).contains("unsupported manifest api 3"));
+        assert!(err(2, r#"{"name":"a","path":"x.png"}"#).contains("unsupported manifest api 2"));
+        assert!(err(0, r#"{"name":"a","path":"x.png"}"#).contains("unsupported manifest api 0"));
     }
 
     #[test]
@@ -1014,24 +980,23 @@ mod tests {
                     .as_bytes(),
             )
         };
-        let m = parse(2, r#""values":{"custom":-1,"fade":0,"wipeleft":1},"default":"fade""#).unwrap();
+        let m = parse(1, r#""values":{"custom":-1,"fade":0,"wipeleft":1},"default":"fade""#).unwrap();
         assert_eq!(m.params[0].enum_values(), [("custom", -1), ("fade", 0), ("wipeleft", 1)]);
-        let m = parse(2, r#""values":["b","a"],"default":1"#).unwrap();
+        let m = parse(1, r#""values":["b","a"],"default":1"#).unwrap();
         assert_eq!(m.params[0].enum_values(), [("b", 0), ("a", 1)]);
         let err = |api: u32, p: &str| parse(api, p).unwrap_err().to_string();
-        assert!(err(1, r#""values":["a"]"#).contains(r#"type enum needs "api": 2"#));
-        assert!(err(2, "\"default\":\"a\"").contains("needs values"));
-        assert!(err(2, r#""values":[]"#).contains("at least one value"));
-        assert!(err(2, r#""values":["a","a"]"#).contains("duplicate value name `a`"));
-        assert!(err(2, r#""values":{"a":1,"b":1}"#).contains("share the number 1"));
-        assert!(err(2, r#""values":{"a":1.5}"#).contains("integer"));
-        assert!(err(2, r#""values":["a","2"]"#).contains("not a number"));
-        assert!(err(2, r#""values":["a b"]"#).contains("letters, digits"));
-        assert!(err(2, r#""values":["a","b"],"default":"c""#).contains("not one of the values (a, b)"));
-        assert!(err(2, r#""values":["a","b"],"default":2"#).contains("not one of the values"));
-        assert!(err(2, r#""values":["a"],"max":3"#).contains("no min or max"));
+        assert!(err(1, "\"default\":\"a\"").contains("needs values"));
+        assert!(err(1, r#""values":[]"#).contains("at least one value"));
+        assert!(err(1, r#""values":["a","a"]"#).contains("duplicate value name `a`"));
+        assert!(err(1, r#""values":{"a":1,"b":1}"#).contains("share the number 1"));
+        assert!(err(1, r#""values":{"a":1.5}"#).contains("integer"));
+        assert!(err(1, r#""values":["a","2"]"#).contains("not a number"));
+        assert!(err(1, r#""values":["a b"]"#).contains("letters, digits"));
+        assert!(err(1, r#""values":["a","b"],"default":"c""#).contains("not one of the values (a, b)"));
+        assert!(err(1, r#""values":["a","b"],"default":2"#).contains("not one of the values"));
+        assert!(err(1, r#""values":["a"],"max":3"#).contains("no min or max"));
         let other = Manifest::parse(
-            br#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"m","type":"int","values":["a"]}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
+            br#"{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"params":[{"name":"m","type":"int","values":["a"]}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
         );
         assert!(other.unwrap_err().to_string().contains("only an enum has values"));
     }
@@ -1130,7 +1095,7 @@ mod tests {
         Manifest::parse(format!(r#"{{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"groups":[{{{p}}}]}}"#).as_bytes()).unwrap();
         // GLSL in any group rules out a repeated input.
         let glsl = Manifest::parse(
-            br#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{"name":"s","repeat":{"default":2}}],"groups":[{"passes":[{"shader":"a.wgsl"}]},{"passes":[{"shader":"a.glsl"}]}]}"#,
+            br#"{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{"name":"s","repeat":{"default":2}}],"groups":[{"passes":[{"shader":"a.wgsl"}]},{"passes":[{"shader":"a.glsl"}]}]}"#,
         );
         assert!(glsl.unwrap_err().to_string().contains("only for WGSL"));
     }
@@ -1138,7 +1103,7 @@ mod tests {
     #[test]
     fn repeated_inputs_expand_in_every_group() {
         let m = Manifest::parse(
-            br#"{"api":2,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"s","repeat":{"default":2,"max":3}}],
+            br#"{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"s","repeat":{"default":2,"max":3}}],
                 "groups":[{"requires":{"backend":["vulkan"]},"passes":[{"shader":"a.wgsl","inputs":["s"]}]},{"passes":[{"shader":"b.wgsl","inputs":["a","s"]}]}]}"#,
         )
         .unwrap();
