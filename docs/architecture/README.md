@@ -259,8 +259,9 @@ initialize the graph instead of running incorrectly.
   frames, [`GpuOutputSlot::bind_planes`](../../crates/gpufx-core/src/convert.rs#L934), one pass per plane). Codes are written in the matrix and
   range of the first input; the caller tags the output frames with them. `gray` (PlaneKind 3) also goes through the
   RGBA conversions: neutral chroma in [`load_uv`](../../crates/gpufx-core/src/convert_in.wgsl#L27), one per-plane pass out on the GPU.
-- **Output format**: [`EffectGraph::output_default_format`](../../crates/gpufx-core/src/graph.rs#L2669) (C: `gpufx_effect_output_default_format`)
-  picks `out_format`, else the first input's format when of the output's layout, else
+- **Output format**: [`EffectGraph::output_default_format`](../../crates/gpufx-core/src/graph.rs#L2673) (C: `gpufx_effect_output_default_format`)
+  picks `out_format`, else the source input's format (as it is when the output declares no `pixel_layout`,
+  `OutputDef::declared_layout`; only when of the declared layout otherwise), else
   [`PixelFormat::default_of`](../../crates/gpufx-core/src/frame.rs#L164). Tests count frame conversions with `rgba_conversions` and
   `layout_converts`.
 

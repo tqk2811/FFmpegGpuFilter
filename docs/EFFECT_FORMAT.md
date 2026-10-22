@@ -81,8 +81,10 @@ Each element of `outputs` (an array; the object form of earlier versions is an e
 
 Pixel formats: the GPU converter reads and writes `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (and reads `yuvj420p`/`yuvj422p`/`yuvj444p`).
-The `sw_format` of an output defaults by its `pixel_layout` (see [Pixel layout](#pixel-layout-planes)): the first
-input's format when it is of that layout, else the layout's default (`nv12` for `yuv420`, `gray` for `y`, `yuva420p`
+The `sw_format` of an output defaults to the format of its source input (the input its pad is timed by) when the
+manifest omits the output's `pixel_layout`, whatever its kind (the core converts back: a plain RGBA effect on `nv12`
+gives `nv12`). An output that declares a `pixel_layout` (see [Pixel layout](#pixel-layout-planes)), even `rgba`, takes
+that input's format when it is of that layout, else the layout's default (`nv12` for `yuv420`, `gray` for `y`, `yuva420p`
 for `yuva420`, `rgba` for `rgba`). The filter option `out_format` (one entry, or one per output pad separated by `|`)
 overrides it and may be any GPU-converted format. An effect that produces alpha keeps it by default when its output
 declares `rgba` or `yuva420`/`yuva444`.
@@ -353,9 +355,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   output directly, with premultiplied alpha, or while the filter is bypassed goes through RGBA.
 - **Frames out**: an output with planes is written straight into a frame of the same kind (`yuv420` into `nv12`, `y`
   into `gray`, `yuva420` into `yuva420p` with its alpha); any other format (`out_format=rgba`) goes through RGBA.
-  With no format given the output takes `out_format`, else the first input's format when of the same kind, else
-  `nv12` (`yuv420`), `yuv422p`, `yuv444p`, `yuva420p`, `yuva444p` or `gray` (`y`). Output frames keep the matrix and
-  range of the first input.
+  With no format given the output takes `out_format`, else its source input's format (any kind when its
+  `pixel_layout` is not declared, only of the same kind when it is), else `nv12` (`yuv420`), `yuv422p`, `yuv444p`,
+  `yuva420p`, `yuva444p`, `gray` (`y`) or `rgba`. Output frames keep the matrix and range of the first input; RGB
+  output frames are marked full-range RGB instead.
 
 ### Output size
 

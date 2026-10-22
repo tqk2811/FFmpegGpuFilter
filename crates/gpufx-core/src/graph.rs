@@ -2671,14 +2671,22 @@ impl EffectGraph {
     }
 
     /// The pixel format output `k` is written in: `out_format` when given (the caller's
-    /// choice, e.g. FFmpeg's `out_format` option), else `first_input` (the format of the
-    /// first input frame) when it is of the `pixel_layout` of the output, else that layout's
-    /// default ([`PixelFormat::default_of`]: `nv12` for `yuv420`, `gray` for `y`, `rgba`
-    /// for `rgba`, ...). An output with planes in a format of its layout is written straight
-    /// from its planes when its frame has straight alpha; a premultiplied frame, or any
-    /// other format, goes through RGBA. An unknown `out_format` is an error (the caller
-    /// asked for it); an unknown `first_input` (a format the GPU does not convert, e.g. a
-    /// 12-bit one) is only a hint and falls back to the layout's default.
+    /// choice, e.g. FFmpeg's `out_format` option), else from `first_input` (the format of
+    /// the input frame output `k` comes from; FFmpeg passes the input its output pad is
+    /// timed by):
+    /// - an output whose manifest omits `pixel_layout` (and a graph output that is an input
+    ///   passed through) keeps `first_input` as it is, whatever its kind: a plain RGBA
+    ///   effect on nv12 gives nv12, the core converts back;
+    /// - an output that declares a `pixel_layout` (even `rgba`, as keying effects do to keep
+    ///   alpha) keeps `first_input` only when it is of that layout, else takes the layout's
+    ///   default ([`PixelFormat::default_of`]: `nv12` for `yuv420`, `gray` for `y`, `rgba`
+    ///   for `rgba`, ...).
+    ///
+    /// An output with planes in a format of its layout is written straight from its planes
+    /// when its frame has straight alpha; a premultiplied frame, or any other format, goes
+    /// through RGBA. An unknown `out_format` is an error (the caller asked for it); an
+    /// unknown `first_input` (a format the GPU does not convert, e.g. a 12-bit one) is only
+    /// a hint and falls back to the layout's default.
     pub fn output_default_format(&self, k: usize, out_format: Option<&str>, first_input: Option<&str>) -> Result<PixelFormat, Error> {
         if k >= self.topo.outputs.len() {
             return Err(Error::Unsupported(format!("the {} has no output {k}", self.what)));
@@ -2689,12 +2697,15 @@ impl EffectGraph {
         if let Some(name) = out_format {
             return parse(name);
         }
-        let layout = match self.topo.outputs[k] {
-            Source::Node(j, o) => self.effects[j].package().manifest.outputs[o].pixel_layout,
-            Source::Input(_) => PixelLayout::Rgba,
+        let (layout, declared) = match self.topo.outputs[k] {
+            Source::Node(j, o) => {
+                let def = &self.effects[j].package().manifest.outputs[o];
+                (def.pixel_layout, def.declared_layout.is_some())
+            }
+            Source::Input(_) => (PixelLayout::Rgba, false),
         };
         if let Some(f) = first_input.and_then(PixelFormat::from_name) {
-            if f.pixel_layout() == layout {
+            if !declared || f.pixel_layout() == layout {
                 return Ok(f);
             }
         }

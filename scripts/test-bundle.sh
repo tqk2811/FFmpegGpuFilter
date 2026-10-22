@@ -121,7 +121,9 @@ gpu_ff() { "$FF" -hide_banner -nostdin -v error $DEV "$@"; }
 # raw OUT ARGS...: first 3 frames as raw video.
 raw() {
     out=$1; shift
-    gpu_ff "$@" -frames:v 3 -an -f rawvideo -y "$out" 2> "$CLIPS/last.log"
+    # A failed run leaves no file (the check after it fails), never aborts the run (set -e).
+    rm -f "$out"
+    gpu_ff "$@" -frames:v 3 -an -f rawvideo -y "$out" 2> "$CLIPS/last.log" || true
 }
 # diff_stats A B BYTES: "max mean" of the differences of the 1 or 2 byte samples.
 diff_stats() {
@@ -464,7 +466,7 @@ rm -f "$CLIPS/p.md5" "$CLIPS/q.md5"
 gpu_ff -i "$A" -filter_complex \
     "[0:v]format=rgba,gpufx=graph='[0]split[a][b]; [a]$FX/ffmpeg/invert.zip[inv]; [b]$FX/ffmpeg/grayscale.zip[gray]'[p][q];[p]hwdownload,format=rgba[p2];[q]hwdownload,format=rgba[q2]" \
     -map "[p2]" -frames:v 3 -pix_fmt rgba -f framemd5 -y "$CLIPS/p.md5" \
-    -map "[q2]" -frames:v 3 -pix_fmt rgba -f framemd5 -y "$CLIPS/q.md5" > "$CLIPS/last.log" 2>&1
+    -map "[q2]" -frames:v 3 -pix_fmt rgba -f framemd5 -y "$CLIPS/q.md5" > "$CLIPS/last.log" 2>&1 || true
 P_MD5=$(grep -v '^#' "$CLIPS/p.md5" 2>/dev/null | awk -F, '{print $NF}')
 Q_MD5=$(grep -v '^#' "$CLIPS/q.md5" 2>/dev/null | awk -F, '{print $NF}')
 GRAY_MD5=$(md5 "gpufx=graph=$FX/ffmpeg/grayscale.zip")
@@ -503,7 +505,7 @@ rm -f "$CLIPS/p.md5" "$CLIPS/q.md5"
 gpu_ff -i "$A" -filter_complex \
     "[0:v]format=rgba,gpufx=graph='[0]split[a][b]; [a]$FX/ffmpeg/invert.zip=enable=0[inv]; [b]$FX/ffmpeg/grayscale.zip=enable=0|$FX/ffmpeg/invert.zip[gray]'[p][q];[p]hwdownload,format=rgba[p2];[q]hwdownload,format=rgba[q2]" \
     -map "[p2]" -frames:v 3 -pix_fmt rgba -f framemd5 -y "$CLIPS/p.md5" \
-    -map "[q2]" -frames:v 3 -pix_fmt rgba -f framemd5 -y "$CLIPS/q.md5" > "$CLIPS/last.log" 2>&1
+    -map "[q2]" -frames:v 3 -pix_fmt rgba -f framemd5 -y "$CLIPS/q.md5" > "$CLIPS/last.log" 2>&1 || true
 P_MD5=$(grep -v '^#' "$CLIPS/p.md5" 2>/dev/null | awk -F, '{print $NF}')
 Q_MD5=$(grep -v '^#' "$CLIPS/q.md5" 2>/dev/null | awk -F, '{print $NF}')
 if [ -n "$P_MD5" ] && [ "$P_MD5" = "$SRC_MD5" ] && [ "$Q_MD5" = "$ONCE_MD5" ]; then
@@ -571,7 +573,7 @@ else
     fail "YUV output follows the BT.709 output link (mean difference $GOOD, BT.601 $BAD)"; cat "$CLIPS/last.log"
 fi
 # yuv420p in and out: gpufx converts on the GPU, FFmpeg inserts no scale filter.
-gpu_ff -v verbose -i "$A" -frames:v 2 -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=yuv420p" -pix_fmt yuv420p -f null - > "$CLIPS/last.log" 2>&1
+gpu_ff -v verbose -i "$A" -frames:v 2 -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=yuv420p" -pix_fmt yuv420p -f null - > "$CLIPS/last.log" 2>&1 || true
 if grep -q "Loaded 'Invert'" "$CLIPS/last.log" && ! grep -q auto_scale "$CLIPS/last.log"; then pass "yuv420p in and out without swscale"
 else fail "yuv420p in and out without swscale"; cat "$CLIPS/last.log"; fi
 # GPU formats round trip: invert twice gives the frame back, up to chroma filtering on
@@ -928,6 +930,10 @@ fi
 }
 # Effects with a pixel_layout of planes (tplanar/: directory packages written here, as in
 # crates/gpufx-core/tests/planes.rs). planar_pkg NAME IN_LAYOUT OUT_LAYOUT BODY
+# They sit in the packages dir (graph paths must stay relative, see FX), so they are
+# removed when the script exits, however it exits.
+rm -rf "$PACKAGES/tplanar"
+trap 'rm -rf "$PACKAGES/tplanar"' EXIT
 planar_pkg() {
     mkdir -p "tplanar/$1"
     printf '{"id":"t.%s","name":"%s","api":1,"used_for":["gpufx"],"inputs":[{"name":"src","pixel_layout":"%s"}],"outputs":[{"name":"out","pixel_layout":"%s"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}\n' \
@@ -984,6 +990,9 @@ planar_tests() {
         -map "[co]" -frames:v 3 -f rawvideo -y "$T.lm" -map "[m]" -f null - 2> "$CLIPS/last.log" || true
     bytes_is "$1: luma-matte color gives rgba (alpha) by default" $((3 * 320 * 180 * 4)) "$T.lm"
     if [ "${3:-}" = full ]; then
+        # No $2 (hwupload) here: FFmpeg makes yuva420p Vulkan frames without usage flags, which
+        # gpufx refuses as not sampleable (vf_gpufx.c config_inputs); gpufx uploads the
+        # software frame itself.
         raw "$T.aref" -i "$P" -vf "format=yuva420p" || true
         raw "$T.a" -i "$P" -vf "format=yuva420p,gpufx=graph=tplanar/keya,hwdownload" || true
         close_to "$1: yuva420p through a yuva420 effect keeps its alpha" 1 1 "$T.a" "$T.aref"

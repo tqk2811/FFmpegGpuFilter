@@ -267,9 +267,16 @@ pub struct OutputDef {
     /// no pad, no texture. See [`Manifest::with_outputs_off`].
     #[serde(default)]
     pub optional: bool,
-    /// The textures the shader writes for this output (see [`PixelLayout`]).
-    #[serde(default)]
+    /// The textures the shader writes for this output (see [`PixelLayout`]): `declared_layout`
+    /// or `rgba`, set by [`Manifest::parse`].
+    #[serde(skip)]
     pub pixel_layout: PixelLayout,
+    /// The `pixel_layout` the manifest gives, `None` when omitted. An output that declares one
+    /// (even `rgba`, e.g. to keep alpha) is written by default in a format of that layout; one
+    /// that omits it is written by default in the format of its source input (see
+    /// [`crate::EffectGraph::output_default_format`]).
+    #[serde(default, rename = "pixel_layout")]
+    pub declared_layout: Option<PixelLayout>,
 }
 
 /// Most outputs an effect may have.
@@ -617,7 +624,11 @@ impl Manifest {
                 repeat: None,
                 optional: false,
                 pixel_layout: PixelLayout::Rgba,
+                declared_layout: None,
             });
+        }
+        for o in &mut m.outputs {
+            o.pixel_layout = o.declared_layout.unwrap_or_default();
         }
         // Optional outputs may be off: the copies fit beside the others that are not.
         let fixed = m.outputs.iter().take(m.outputs.len().saturating_sub(1)).filter(|o| !o.optional).count() as u32;

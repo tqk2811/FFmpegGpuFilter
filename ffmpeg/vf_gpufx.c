@@ -971,17 +971,29 @@ static int config_vulkan(AVFilterContext *ctx)
 
 /*
  * The format output k is tried in first: out_format when given, else the format libgpufx
- * picks for its pixel_layout from the first input's format (gray for y, yuva420p for
- * yuva420, the input's own format when it is of that layout).
+ * picks from the format of the output's source input (that format for an output without a
+ * declared pixel_layout; for a declared one gray for y, yuva420p for yuva420, rgba for rgba,
+ * the input's own format when it is of that layout). libgpufx alone decides.
  */
-static enum AVPixelFormat output_want(const GpufxContext *s, unsigned k)
+static int output_want(AVFilterContext *ctx, unsigned k, enum AVPixelFormat *want)
 {
+    GpufxContext *s = ctx->priv;
     const char *name;
 
-    if (s->out_fmts[k] != AV_PIX_FMT_NONE)
-        return s->out_fmts[k];
-    name = gpufx_effect_output_default_format(s->fx, k, NULL, av_get_pix_fmt_name(s->hw_in_fmt[0]));
-    return name ? av_get_pix_fmt(name) : s->hw_in_fmt[s->source[k]];
+    if (s->out_fmts[k] != AV_PIX_FMT_NONE) {
+        *want = s->out_fmts[k];
+        return 0;
+    }
+    name = gpufx_effect_output_default_format(s->fx, k, NULL, av_get_pix_fmt_name(s->hw_in_fmt[s->source[k]]));
+    if (!name) {
+        av_log(ctx, AV_LOG_ERROR, "Output %u: no default format: %s\n", k, gpufx_last_error());
+        return AVERROR(EINVAL);
+    }
+    if ((*want = av_get_pix_fmt(name)) == AV_PIX_FMT_NONE) {
+        av_log(ctx, AV_LOG_ERROR, "Output %u: libgpufx picked '%s', unknown to FFmpeg\n", k, name);
+        return AVERROR(EINVAL);
+    }
+    return 0;
 }
 
 /*
@@ -996,9 +1008,12 @@ static int config_vulkan_output(AVFilterLink *outlink, unsigned k)
 {
     AVFilterContext *ctx = outlink->src;
     GpufxContext *s = ctx->priv;
-    const enum AVPixelFormat want = output_want(s, k);
     const uint32_t count = gpufx_effect_output_pad_format_count(s->fx, k);
+    enum AVPixelFormat want;
+    int err = output_want(ctx, k, &want);
 
+    if (err < 0)
+        return err;
     /* Pass -1 tries the source input's format, then each format in order. */
     for (int j = -1; j < (int)count; j++) {
         enum AVPixelFormat fmt = j < 0 ? want : av_get_pix_fmt(gpufx_effect_output_pad_format(s->fx, k, j));
@@ -1271,9 +1286,12 @@ static int config_d3d_output(AVFilterLink *outlink, unsigned k)
 {
     AVFilterContext *ctx = outlink->src;
     GpufxContext *s = ctx->priv;
-    const enum AVPixelFormat want = output_want(s, k);
     const uint32_t count = gpufx_effect_output_pad_format_count(s->fx, k);
+    enum AVPixelFormat want;
+    int err = output_want(ctx, k, &want);
 
+    if (err < 0)
+        return err;
     /* gpufx makes the output frames context alone: relabel_hold() relies on nobody else
      * setting its free / user_opaque. */
     for (int j = -1; j < (int)count; j++) {
@@ -2579,7 +2597,23 @@ static int config_output(AVFilterLink *outlink)
     av_frame_side_data_remove_by_props(&outlink->side_data, &outlink->nb_side_data,
                                        AV_SIDE_DATA_PROP_COLOR_DEPENDENT);
     outlink->time_base = s->fs.time_base;
-    return config_api_output(outlink, FF_OUTLINK_IDX(outlink));
+    if ((ret = config_api_output(outlink, FF_OUTLINK_IDX(outlink))) < 0)
+        return ret;
+    /*
+     * An RGB output of a YUV input holds full-range RGB: it must not keep the YUV matrix and
+     * limited range the link negotiated from the input (frames take the link's, see
+     * set_output_props() callers). A gray output keeps them: its codes are the input's Y as
+     * they are (same range), and FFmpeg ignores the matrix of gray.
+     */
+    if (ol->hw_frames_ctx) {
+        const AVPixFmtDescriptor *d = av_pix_fmt_desc_get(((AVHWFramesContext *)ol->hw_frames_ctx->data)->sw_format);
+
+        if (d && (d->flags & AV_PIX_FMT_FLAG_RGB)) {
+            outlink->colorspace  = AVCOL_SPC_RGB;
+            outlink->color_range = AVCOL_RANGE_JPEG;
+        }
+    }
+    return 0;
 }
 
 /*

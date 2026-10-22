@@ -591,7 +591,8 @@ pub unsafe extern "C" fn gpufx_effect_output_pad_format(fx: *const GpufxEffect, 
 }
 
 /// The pixel format output `output` is written in: `out_format` when not NULL, else
-/// `first_input` when of the output's `pixel_layout`, else that layout's default (see
+/// `first_input` (the output's source input): as it is for an output without a declared
+/// `pixel_layout`, only when of that layout for a declared one, else that layout's default (see
 /// `EffectGraph::output_default_format`). NULL with gpufx_last_error() for an unknown or
 /// non-UTF-8 `out_format`; an unknown or non-UTF-8 `first_input` falls back to the default.
 #[no_mangle]
@@ -1581,7 +1582,14 @@ mod tests {
             let err = CStr::from_ptr(gpufx_last_error()).to_str().unwrap().to_string();
             assert!(err.contains("out_format is not UTF-8"), "{err}");
             assert!(gpufx_effect_output_default_format(fx, 1, ptr::null(), ptr::null()).is_null());
+            // No declared pixel_layout: the source input's format, converted back.
+            assert_eq!(name(gpufx_effect_output_default_format(fx, 0, ptr::null(), nv12.as_ptr())).as_deref(), Some("nv12"));
             gpufx_effect_free(fx);
+            // A declared `rgba` (keying keeps its alpha): rgba even from nv12.
+            let key = open(&examples.join("chroma-key"));
+            assert!(!key.is_null(), "{:?}", CStr::from_ptr(gpufx_last_error()));
+            assert_eq!(name(gpufx_effect_output_default_format(key, 0, ptr::null(), nv12.as_ptr())).as_deref(), Some("rgba"));
+            gpufx_effect_free(key);
         }
     }
 

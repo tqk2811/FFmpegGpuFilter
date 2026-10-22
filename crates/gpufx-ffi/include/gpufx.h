@@ -279,8 +279,9 @@ uint32_t gpufx_effect_output_pad_format_count(const GpufxEffect *fx, uint32_t ou
 const char *gpufx_effect_output_pad_format(const GpufxEffect *fx, uint32_t output, uint32_t index);
 /*
  * The pixel format output `output` is written in when the caller picks none: out_format
- * when not NULL (the caller's choice), else first_input (the format of the first input)
- * when it is of the pixel_layout of the output, else that layout's default (nv12 for
+ * when not NULL (the caller's choice), else first_input (the format of the input the
+ * output comes from): as it is when the manifest declares no pixel_layout for the output
+ * (the core converts back), else only when it is of that layout, else that layout's default (nv12 for
  * yuv420, yuv422p, yuv444p, yuva420p, yuva444p, gray for y, rgba for rgba). An output
  * with planes in a format of its layout is written straight from its planes when its
  * frame has straight alpha (premultiplied frames go through RGBA). A static string, or
