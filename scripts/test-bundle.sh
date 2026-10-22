@@ -5,7 +5,9 @@
 # Test clips come from another ffmpeg with lavfi sources ($REF_FFMPEG, default `ffmpeg`),
 # since the bundle has no video source filters; pass clips-dir to reuse existing ones.
 # Clips and logs default to build/test-<bundle name>, outside the bundle.
-# Effect and model packages come from $GPUFX_PACKAGES (default dist/packages), laid out like the
+# Effect and model packages come from $GPUFX_PACKAGES; unset, the script first packs the source
+# packages and models into dist/packages (scripts/pack-packages.sh --models) and tests those zips.
+# The packages dir is laid out like the
 # release asset gpufx-packages.zip: gpufx/<group>/<name>.zip (scripts/pack-packages.sh -o
 # dist/packages/gpufx), gpufx_ai_upscale/<name>.zip and gpufx_ai_framerate/<name>.zip (copied from
 # build/packages/ after scripts/fetch-models.sh). REQUIRE_MODELS=1 fails when a model is missing.
@@ -75,6 +77,8 @@ if command -v cygpath >/dev/null; then   # Git Bash on Windows: give ffmpeg.exe 
     E=$(cygpath -m "$E") R=$(cygpath -m "$R") X=$(cygpath -m "$X") P=$(cygpath -m "$P")
     AI=$(cygpath -m "$AI") AICUT=$(cygpath -m "$AICUT")
 fi
+# No packages dir given: pack packages/gpufx and the models now, so the zips match the source.
+[ -n "${GPUFX_PACKAGES:-}" ] || "$ROOT/scripts/pack-packages.sh" --models -o "$ROOT/dist/packages/gpufx"
 PACKAGES=$(cd "${GPUFX_PACKAGES:-$ROOT/dist/packages}" && pwd)
 [ -d "$PACKAGES/gpufx" ] || { echo "$PACKAGES has no gpufx/ (scripts/pack-packages.sh -o $PACKAGES/gpufx)" >&2; exit 1; }
 cd "$PACKAGES"
@@ -675,6 +679,47 @@ else
         -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=gpufx_ai_upscale/realesr-general-x4v3.zip:scale=2,hwdownload,format=nv12" -f null -
     NODEV=1 rejects "model is required" "model is required" -i "$A" -frames:v 1 -vf "gpufx_ai_upscale" -f null -
 fi
+
+echo "unpacked packages (directories):"
+# A package or model also opens from its unpacked directory. The zips above are unpacked into
+# $PACKAGES/unpacked (relative paths, like the zips) and must give exactly the zip's pixels.
+rm -rf unpacked && mkdir -p unpacked
+# dir_md5 INPUTS FILTERS: framemd5 of 3 rgba frames of A (INPUTS copies of it, 1 or 2) through
+# FILTERS, which take [i0] (and [i1]) as rgba software frames, downloaded again.
+dir_md5() {
+    if [ "$1" = 2 ]; then set -- "-i $A -i $A" "[0]format=rgba[i0];[1]format=rgba[i1];[i0][i1]$2"
+    else set -- "-i $A" "[0]format=rgba[i0];[i0]$2"; fi
+    # shellcheck disable=SC2086
+    gpu_ff $1 -frames:v 3 -an -filter_complex "$2,hwdownload,format=rgba" -pix_fmt rgba -f framemd5 - \
+        2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}'
+}
+# dir_same NAME INPUTS ZIP_FILTERS DIR_FILTERS: both give the same, non-empty frames.
+dir_same() {
+    z=$(dir_md5 "$2" "$3") d=$(dir_md5 "$2" "$4")
+    if [ -n "$z" ] && [ "$z" = "$d" ]; then pass "$1"
+    else fail "$1"; echo "    zip: $z"; echo "    dir: $d"; cat "$CLIPS/last.log"; fi
+}
+for p in grayscale vignette zoom-canvas; do
+    unzip -q "$FX/ffmpeg/$p.zip" -d "unpacked/$p"
+done
+dir_same "grayscale from a directory equals the zip" 1 \
+    "gpufx=graph=$FX/ffmpeg/grayscale.zip" "gpufx=graph=unpacked/grayscale"
+dir_same "vignette with a parameter from a directory equals the zip" 1 \
+    "gpufx=graph='$FX/ffmpeg/vignette.zip=strength=0.7'" "gpufx=graph='unpacked/vignette=strength=0.7'"
+dir_same "zoom-canvas (2 inputs, per-component expressions) from a directory equals the zip" 2 \
+    "gpufx=graph='$FX/ffmpeg/zoom-canvas.zip=zoom=1+t&anchor=0.5+0.1*sin(t)\,0.5'" \
+    "gpufx=graph='unpacked/zoom-canvas=zoom=1+t&anchor=0.5+0.1*sin(t)\,0.5'"
+rejects "a directory that is no package" "missing manifest.json" -i "$A" -frames:v 1 \
+    -vf "format=rgba,gpufx=graph=unpacked,hwdownload,format=rgba" -f null -
+if grep -qw gpufx_ai_upscale "$CLIPS/filters.txt" && [ -f gpufx_ai_upscale/realesr-animevideov3.zip ]; then
+    unzip -q gpufx_ai_upscale/realesr-animevideov3.zip -d unpacked/animevideov3
+    dir_same "an upscale model from a directory equals the zip" 1 \
+        "gpufx_upload,gpufx_ai_upscale=model=gpufx_ai_upscale/realesr-animevideov3.zip:scale=2" \
+        "gpufx_upload,gpufx_ai_upscale=model=unpacked/animevideov3:scale=2"
+else
+    echo "  skip  no gpufx_ai_upscale or no gpufx_ai_upscale/realesr-animevideov3.zip"
+fi
+rm -rf unpacked
 
 echo "Vulkan frames:"
 # hwupload -> gpufx -> hwdownload runs on FFmpeg's own Vulkan device, frames never leave
