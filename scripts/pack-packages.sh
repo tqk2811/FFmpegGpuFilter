@@ -29,6 +29,7 @@ if [ $# -eq 0 ]; then
     set -- $(find "$ROOT/packages/gpufx" -name manifest.json | sort | sed 's|/manifest.json$||')
     IFS=$OLD_IFS
 fi
+[ "$MODELS" = 0 ] || [ "$(basename "$OUT")" = gpufx ] || { echo "--models needs -o <root>/gpufx (models go to <root>/gpufx_ai_*)" >&2; exit 1; }
 
 cargo build --release --quiet --manifest-path "$ROOT/Cargo.toml" -p gpufx-cli
 GPUFX=$ROOT/target/release/gpufx
@@ -53,7 +54,6 @@ done
 # Models: the release layout of gpufx-packages.zip, <out>/../gpufx_ai_<filter>/<name>.zip. A failed
 # fetch fails the script.
 if [ "$MODELS" = 1 ]; then
-    [ "$(basename "$OUT")" = gpufx ] || { echo "--models needs -o <root>/gpufx (models go to <root>/gpufx_ai_*)" >&2; exit 1; }
     "$ROOT/scripts/fetch-models.sh"
     PKGS=$(dirname "$OUT")
     for d in "$ROOT"/packages/gpufx_ai_*/*/; do
