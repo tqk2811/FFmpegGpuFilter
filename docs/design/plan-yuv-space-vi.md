@@ -48,6 +48,16 @@ gpufx_write_y(p, y2);
 if (all(p % 2u == 0u)) { gpufx_write_uv(p / 2u, uv2); }
 ```
 
+## Điểm đã chốt (2026-10-23, user bảo làm luôn, lấy theo đề xuất)
+
+Quyết định trong mục này ghi đè các chữ "đề xuất" bên dưới.
+- (1) Đếm theo số texture sau khi nở `space`.
+- (2) Texture trung gian khai ở mảng cấp effect `"intermediates": [{ "name": "tmp", "space": "yuv420" }]`; tên output nội bộ không khai = `rgba`.
+- (3) Dispatch theo kích thước Y, thread toạ độ chẵn ghi UV.
+- (4) Y/UV/A dùng `r16float`/`rg16float` khi adapter hỗ trợ storage cho chúng (kiểm format features), không thì `r32float`/`rg32float`; nạp/ghi 8 và 10 bit đều qua float.
+- (6) Kích thước là của Y, UV làm tròn lên.
+- (7) Vulkan + D3D12, thêm D3D11 nếu đường hiện có hỗ trợ; không được thì báo lỗi rõ khi load.
+
 ## Điểm cần chốt khi làm
 
 1. **Giới hạn 4 storage texture mỗi pass** tính theo số texture: `yuva420` chiếm 3. Manifest kiểm theo số texture sau khi nở `space`.
