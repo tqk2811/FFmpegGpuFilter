@@ -291,7 +291,7 @@ echo "single input effects (audio stream kept, GPU frames into the null muxer):"
 # Other effects with several inputs, name:number of inputs (every input the same clip).
 MULTI="blend:2 displace:3 masked-merge:3 masked-minmax:3 maskedclamp:3 maskedthreshold:2 threshold:4 varblur:2 xfade:2 xstack:4 zoom-canvas:2"
 for e in $(find "$FX" -name '*.zip' | sort); do
-    case " $TRANSITIONS $MULTI overlay fit hstack vstack " in *" $(basename "$e" .zip) "* | *" $(basename "$e" .zip):"*) continue ;; esac
+    case " $TRANSITIONS $MULTI overlay fit hstack vstack luma-matte " in *" $(basename "$e" .zip) "* | *" $(basename "$e" .zip):"*) continue ;; esac
     # shellcheck disable=SC2086
     ok "$(basename "$e" .zip)" -i "$A" -vf "gpufx=graph=$e" $NULL
 done
@@ -313,6 +313,19 @@ ok "overlay (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=grap
 ok "hstack of 3 inputs" -i "$A" -i "$A" -i "$A" -filter_complex "[0][1][2]gpufx=graph='[0][1][2]$FX/ffmpeg/hstack.zip'" -an $NULL
 # shellcheck disable=SC2086
 ok "vstack" -i "$A" -i "$A" -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/vstack.zip'" -an $NULL
+echo "effects with several outputs:"
+LM=$(fx luma-matte)
+# shellcheck disable=SC2086
+ok "two output pads of one effect" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM'[c][m]" -map "[c]" $NULL -map "[m]" $NULL
+# shellcheck disable=SC2086
+ok "an output in a graph and one along the chain" -i "$A" -an     -filter_complex "[0]gpufx=graph='[0]$LM[matte=m]|$FX/ffmpeg/invert.zip[x]'[x][m]" -map "[x]" $NULL -map "[m]" $NULL
+# Both outputs: same frames, same timestamps; one output ending early does not stop the other.
+pts_of() { grep -v '^#' "$1" | cut -d, -f3 | tr -d ' '; }
+if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM'[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c.md5" -map "[mo]" -f framemd5 -y "$CLIPS/lm_m.md5" > "$CLIPS/last.log" 2>&1     && [ -s "$CLIPS/lm_c.md5" ] && [ "$(pts_of "$CLIPS/lm_c.md5")" = "$(pts_of "$CLIPS/lm_m.md5")" ]     && [ "$(grep -vc '^#' "$CLIPS/lm_c.md5")" -gt 5 ]; then pass "two outputs: same frame count and pts"
+else fail "two outputs: same frame count and pts"; cat "$CLIPS/last.log"; fi
+if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM'[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c2.md5" -map "[mo]" -frames:v 3 -f framemd5 -y "$CLIPS/lm_m2.md5" > "$CLIPS/last.log" 2>&1     && [ "$(grep -vc '^#' "$CLIPS/lm_m2.md5")" -eq 3 ] && [ "$(pts_of "$CLIPS/lm_c2.md5")" = "$(pts_of "$CLIPS/lm_c.md5")" ]; then
+    pass "two outputs: the second ends early, the first runs to the end"
+else fail "two outputs: the second ends early, the first runs to the end"; cat "$CLIPS/last.log"; fi
 for m in 0 1 2 3; do
     # shellcheck disable=SC2086
     ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/FFmpegArgs.TanersenerSlideShow/fit.zip=mode=$m'" -an $NULL

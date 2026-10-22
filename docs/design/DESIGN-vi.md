@@ -506,7 +506,11 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
   nhiều output; tên pad là nhãn). Không có danh sách output riêng: nhãn gõ sai thành output pad thừa,
   FFmpeg báo là chưa nối.
 - Nút là `split` (một nhãn vào, bao nhiêu nhãn ra cũng được), `null` (một vào, một ra), hoặc các gói
-  nối bằng `|` như `graph=`, đọc số nhãn bằng số input của gói đầu và ghi một nhãn. `split` và
+  nối bằng `|` như `graph=`, đọc số nhãn bằng số input của gói đầu. Hiệu ứng có thể có nhiều output
+  (mảng `output` của manifest): nhãn sau nó đặt tên output theo vị trí hoặc `[tên=nhãn]`, output đầu chưa
+  có nhãn đi tiếp theo chuỗi, hiệu ứng cuối không nhãn ghi mọi output, output khác không nhãn bị bỏ cùng các
+  pass chỉ phục vụ nó. Trong engine một cạnh là `Source::Node(effect, output)`; mỗi output có texture, kích
+  thước, format, input bypass và frame ghi tại chỗ riêng. `split` và
   `null` không tốn gì: output của chúng *chính là* input (hai cạnh cùng đọc một texture).
 - Hiệu ứng ghi kích thước input đầu của nó (size xếp chồng với `output.size` `hstack`/`vstack`, lan truyền tới các node phía sau); output pad k lấy SAR và frame rate của input
   pad mà nguồn của nó đi ra. Frame ra theo sự kiện của input 0 (framesync như khi có nhiều input).

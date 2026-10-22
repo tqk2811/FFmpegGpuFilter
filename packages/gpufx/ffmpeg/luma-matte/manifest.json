@@ -1,0 +1,86 @@
+{
+  "api": 1,
+  "id": "io.github.tqk2811.luma-matte",
+  "name": "Luma Matte",
+  "used_for": [
+    "gpufx"
+  ],
+  "version": "1.0.0",
+  "description": "Luma key with two outputs: the video with the keyed range transparent (color) and the key as a gray image (matte).",
+  "inputs": [
+    {
+      "name": "src",
+      "formats": [
+        "yuv420p",
+        "yuv422p",
+        "yuv444p",
+        "yuvj420p",
+        "nv12",
+        "rgb24",
+        "bgr24",
+        "rgba",
+        "bgra"
+      ]
+    }
+  ],
+  "output": [
+    {
+      "name": "color",
+      "formats": [
+        "rgba",
+        "yuva420p",
+        "yuva444p"
+      ]
+    },
+    {
+      "name": "matte",
+      "formats": [
+        "yuv420p",
+        "nv12",
+        "rgba"
+      ]
+    }
+  ],
+  "params": [
+    {
+      "name": "threshold",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Center of the luma range that becomes transparent"
+    },
+    {
+      "name": "tolerance",
+      "type": "float",
+      "default": 0.01,
+      "min": 0,
+      "max": 1,
+      "description": "Half width of the range that becomes fully transparent"
+    },
+    {
+      "name": "softness",
+      "type": "float",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "Width of the soft edge on both sides of the range"
+    }
+  ],
+  "groups": [
+    {
+      "passes": [
+        {
+          "shader": "shaders/luma_matte.wgsl",
+          "inputs": [
+            "src"
+          ],
+          "output": [
+            "color",
+            "matte"
+          ]
+        }
+      ]
+    }
+  ]
+}

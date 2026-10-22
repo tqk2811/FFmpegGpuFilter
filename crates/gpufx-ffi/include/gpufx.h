@@ -158,9 +158,13 @@ int gpufx_format_supported(const char *format);
  *   split         one label in, any number out (two when unlabelled), no copy (the
  *                 outputs are the input)
  *   null          one label in, one out, no copy
- *   a.zip|b.zip   packages chained: each effect takes the output of the one before it;
- *                 as many labels in as the first package has inputs, one out. Only the
- *                 first package may take more than one input.
+ *   a.zip|b.zip   packages chained: each effect takes the first unlabelled output of the
+ *                 one before it; as many labels in as the first package has inputs.
+ *                 Only the first package may take more than one input.
+ * Labels after a package name its outputs from the first ("a.zip[x][y]"), or by
+ * manifest name ("a.zip[matte=m]"); "[src=0][bg=1]a.zip" names inputs the same way.
+ * One style per side of a package. A last package without labels writes all its
+ * outputs as output pads; any other output without a label is dropped.
  * As in an FFmpeg filtergraph, labels may be left out. A statement without input labels
  * reads the input pads no label of the graph names, the lowest first (as many as its
  * first package has inputs, one for split and null): "[0][1]crossfade.zip" and
@@ -240,13 +244,14 @@ const char *gpufx_effect_input_name(const GpufxEffect *fx, uint32_t index);
 uint32_t gpufx_effect_input_format_count(const GpufxEffect *fx, uint32_t input);
 const char *gpufx_effect_input_format(const GpufxEffect *fx, uint32_t input, uint32_t index);
 
-/* Pixel formats the effect may output, in order of preference (at least one). */
+/* Pixel formats output pad 0 may have, in order of preference (at least one). */
 uint32_t gpufx_effect_output_format_count(const GpufxEffect *fx);
 const char *gpufx_effect_output_format(const GpufxEffect *fx, uint32_t index);
 
 /*
- * Output pads: 1 for an effect or a chain (named "default"), any number
- * for a graph (named after their labels).
+ * Output pads: one per output of the last effect for an effect or a chain
+ * ("default" for one, else the manifest output names), any number for a graph
+ * (named after their labels).
  */
 uint32_t gpufx_effect_output_count(const GpufxEffect *fx);
 const char *gpufx_effect_output_name(const GpufxEffect *fx, uint32_t output);
