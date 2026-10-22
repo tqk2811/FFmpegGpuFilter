@@ -603,6 +603,14 @@ fn uniform(format: PixelFormat, w: u32, h: u32, color: &ColorInfo, plane: Option
             (PlaneKind::Planar, 3) => [3, 0, 0, 0],
             _ => [0, 0, 0, 0],
         };
+        // planes_out_source routes a plane to the UV texture by its first channel being U
+        // or V: plane 0 holds Y (or RGBA), A is channel 3, every other plane is chroma.
+        assert!(
+            l.kind == PlaneKind::Rgba || (ch[0] == 1 || ch[0] == 2) == (p != 0 && ch[0] != 3),
+            "plane {p} of {} is routed by channel {}",
+            format.name(),
+            ch[0]
+        );
         words.extend([pw, ph, channels, l.bytes, row_bytes.div_ceil(4), chroma as u32]);
         words.extend(ch);
     }
@@ -694,7 +702,8 @@ impl InputSlot {
         if key.layout != PixelLayout::Rgba {
             for &plane in key.layout.planes() {
                 let (pw, ph) = key.layout.plane_size(plane, (w, h));
-                keys.push(tex(pw, ph, crate::runtime::plane_format(plane, deep, f16), usage, false));
+                // The format `planes_in` writes: planes have 1 or 2 channels, `deep` picks nothing.
+                keys.push(tex(pw, ph, crate::runtime::plane_format(plane, false, f16), usage, false));
             }
             return keys;
         }

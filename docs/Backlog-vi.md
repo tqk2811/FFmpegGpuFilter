@@ -28,6 +28,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: báo lỗi rõ ngay lúc nạp package, cùng một luật cho hai phía. Đề xuất: tách `is_copy` thành hàm chung, gọi cho cả input `repeat`.
 - **Ngày ghi**: 2026-10-23
 
+### [Thấp] Một input đọc `rgba` kéo cả pad về RGBA rồi thêm layout convert cho các input có plane
+- **Vấn đề**: `pad_layouts` chỉ cho pad nạp plane thẳng khi MỌI input đọc nó đều có plane. Chỉ cần một input đọc `rgba` là cả pad đi qua convert sang RGBA, rồi mỗi input có plane lại chạy một layout convert RGBA sang plane: frame nv12 vào hai effect yuv420 và một effect rgba tốn một convert RGBA và hai layout convert thay vì một lần nạp plane.
+- **Vị trí**: `pad_layouts` trong [graph.rs](../crates/gpufx-core/src/graph.rs#L375).
+- **Vì sao**: nạp plane một lần cho pad, chỉ các input đọc `rgba` mới chạy convert plane sang RGBA, bớt pass và bớt sai số làm tròn qua RGBA cho các input có plane.
+- **Ngày ghi**: 2026-10-23
+
 ### [Thấp] Manifest chưa kiểm giới hạn 16 texture đọc mỗi pass
 - **Vấn đề**: một pass đọc tối đa 16 texture (input kể cả mọi pad của `repeat`, texture package, output pass trước), nhưng manifest không đếm; vượt thì wgpu báo lỗi khó hiểu lúc tạo bind group layout.
 - **Vị trí**: các kiểm tra pass trong [manifest.rs](../crates/gpufx-core/src/manifest.rs), và `compile_pass` trong [runtime.rs](../crates/gpufx-core/src/runtime.rs).

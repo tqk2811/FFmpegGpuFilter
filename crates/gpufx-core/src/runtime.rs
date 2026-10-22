@@ -319,6 +319,19 @@ impl GpuContext {
         self.pool.stats()
     }
 
+    /// Whether planes of a `pixel_layout` other than `rgba` are 16-bit floats. For tests.
+    #[doc(hidden)]
+    pub fn plane_f16(&self) -> bool {
+        self.plane_f16
+    }
+
+    /// Makes the planes 32-bit floats on a context nothing else holds yet, so tests run
+    /// both plane formats on one adapter. Returns false when `ctx` is shared. For tests.
+    #[doc(hidden)]
+    pub fn use_f32_planes(ctx: &mut Arc<Self>) -> bool {
+        Arc::get_mut(ctx).map(|c| c.plane_f16 = false).is_some()
+    }
+
     /// e.g. `"NVIDIA GeForce RTX 4070 (Vulkan)"`.
     pub fn description(&self) -> String {
         format!("{} ({:?})", self.info.name, self.info.backend)
