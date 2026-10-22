@@ -88,6 +88,18 @@ impl Packages {
             r#"{"id":"t.pick420","name":"pick420","api":1,"used_for":["gpufx"],"inputs":[{"name":"a","pixel_layout":"yuv420"},{"name":"b","pixel_layout":"yuv420"}],"outputs":[{"name":"out","pixel_layout":"yuv420"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
             &[("a.wgsl", wgsl(&copy_planes("a", "", false)))],
         );
+        // Two yuv420 inputs: Y of the first, UV of the second.
+        pkgs.add(
+            "mix420",
+            r#"{"id":"t.mix420","name":"mix420","api":1,"used_for":["gpufx"],"inputs":[{"name":"a","pixel_layout":"yuv420"},{"name":"b","pixel_layout":"yuv420"}],"outputs":[{"name":"out","pixel_layout":"yuv420"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
+            &[(
+                "a.wgsl",
+                wgsl(
+                    "gpufx_write_y(p, textureLoad(in_a_y, p, 0).r);\n    let s = gpufx_chroma_scale();\n    \
+                     if (all(p % s == vec2u(0u))) { gpufx_write_uv(p / s, textureLoad(in_b_uv, p / s, 0).rg); }",
+                ),
+            )],
+        );
         pkgs
     }
 
@@ -466,6 +478,118 @@ fn gpu_frames_of_the_layout_skip_rgba() {
             if direct && matches!(fin, Nv12) {
                 assert_eq!(g.memory().input_textures, 0, "8-bit NV12 planes are read in place");
             }
+        }
+    }
+}
+
+/// The R8/RG8 unorm planes of an NV12 frame read in place and the pooled float planes of
+/// a yuv420p frame feed one effect: the effect's bind layout takes both (`r32float` is not
+/// filterable, `r16float` is), with 32-bit planes and, where the adapter has them, 16-bit.
+#[test]
+fn an_nv12_frame_read_in_place_and_pooled_planes_feed_one_effect() {
+    let Some(shared) = gpu() else { return };
+    let pkgs = Packages::new();
+    let info = FrameInfo::new(0.0, 0);
+    let (w, h) = (37, 21);
+    let mut f32_ctx = GpuContext::new(common::backend()).unwrap();
+    assert!(GpuContext::use_f32_planes(&mut f32_ctx));
+    let mut ctxs = vec![f32_ctx];
+    if shared.plane_f16() {
+        ctxs.push(shared);
+    }
+    let (a, b) = (codes(PixelFormat::Nv12, w, h, 3), codes(PixelFormat::Yuv420p, w, h, 4));
+    let uv: Vec<u8> = b[1].iter().zip(&b[2]).flat_map(|(&u, &v)| [u, v]).collect();
+    let want = vec![vec![a[0].clone(), uv]];
+    for ctx in ctxs {
+        let mut g = pkgs.graph(&ctx, "[0][1]mix420.zip").unwrap();
+        g.allow_direct_gpu();
+        let inputs = [upload(&ctx, PixelFormat::Nv12, &a, w, h), upload(&ctx, PixelFormat::Yuv420p, &b, w, h)];
+        let got = gpu_run(&ctx, &mut g, &inputs, &[target(&ctx, PixelFormat::Nv12, w, h)], Some(&info));
+        assert_eq!(got, want, "f16 {}", ctx.plane_f16());
+        // Only the yuv420p frame takes pooled planes (Y and UV); the NV12 one none.
+        assert_eq!(g.memory().input_textures, 2, "f16 {}", ctx.plane_f16());
+        let cpu =
+            cpu_run(&mut g, &[(PixelFormat::Nv12, a.clone()), (PixelFormat::Yuv420p, b.clone())], &[PixelFormat::Nv12], w, h, Some(&info));
+        assert_eq!(cpu, want, "CPU, f16 {}", ctx.plane_f16());
+    }
+}
+
+/// A bypass call reads the pads as RGBA, so the pad layout flips on every toggle: the
+/// slots and the plan follow, and each frame has the pixels of a fresh graph.
+#[test]
+fn toggling_bypass_rebuilds_the_planar_input_each_time() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let info = FrameInfo::new(0.0, 0);
+    let (w, h) = (37, 21);
+    let src = codes(PixelFormat::Nv12, w, h, 6);
+    let text = "id420.zip|id420.zip";
+    let off = cpu_run(&mut pkgs.graph(&ctx, text).unwrap(), &[(PixelFormat::Nv12, src.clone())], &[PixelFormat::Nv12], w, h, None);
+    assert_ne!(off[0], src, "the bypass goes through RGBA");
+    for gpu_frames in [false, true] {
+        let mut g = pkgs.graph(&ctx, text).unwrap();
+        g.allow_direct_gpu();
+        for (n, on) in [true, false, true, false, true].into_iter().enumerate() {
+            let i = on.then_some(&info);
+            let got = if gpu_frames {
+                gpu_run(&ctx, &mut g, &[upload(&ctx, PixelFormat::Nv12, &src, w, h)], &[target(&ctx, PixelFormat::Nv12, w, h)], i)
+            } else {
+                cpu_run(&mut g, &[(PixelFormat::Nv12, src.clone())], &[PixelFormat::Nv12], w, h, i)
+            };
+            let want = if on { vec![src.clone()] } else { off.clone() };
+            assert_eq!(got, want, "gpu {gpu_frames} call {n} on {on}");
+            if on {
+                assert_eq!((g.layout_converts(), g.rgba_conversions()), (0, 0), "gpu {gpu_frames} call {n}");
+            }
+        }
+    }
+}
+
+/// CPU planes with rows longer than their samples (odd sizes, chroma rounded up).
+#[test]
+fn padded_cpu_planes_load_straight() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let info = FrameInfo::new(0.0, 0);
+    let color = ColorInfo { matrix: Matrix::Bt709, range: Range::Limited, ..Default::default() };
+    for format in [PixelFormat::Nv12, PixelFormat::Yuv420p] {
+        for (w, h) in [(37, 21), (1, 1), (5, 3)] {
+            let src = codes(format, w, h, 7);
+            let mut strides = [0u32; 4];
+            let padded: Vec<Vec<u8>> = src
+                .iter()
+                .enumerate()
+                .map(|(p, data)| {
+                    let (row, _) = format.plane_size(p, w, h);
+                    strides[p] = row + 13;
+                    data.chunks(row as usize).flat_map(|r| r.iter().copied().chain([0xEE; 13])).collect()
+                })
+                .collect();
+            let mut planes: [&[u8]; 4] = [&[]; 4];
+            for (p, d) in padded.iter().enumerate() {
+                // The last row needs no padding.
+                planes[p] = &d[..d.len() - 13];
+            }
+            let frame = Frame { format, width: w, height: h, planes, strides, color };
+            let mut g = pkgs.graph(&ctx, "id420.zip").unwrap();
+            let mut outs: Vec<Vec<u8>> = (0..format.plane_count())
+                .map(|p| {
+                    let (r, n) = format.plane_size(p, w, h);
+                    vec![0; (r * n) as usize]
+                })
+                .collect();
+            {
+                let mut it = outs.iter_mut();
+                let mut p: [&mut [u8]; 4] = Default::default();
+                let mut out_strides = [0; 4];
+                for (i, slot) in p.iter_mut().enumerate().take(format.plane_count()) {
+                    *slot = it.next().unwrap();
+                    out_strides[i] = format.plane_size(i, w, h).0;
+                }
+                let mut targets = [FrameMut { format, width: w, height: h, planes: p, strides: out_strides, color }];
+                g.process_frames(&[frame], &mut targets, &info).unwrap();
+            }
+            assert_eq!(outs, src, "{} {w}x{h}", format.name());
         }
     }
 }

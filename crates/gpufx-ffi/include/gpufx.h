@@ -282,8 +282,10 @@ const char *gpufx_effect_output_pad_format(const GpufxEffect *fx, uint32_t outpu
  * when not NULL (the caller's choice), else first_input (the format of the first input)
  * when it is of the pixel_layout of the output, else that layout's default (nv12 for
  * yuv420, yuv422p, yuv444p, yuva420p, yuva444p, gray for y, rgba for rgba). An output
- * with planes in a format of its layout is written straight from its planes. A static
- * string, or NULL (see gpufx_last_error()) for an unknown format.
+ * with planes in a format of its layout is written straight from its planes when its
+ * frame has straight alpha (premultiplied frames go through RGBA). A static string, or
+ * NULL (see gpufx_last_error()) for an unknown or non-UTF-8 out_format; an unknown
+ * first_input (a format the GPU does not convert) falls back to the layout's default.
  */
 const char *gpufx_effect_output_default_format(const GpufxEffect *fx, uint32_t output, const char *out_format,
                                                const char *first_input);

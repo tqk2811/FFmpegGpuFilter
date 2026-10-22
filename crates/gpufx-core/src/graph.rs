@@ -2675,7 +2675,10 @@ impl EffectGraph {
     /// first input frame) when it is of the `pixel_layout` of the output, else that layout's
     /// default ([`PixelFormat::default_of`]: `nv12` for `yuv420`, `gray` for `y`, `rgba`
     /// for `rgba`, ...). An output with planes in a format of its layout is written straight
-    /// from its planes; any other format goes through RGBA.
+    /// from its planes when its frame has straight alpha; a premultiplied frame, or any
+    /// other format, goes through RGBA. An unknown `out_format` is an error (the caller
+    /// asked for it); an unknown `first_input` (a format the GPU does not convert, e.g. a
+    /// 12-bit one) is only a hint and falls back to the layout's default.
     pub fn output_default_format(&self, k: usize, out_format: Option<&str>, first_input: Option<&str>) -> Result<PixelFormat, Error> {
         if k >= self.topo.outputs.len() {
             return Err(Error::Unsupported(format!("the {} has no output {k}", self.what)));

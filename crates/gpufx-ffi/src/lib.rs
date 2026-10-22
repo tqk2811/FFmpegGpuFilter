@@ -592,7 +592,8 @@ pub unsafe extern "C" fn gpufx_effect_output_pad_format(fx: *const GpufxEffect, 
 
 /// The pixel format output `output` is written in: `out_format` when not NULL, else
 /// `first_input` when of the output's `pixel_layout`, else that layout's default (see
-/// `EffectGraph::output_default_format`). NULL with gpufx_last_error() for an unknown format.
+/// `EffectGraph::output_default_format`). NULL with gpufx_last_error() for an unknown or
+/// non-UTF-8 `out_format`; an unknown or non-UTF-8 `first_input` falls back to the default.
 #[no_mangle]
 pub unsafe extern "C" fn gpufx_effect_output_default_format(
     fx: *const GpufxEffect,
@@ -602,8 +603,9 @@ pub unsafe extern "C" fn gpufx_effect_output_default_format(
 ) -> *const c_char {
     guard(ptr::null(), || {
         let fx = fx.as_ref().ok_or("effect is NULL")?;
-        let text = |p: *const c_char| if p.is_null() { None } else { CStr::from_ptr(p).to_str().ok() };
-        let f = fx.graph.output_default_format(output as usize, text(out_format), text(first_input)).map_err(|e| e.to_string())?;
+        let out_format = if out_format.is_null() { None } else { Some(str_arg(out_format, "out_format")?) };
+        let first_input = if first_input.is_null() { None } else { CStr::from_ptr(first_input).to_str().ok() };
+        let f = fx.graph.output_default_format(output as usize, out_format, first_input).map_err(|e| e.to_string())?;
         let i = PixelFormat::ALL.iter().position(|&a| a == f).expect("a listed format");
         Ok(format_names()[i].as_ptr())
     })
@@ -1555,6 +1557,30 @@ mod tests {
             assert_eq!(rc, -1);
             let err = CStr::from_ptr(gpufx_last_error()).to_str().unwrap().to_string();
             assert!(err.contains("gpufx_effect_use_vulkan"), "{err}");
+            gpufx_effect_free(fx);
+        }
+    }
+
+    /// NULL arguments pick the next rule; an `out_format` that is not UTF-8 is an error,
+    /// not taken as absent, while a `first_input` that is not falls back to the default.
+    #[test]
+    fn output_default_format_takes_null_and_rejects_a_bad_out_format() {
+        let _serial = serial();
+        let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx/ffmpeg");
+        let fx = open(&examples.join("invert"));
+        assert!(!fx.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        let name = |p: *const c_char| (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) }.to_str().unwrap().to_string());
+        let bad = [0xFFu8, 0];
+        let nv12 = CString::new("nv12").unwrap();
+        unsafe {
+            assert!(gpufx_effect_output_default_format(ptr::null(), 0, ptr::null(), ptr::null()).is_null());
+            assert_eq!(name(gpufx_effect_output_default_format(fx, 0, ptr::null(), ptr::null())).as_deref(), Some("rgba"));
+            assert_eq!(name(gpufx_effect_output_default_format(fx, 0, nv12.as_ptr(), ptr::null())).as_deref(), Some("nv12"));
+            assert_eq!(name(gpufx_effect_output_default_format(fx, 0, ptr::null(), bad.as_ptr().cast())).as_deref(), Some("rgba"));
+            assert!(gpufx_effect_output_default_format(fx, 0, bad.as_ptr().cast(), ptr::null()).is_null());
+            let err = CStr::from_ptr(gpufx_last_error()).to_str().unwrap().to_string();
+            assert!(err.contains("out_format is not UTF-8"), "{err}");
+            assert!(gpufx_effect_output_default_format(fx, 1, ptr::null(), ptr::null()).is_null());
             gpufx_effect_free(fx);
         }
     }
