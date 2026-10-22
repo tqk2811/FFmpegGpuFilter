@@ -64,6 +64,12 @@ impl Packages {
             r#"{"id":"t.idrgba","name":"idrgba","api":1,"used_for":["gpufx"],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
             &[("a.wgsl", wgsl("gpufx_write(id, textureLoad(src, vec2i(p), 0));"))],
         );
+        // The same copy with `pixel_layout: rgba` declared on its output (as keying effects do).
+        pkgs.add(
+            "keeprgba",
+            r#"{"id":"t.keeprgba","name":"keeprgba","api":1,"used_for":["gpufx"],"outputs":[{"name":"out","pixel_layout":"rgba"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}"#,
+            &[("a.wgsl", wgsl("gpufx_write(id, textureLoad(src, vec2i(p), 0));"))],
+        );
         // The luma of a yuv420 input as a `y` output.
         pkgs.add(
             "luma",
@@ -366,6 +372,22 @@ fn a_yuv444p_input_into_a_yuv420_effect_takes_one_plane_convert() {
             }
         }
     }
+}
+
+/// An output without a declared `pixel_layout` keeps its source input's format (the core
+/// converts back); a declared one, even `rgba`, takes a format of its layout.
+#[test]
+fn an_undeclared_output_layout_keeps_the_input_format() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let g = pkgs.graph(&ctx, "idrgba.zip").unwrap();
+    assert_eq!(g.output_default_format(0, None, Some("nv12")).unwrap(), PixelFormat::Nv12);
+    assert_eq!(g.output_default_format(0, None, Some("yuv420p")).unwrap(), PixelFormat::Yuv420p);
+    assert_eq!(g.output_default_format(0, None, None).unwrap(), PixelFormat::Rgba);
+    let g = pkgs.graph(&ctx, "keeprgba.zip").unwrap();
+    assert_eq!(g.output_default_format(0, None, Some("nv12")).unwrap(), PixelFormat::Rgba);
+    let g = pkgs.graph(&ctx, "id420.zip").unwrap();
+    assert_eq!(g.output_default_format(0, None, Some("nv12")).unwrap(), PixelFormat::Nv12);
 }
 
 #[test]

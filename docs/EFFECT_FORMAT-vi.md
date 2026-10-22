@@ -81,8 +81,10 @@ Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là l�
 
 Pixel format: bộ chuyển đổi trên GPU đọc và ghi `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (và đọc thêm
-`yuvj420p`/`yuvj422p`/`yuvj444p`). `sw_format` của output mặc định theo `pixel_layout` của nó: format của input đầu nếu cùng
-layout, không thì format mặc định của layout (`nv12` cho `yuv420`, `gray` cho `y`, `yuva420p` cho `yuva420`, `rgba` cho
+`yuvj420p`/`yuvj422p`/`yuvj444p`). `sw_format` của output mặc định là format của input nguồn (input định nhịp pad của nó) khi
+manifest không khai `pixel_layout` cho output, loại nào cũng vậy (core đổi ngược lại: hiệu ứng RGBA thường trên `nv12` ra
+`nv12`). Output có khai `pixel_layout`, kể cả `rgba`, lấy format của input đó nếu cùng layout, không thì format mặc định
+của layout (`nv12` cho `yuv420`, `gray` cho `y`, `yuva420p` cho `yuva420`, `rgba` cho
 `rgba`). Option `out_format` của filter (một mục, hoặc mỗi output pad một mục cách nhau bằng `|`) ghi đè và có thể là
 bất kỳ format nào GPU chuyển được. Hiệu ứng tạo ra alpha giữ alpha mặc định khi output khai `rgba` hoặc
 `yuva420`/`yuva444`.
@@ -349,8 +351,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   hoặc khi filter bị bypass thì đi qua RGBA.
 - **Frame ra**: output có plane được ghi thẳng vào frame cùng loại (`yuv420` vào `nv12`, `y` vào `gray`, `yuva420` vào
   `yuva420p` giữ alpha); format khác (`out_format=rgba`) đi qua RGBA. Không chỉ định format thì output lấy
-  `out_format`, không có thì format của input đầu nếu cùng loại, không nữa thì `nv12` (`yuv420`), `yuv422p`, `yuv444p`,
-  `yuva420p`, `yuva444p` hoặc `gray` (`y`). Frame ra giữ matrix và range của input đầu.
+  `out_format`, không có thì format của input nguồn (loại nào cũng được khi không khai `pixel_layout`, khai thì phải cùng
+  loại), không nữa thì `nv12` (`yuv420`), `yuv422p`, `yuv444p`, `yuva420p`, `yuva444p`, `gray` (`y`) hoặc `rgba`. Frame
+  ra giữ matrix và range của input đầu; riêng frame RGB được gắn RGB full range.
 
 ### Kích thước output
 

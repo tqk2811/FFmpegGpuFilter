@@ -275,8 +275,9 @@ tạo graph thay vì chạy sai.
   [`GpuOutputSlot::bind_planes`](../../crates/gpufx-core/src/convert.rs#L934), mỗi plane một pass). Mã ghi theo matrix và range của input đầu; bên gọi
   gắn chúng cho frame ra. `gray` (PlaneKind 3) cũng đi được qua bộ convert RGBA: chroma trung tính ở
   [`load_uv`](../../crates/gpufx-core/src/convert_in.wgsl#L27), ra GPU bằng pass từng plane.
-- **Format ra**: [`EffectGraph::output_default_format`](../../crates/gpufx-core/src/graph.rs#L2669) (C: `gpufx_effect_output_default_format`) chọn
-  `out_format`, không có thì format của input đầu nếu cùng layout của output, không nữa thì
+- **Format ra**: [`EffectGraph::output_default_format`](../../crates/gpufx-core/src/graph.rs#L2673) (C: `gpufx_effect_output_default_format`) chọn
+  `out_format`, không có thì format của input nguồn (giữ nguyên khi output không khai `pixel_layout`,
+  `OutputDef::declared_layout`; có khai thì chỉ khi cùng layout đó), không nữa thì
   [`PixelFormat::default_of`](../../crates/gpufx-core/src/frame.rs#L164). Test đếm số convert frame bằng `rgba_conversions` và `layout_converts`.
 
 ## 5. Filter FFmpeg `gpufx`
