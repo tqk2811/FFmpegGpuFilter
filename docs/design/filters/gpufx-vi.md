@@ -37,7 +37,7 @@ Trên dòng lệnh, bọc cả giá trị `graph=` trong `'...'` để bảo v�
 | `graph` | string | không có | đường dẫn một effect, chuỗi `\|` hoặc graph có nhãn | Bắt buộc: thiếu thì filter lỗi ở init. Số input pad là số input của effect đầu với chain không nhãn (với input `repeat` là `default`), còn lại là pad lớn nhất được đọc (có nhãn hoặc gắn ngầm) cộng một; số output pad là số output của graph |
 | `backend` | string | `auto` | `auto`, `vulkan` (`vk`), `dx12` (`d3d12`, `directx`), `metal` (`mtl`); không phân biệt hoa thường | Chỉ để test: `auto` theo device của frame. `gl` bị từ chối; `metal` bị từ chối nếu bản build không có VideoToolbox (macOS). Tên khác báo lỗi khi mở graph |
 | `shortest` | bool | `0` | `0`, `1` | `0`: chỉ input 0 quyết định điểm kết thúc (input khác giữ frame cuối, và hiện frame trống trước frame đầu của nó). `1`: output kết thúc khi một input bất kỳ kết thúc |
-| `out_format` | chuỗi | không có (chọn theo input) | tên một pixel format của FFmpeg, hoặc mỗi output pad một tên, cách nhau bằng `\|` | Ép format của các output (`sw_format` của GPU frame). Một tên thì áp cho mọi output (`out_format=rgba`); nhiều tên thì theo thứ tự output pad (`out_format=yuva420p\|nv12`), mục rỗng giữ mặc định của pad đó (`out_format=\|nv12`). Mỗi format phải nằm trong `formats` của output manifest tương ứng, libgpufx ghi được và device lưu được, nếu không cấu hình lỗi. Lỗi: `unknown pixel format 'x'`, `has 3 entries` (khác 1 và khác số output pad) |
+| `out_format` | chuỗi | không có (chọn theo input) | tên một pixel format của FFmpeg, hoặc mỗi output pad một tên, cách nhau bằng `\|` | Ép format của các output (`sw_format` của GPU frame). Một tên thì áp cho mọi output (`out_format=rgba`); nhiều tên thì theo thứ tự output pad (`out_format=yuva420p\|nv12`), mục rỗng giữ mặc định của pad đó (`out_format=\|nv12`). Mỗi format phải là format libgpufx ghi được và device lưu được, nếu không cấu hình lỗi. Lỗi: `unknown pixel format 'x'`, `has 3 entries` (khác 1 và khác số output pad) |
 | `passthrough` | int (enum) | `auto` | `auto`, `off` | Khi `enable=` tắt filter: `auto` gắn nhãn lại texture input thành frame output, không copy GPU, nếu pixel không đổi và filter kế tiếp là `gpufx`, `gpufx_download` hoặc `hwdownload`; `off` luôn copy |
 | `bypass` | int (enum) | `0` | `0`, `auto` | Input được chuyển tiếp khi filter bị `enable=` tắt: `0` là input pad nguồn của từng output, `auto` là pad đó cho tới khi filter được bật một frame, sau đó là input pad cuối. Pad được chọn phải cùng size với output, nếu không `EINVAL` |
 | `enable` | string (expression) | không có | expression timeline của FFmpeg | Option timeline chung của FFmpeg (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): bằng 0 thì filter đi đường disabled mô tả ở `passthrough`/`bypass`. Khác với `enable=` inline của một effect |
@@ -62,8 +62,7 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
   mọi pass nằm trong một lần submit GPU, không qua frame trung gian.
   Input của filter là input của hiệu ứng đầu; chỉ hiệu ứng đầu được có nhiều input. Output
   theo quy tắc của hiệu ứng cuối. Quy tắc của hiệu ứng sau được kiểm như khi nối filter:
-  format là format đầu tiên trong `output.formats` của hiệu ứng trước mà hiệu ứng sau nhận,
-  kích thước là kích thước hiệu ứng trước ghi ra (của input đầu, hoặc size từ `gpufx_output_size`). Frame vẫn là RGBA trên GPU, không chuyển sang format đó.
+  kích thước là kích thước hiệu ứng trước ghi ra (của input đầu, hoặc size từ `gpufx_output_size`). Giữa các hiệu ứng, texture là RGBA trên GPU bất kể format của stream.
   Mỗi hiệu ứng có tham số inline riêng (`graph='gaussian-blur.zip=radius=8|vignette.zip=strength=0.6'`, xem
   "Tham số inline" bên dưới). Dấu cách quanh `|` được bỏ qua.
 - **Chỉ trả ra frame GPU**, giống các filter `*_cuda`: mọi output là frame Vulkan, D3D12, D3D11 hoặc VideoToolbox, nên trước
@@ -79,12 +78,12 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
   Thêm một API là thêm một dòng vào `hw_apis[]` và các nhánh trong các switch theo API của
   `vf_gpufx.c`.
 - **out_format**: ép pixel format của mọi output (với frame Vulkan/D3D: sw_format của frames context đầu
-  ra). Format phải nằm trong danh sách output của effect, libgpufx phải chuyển được trên GPU
-  (`gpufx_format_supported`), và với frame GPU thì FFmpeg phải tạo được storage image của nó; không thì
-  filter báo lỗi lúc configure. Mặc định: format của input nguồn (input CPU: format nó được upload) nếu effect
-  được trả ra format đó, không thì format output đầu tiên GPU ghi được (xem "Frame Vulkan" trong [DESIGN-vi.md](../DESIGN-vi.md)). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
+  ra). Format có thể là bất kỳ format nào libgpufx chuyển được trên GPU
+  (`gpufx_format_supported`; manifest không có danh sách `formats`), và với frame GPU thì FFmpeg phải tạo được storage image của nó; không thì
+  filter báo lỗi lúc configure. Mặc định: format của input nguồn của output (input đầu, hoặc input `bypass` của output; input CPU: format nó được upload) nếu
+  libgpufx ghi được, không thì `rgba` (xem "Frame Vulkan" trong [DESIGN-vi.md](../DESIGN-vi.md)). Mặc định bỏ alpha khi input không có alpha: muốn giữ thì `out_format=rgba` (hoặc `yuva420p`). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
   đổi YUV ↔ RGBA (filter cuối quay về bằng `out_format=nv12`).
-  Giới hạn: một format cho mọi output của filter; với frame D3D chỉ nv12, p010le, rgba, rgba64le; với frame VideoToolbox chỉ nv12, p010le.
+  Giới hạn: với frame D3D chỉ nv12, p010le, rgba, rgba64le; với frame VideoToolbox chỉ nv12, p010le.
 - **passthrough** (`auto`, `off`; mặc định `auto`): filter làm gì khi timeline `enable=` tắt nó.
   `auto` đưa cho mỗi output texture của input nguồn, gắn nhãn lại thành frame của output (buffer
   của input cùng frames context của output link, không copy trên GPU) khi copy trên GPU sẽ giữ

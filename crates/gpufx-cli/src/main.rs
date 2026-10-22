@@ -55,9 +55,6 @@ fn info(path: &str) -> Result<(), String> {
     println!("inputs:");
     for i in &m.inputs {
         println!("  {} {}", i.name, i.description);
-        if !i.formats.is_empty() {
-            println!("    formats: {}", i.formats.join(", "));
-        }
         for (what, rule) in [("width", &i.width), ("height", &i.height)] {
             if let Some(r) = rule {
                 println!("    {what}: {}", describe(r));
@@ -69,7 +66,7 @@ fn info(path: &str) -> Result<(), String> {
     }
     println!("outputs:");
     for o in &m.outputs {
-        println!("  {}: formats {}", o.name, o.formats.join(", "));
+        println!("  {}", o.name);
     }
     println!("params:");
     for p in &m.params {

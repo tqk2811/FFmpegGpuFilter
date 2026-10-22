@@ -99,7 +99,6 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
   it is uploaded once.
 - **Limitation:** `gpufx_upload`/`gpufx_download` exist for Vulkan only; a frame size change midstream returns
   EINVAL; with sparse (live) input each frame is delayed by `latency` frames.
-- **Limitation:** `out_format` is one format for every output.
 
 ## Effects, parameters, expressions, graph
 

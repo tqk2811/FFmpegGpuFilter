@@ -198,14 +198,14 @@ passes → built-in conversion pass → copy back to RAM. libgpufx converts `rgb
   copied to one mappable buffer and read back.
 - RGBA textures are `rgba16float` when a frame of the chain (an input or the output) has more than 8 bits,
   so 10-bit survives the chain; otherwise `rgba8unorm`. Package PNGs stay `rgba8unorm`.
-- The filter: inputs without `formats` accept these formats directly (FFmpeg converts other formats to
-  one of them); inputs with `formats` receive the frame as is. Formats, matrices (FCC, SMPTE 240M,
+- The filter: inputs accept these formats directly (FFmpeg converts other formats to
+  one of them; the manifest has no `formats` field, shaders always see RGBA). Formats, matrices (FCC, SMPTE 240M,
   YCgCo...) and BT.2020 constant luminance that libgpufx does not handle are converted with `swscale` to
   `rgba` (or `rgba64le` above 8 bits) as before. The output is never converted by swscale: the filter outputs GPU frames
-  only (see "Formats the GPU does not convert"). A manifest without `outputs` may output
-  any of these formats (`rgba` first), so a CPU encoder taking `yuv420p` needs `hwdownload` after `gpufx`
-  but no `scale`. Such an output may be YUV without alpha, dropping the alpha the effect writes: effects that produce
-  alpha should declare `output.formats` (a recommendation, not checked by the code).
+  only (see "Formats the GPU does not convert"). An output may be any of these formats
+  (default: the format of its source input, see below), so a CPU encoder taking `yuv420p` needs `hwdownload` after `gpufx`
+  but no `scale`. Such an output may be YUV without alpha, dropping the alpha the effect writes: to keep it, use
+  `out_format=rgba` (or `yuva420p`).
 - Unspecified chroma siting is centre for full range frames (JPEG/MJPEG) and left otherwise.
 - Each package compiles its `rgba8unorm` pipelines when it loads and its `rgba16float` ones when the
   first frame above 8 bits comes (that frame waits for the compile; an error names the package).
@@ -400,17 +400,17 @@ of a plane, and `encode()` ([L51](../../crates/gpufx-core/src/convert_out.wgsl#L
 The core does not choose; it builds the convert-out that matches the output frame it is given (`GpuOutputSlot::new` and
 `OutputSlot::new` take the format of the frame). The choice is made by the C filter:
 
-1. **Manifest**: `output.formats` lists the formats the effect may produce, in order of preference. Without it, the list
-   is every format libgpufx converts, `rgba` first ([manifest.rs](../../crates/gpufx-core/src/manifest.rs#L419)). Recommendation (not enforced
-   by the code): an effect that writes meaningful alpha should list only formats with alpha (`rgba`, `rgba64le`, `yuva*`).
-2. **Filter option `out_format`**: when set, every output must list it and libgpufx must convert it
-   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L554)), else configuration fails.
+1. **Manifest**: no format list. The manifest has no `formats` field on `inputs` or `outputs` (giving it is an "unknown
+   field" error); every output may be any format libgpufx converts. An effect that writes meaningful alpha needs
+   `out_format=rgba` (or `yuva420p`) when its input format has no alpha.
+2. **Filter option `out_format`**: one entry, or one per output pad separated by `|`; it may be any GPU-converted
+   format (the old check "must be in the output formats" is gone). A format libgpufx does not convert fails configuration.
 3. **Candidate order** (`config_vulkan_output`, [vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L949); `config_d3d_output`,
    [L1224](../../ffmpeg/vf_gpufx.c#L1224)): `out_format` if set, else the `sw_format` of the input
-   `source[k]` (`hw_in_fmt[source[k]]`) if the manifest lists it. `source[k]` comes from `gpufx_effect_output_source`
-   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L587)): the input pad whose size (and frame rate, aspect ratio) output `k` has,
-   found by following the graph from the output back through the first input of each effect; then the manifest list in order. A candidate is skipped when it
-   is not listed, libgpufx does not convert it, or the API cannot write it. With `out_format` there is no fallback: that
+   `source[k]` (`hw_in_fmt[source[k]]`) when libgpufx can write it, else `rgba`. `source[k]` comes from `gpufx_effect_output_source`
+   ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L587)): the first input, or the output's `bypass` input, found by following the
+   graph from the output back through the first input of each effect. A candidate is skipped when
+   libgpufx does not convert it or the API cannot write it. With `out_format` there is no fallback: that
    format or an error.
 4. **API limits**: Vulkan needs FFmpeg to make one-image-per-plane images with storage usage for the format
    (`av_vkfmt_from_pixfmt`, `VK_IMAGE_USAGE_STORAGE_BIT`). D3D12 and D3D11 accept `nv12`, `p010le`, `rgba`, `rgba64le`;
@@ -419,8 +419,8 @@ The core does not choose; it builds the convert-out that matches the output fram
    `ColorInfo` built from the frame (`gpu_color_fmt`, [vf_gpufx_frames.h](../../ffmpeg/vf_gpufx_frames.h#L87)), and the core
    builds or reuses the slot for that (format, size).
 
-So a `yuv420p10le` input of an effect that lists it comes out as `yuv420p10le`, and an effect that lists only `rgba`
-always outputs `rgba`.
+So a `yuv420p10le` input comes out as `yuv420p10le`, and `out_format=rgba` always outputs `rgba`. Between effects of
+a chain or graph the textures are RGBA.
 
 **What is lost going from RGBA to a format without alpha** (for example `nv12`): the alpha the effect wrote is dropped.
 It is not composited over a background, so a transparent pixel keeps whatever RGB the effect left under it (often
@@ -432,10 +432,10 @@ the chain is 8-bit (`rgba8unorm`) and the format is 10-bit, the extra bits only 
 
 The C layer lets only formats the GPU can read through, and uses swscale for the rest:
 
-- `query_formats` ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2248)): an input without a manifest `formats` list offers only
+- `query_formats` ([vf_gpufx.c](../../ffmpeg/vf_gpufx.c#L2248)): an input offers only
   formats libgpufx converts (`gpufx_format_supported`), so FFmpeg's negotiation inserts a `scale` (swscale) in front for
-  the others (`gray`, `rgb24`, `yuv411p`...). An input *with* a `formats` list offers every format swscale reads and
-  receives the frame in its own format.
+  the others (`gray`, `rgb24`, `yuv411p`...). A format that still reaches an input without being converted fails with
+  ``pixel format `x` is not converted on the GPU (supported: ...)``.
 - Software frames are uploaded by `upload_input` ([L1619](../../ffmpeg/vf_gpufx.c#L1619)) into GPU frames of the format
   chosen by `config_upload` ([L1574](../../ffmpeg/vf_gpufx.c#L1574)): the input's own format if the device takes it, else
   `nv12` / `p010le` for 4:2:0 YUV without alpha, else `rgba` / `rgba64le` (`rgba_for`,
@@ -456,7 +456,7 @@ The C layer lets only formats the GPU can read through, and uses swscale for the
    and change `PIXEL_FORMATS` in [convert.rs](../../crates/gpufx-core/src/convert.rs#L315) (`Yuva444p as usize + 1`) to the new
    last variant. If the format is a combination of what exists (planar or semi-planar YUV or RGBA, depth up to 16,
    subsampling 1 or 2, an optional alpha plane), `plane_dims`, `plane_texture_format`, `plane_format`, `uniform` and the
-   shaders need no change; `from_name`, `gpufx_format_supported` and the default `output.formats` follow `NAMES`.
+   shaders need no change; `from_name` and `gpufx_format_supported` follow `NAMES`.
 2. A new **layout** (packed YUV such as `yuyv422`, 3-channel RGB, subsampling 4) needs a new `PlaneKind` and edits in
    `plane_dims` / `plane_count`; `uniform` (channel map `ch`); the `kind` comment of `convert.wgsl`; `load_uv` and `pixel`
    of `convert_in.wgsl`; `sample` and `channel` of `convert_out.wgsl`; `fused_source`; and the tile sizes of
@@ -501,7 +501,7 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
   outputs (manifest `outputs` array): labels after it name them by position or as `[name=label]`, the first
   unlabelled one goes on along the chain, a last effect without labels writes all of them, other unlabelled
   outputs are dropped with the passes only they need. In the engine an edge is `Source::Node(effect, output)`;
-  each output has its own texture, size, formats, bypass input and in-place frame.
+  each output has its own texture, size, bypass input and in-place frame.
   `split` and `null` cost nothing: their outputs *are* their input (two edges reading one texture).
 - An effect writes the size of its first input (or the size from `gpufx_output_size`, propagated to
   downstream nodes); output pad k takes the SAR and frame rate of the
@@ -568,8 +568,8 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   `STORAGE` usage. A multiplane image is refused at configuration with a message saying so, and so are input frames without
   `SAMPLED` usage. FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without any usage by default (the
   ones `hwupload` makes work), so outputs fall back to another format, e.g. `rgba`. The output
-  sw_format is the source input's when the effect may output it, else the first format of the output pad
-  that libgpufx converts and that FFmpeg can make storage images of. `out_format` replaces that choice
+  sw_format is the source input's when libgpufx can write it and FFmpeg can make storage images of it, else
+  `rgba`. `out_format` replaces that choice
   (that format or a configuration error). Chains of separate filters keep RGBA in between with
   `out_format=rgba` on all but the last (numbers in [BENCHMARK.md](../BENCHMARK.md): faster than without it, still
   slower than one `graph=`).

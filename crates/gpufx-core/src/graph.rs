@@ -1760,66 +1760,15 @@ impl EffectGraph {
             }
             fx.set_used_outputs(&used);
         }
-        // What gpufx=a,gpufx=b would negotiate: the first output format of `a` that `b` accepts.
-        let mut links = Vec::with_capacity(effects.len());
-        let mut input_formats: Vec<Option<Vec<String>>> = vec![None; topo.nb_inputs];
-        for (k, fx) in effects.iter().enumerate() {
-            let m = &fx.package().manifest;
-            let mut row = Vec::new();
-            for (i, src) in topo.node_inputs[k].iter().enumerate() {
-                let accepted = &m.inputs[i].formats;
-                match *src {
-                    Source::Node(j, o) => {
-                        let prev = &effects[j].package().manifest;
-                        let formats = &prev.outputs[o].formats;
-                        let link = formats.iter().find(|f| accepted.is_empty() || accepted.contains(f)).ok_or_else(|| {
-                            let what =
-                                if prev.outputs.len() == 1 { String::new() } else { format!(" (output `{}`)", prev.outputs[o].name) };
-                            Error::Unsupported(format!(
-                                "`{}`{what} outputs {} but `{}` accepts {}",
-                                labels[j],
-                                formats.join(", "),
-                                labels[k],
-                                accepted.join(", ")
-                            ))
-                        })?;
-                        row.push(Some(link.clone()));
-                    }
-                    Source::Input(p) => {
-                        // A pad read by several effects takes the formats all of them accept.
-                        let merged = match (&input_formats[p], accepted.is_empty()) {
-                            (None, _) => accepted.clone(),
-                            (Some(have), true) => have.clone(),
-                            (Some(have), false) if have.is_empty() => accepted.clone(),
-                            (Some(have), false) => {
-                                let common: Vec<String> = have.iter().filter(|f| accepted.contains(f)).cloned().collect();
-                                if common.is_empty() {
-                                    return Err(Error::Unsupported(format!(
-                                        "input {p} is read by effects accepting {} and by `{}` accepting {}: no common format",
-                                        have.join(", "),
-                                        labels[k],
-                                        accepted.join(", ")
-                                    )));
-                                }
-                                common
-                            }
-                        };
-                        input_formats[p] = Some(merged);
-                        row.push(None);
-                    }
-                }
-            }
-            links.push(row);
-        }
-        let input_formats = input_formats.into_iter().map(Option::unwrap_or_default).collect();
-        let output_formats = topo
-            .outputs
+        // Effects pass RGBA textures to each other; inputs and outputs take any format the
+        // GPU converts.
+        let links: Vec<Vec<Option<String>>> = topo
+            .node_inputs
             .iter()
-            .map(|s| match *s {
-                Source::Node(j, o) => effects[j].package().manifest.outputs[o].formats.clone(),
-                Source::Input(_) => crate::manifest::default_output_formats(),
-            })
+            .map(|ins| ins.iter().map(|src| matches!(src, Source::Node(..)).then(|| "rgba".to_string())).collect())
             .collect();
+        let input_formats = vec![Vec::new(); topo.nb_inputs];
+        let output_formats = vec![crate::manifest::default_output_formats(); topo.outputs.len()];
 
         let mut params = Vec::new();
         let mut param_names = Vec::new();

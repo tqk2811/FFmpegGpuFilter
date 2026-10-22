@@ -10,7 +10,7 @@ The effect takes every input connected to its graph node, in order, 2 to 16 (lik
 
 ## Output
 
-Same size as the first input (`src0`): the frame is divided into the grid cells and each input is scaled (bilinear) into its cell. FFmpeg's `xstack` makes a frame as large as the placed inputs; gpufx effects only grow the output for `hstack`/`vstack` layouts, so this port shrinks the inputs instead. For a bigger frame, scale the first input up first. Pixel format: the first input's, when the effect may output it (the manifest has no `output.formats` rule).
+Same size as the first input (`src0`): the frame is divided into the grid cells and each input is scaled (bilinear) into its cell. FFmpeg's `xstack` makes a frame as large as the placed inputs; gpufx effects only grow the output for `hstack`/`vstack` layouts, so this port shrinks the inputs instead. For a bigger frame, scale the first input up first. Pixel format: the first input's when the GPU converter can write it, else `rgba`; `out_format` overrides.
 
 ## Options
 
