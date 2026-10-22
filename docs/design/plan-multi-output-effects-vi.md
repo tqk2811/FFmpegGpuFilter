@@ -28,12 +28,14 @@ Số dòng dưới đây đo trên working tree ngày 2026-10-22 (đang có sử
 
 `output` cấp effect đổi thành MẢNG giống `inputs`. Bỏ trống thì là `[{"name": "out"}]`.
 
+Ghi chú: `formats` của input/output đã bỏ khỏi manifest (format chỉ chọn ở FFmpeg), ví dụ dưới không còn mang nó.
+
 ```json
 {
-  "inputs": [{ "name": "src", "formats": ["rgba"] }],
+  "inputs": [{ "name": "src" }],
   "outputs": [
-    { "name": "color", "formats": ["rgba", "nv12"] },
-    { "name": "matte", "formats": ["gray", "rgba"] }
+    { "name": "color" },
+    { "name": "matte" }
   ],
   "groups": [{ "passes": [
     { "shader": "key.wgsl", "inputs": ["src"], "outputs": ["color", "matte"] }

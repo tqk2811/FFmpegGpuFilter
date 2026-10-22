@@ -203,14 +203,17 @@ pad. The package is compiled for that count; the number of input pads of the `gp
 names the input reads all its pads. `gpufx pack --precompile` compiles the `default` count only; another count compiles
 its shaders when the graph loads.
 
-The shader cannot know the pad names in advance, so the prelude of a package with a `repeat` input (or whose shader defines `gpufx_output_size`) also declares
-(over the effect inputs the pass reads, in pad order):
+The shader cannot know the pad names in advance, so the prelude also declares helpers over the effect inputs. `i` is the
+index of the input among the effect's inputs, in pad order, whatever inputs the pass binds; package textures are not counted:
 
 ```wgsl
-fn gpufx_input_count() -> u32                       // number of inputs
-fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions of input i (0 when out of range)
-fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad of input i at level 0 (0 when out of range)
+fn gpufx_input_count() -> u32                       // number of effect inputs
+fn gpufx_input_size(i: u32) -> vec2u                // textureDimensions of input i (0 when out of range or not bound by the pass)
+fn gpufx_input_load(i: u32, p: vec2i) -> vec4f      // textureLoad of input i at level 0 (0 when out of range or not bound); `repeat` packages only
 ```
+
+GLSL shaders get `uint gpufx_input_count()` and `uvec2 gpufx_input_size(uint i)` with the same meaning. Inside
+`gpufx_output_size` (see below) `gpufx_input_size(i)` gives the size of every effect input, bound by the pass or not.
 
 See `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl`.
 
@@ -233,13 +236,16 @@ Rules:
   in WGSL and GLSL): no textures, no `globals`.
 - It is optional. Without it, the output has the size of the first input.
 - The sizes are computed once, by a one-off GPU dispatch when the filter is configured, from the param values at that
-  time: the defaults and the constant inline values of the graph. Per-frame expressions are not evaluated then, their params keep the default.
+  time: the defaults, the inline values of the graph, and the FFmpeg filter's param expressions evaluated at `t=0`, `n=0`
+  (`w`, `h`, `a`, `sar`, `dar` of the first input), so `w='640+0'` works. No GPU work runs per frame for the size.
+- Only a function named exactly `gpufx_output_size` counts (a comment or another name mentioning it does not).
 - A size of 0, or above the device's largest texture side (`max_texture_dimension_2d`, 8192 or more on desktop GPUs), is an error.
   `hstack` of inputs with different heights returns 0, so the error reads `gpufx_output_size gives 0x0`.
 - Downstream effects of a chain or graph see that size, and the FFmpeg filter gives its output link that size (frame rate and
   aspect ratio still come from the first input).
-- If a param later changes so that the size changes, processing fails with an error naming the size mismatch
-  (a size from `gpufx_output_size` must not change while the stream runs).
+- The params the function reads (found in the compiled shader) must keep the values the size was computed from: when one
+  changes, even to a value giving the same size, processing fails with an error naming it (`parameter `w` sets the size of
+  the output of `scale` and must not change while the stream runs`). Other params may change freely.
 
 Examples: `packages/gpufx/ffmpeg/hstack/shaders/hstack.wgsl` (the inputs side by side) and
 `packages/gpufx/ffmpeg/scale/shaders/scale.wgsl` (the size from the params `w` and `h`).

@@ -2494,6 +2494,33 @@ static int config_inputs(AVFilterContext *ctx)
 }
 
 /*
+ * Sets the parameter expressions to their values at the start (t=0, n=0, w/h/a/sar/dar of
+ * input 0), so a shader that sizes an output from a parameter (gpufx_output_size) sees
+ * them. A parameter the size reads must then keep that value: the effect fails on the
+ * frame where it changes.
+ */
+static int set_start_params(AVFilterContext *ctx)
+{
+    GpufxContext *s = ctx->priv;
+    AVFilterLink *in0 = ctx->inputs[0];
+    double vars[VAR_NB] = { 0 };
+
+    vars[VAR_W]   = in0->w;
+    vars[VAR_H]   = in0->h;
+    vars[VAR_A]   = in0->h ? (double)in0->w / in0->h : 1.0;
+    vars[VAR_SAR] = in0->sample_aspect_ratio.num ? av_q2d(in0->sample_aspect_ratio) : 1.0;
+    vars[VAR_DAR] = vars[VAR_A] * vars[VAR_SAR];
+    for (int i = 0; i < s->nb_exprs; i++) {
+        double v[4];
+        for (int j = 0; j < s->exprs[i].nb; j++)
+            v[j] = av_expr_eval(s->exprs[i].expr[j], vars, NULL);
+        if (gpufx_effect_set_param_values(s->fx, s->exprs[i].name, v, s->exprs[i].nb) < 0)
+            return gpufx_error(ctx, s->exprs[i].name);
+    }
+    return 0;
+}
+
+/*
  * Output k has the aspect ratio and frame rate of its source input (the first input of
  * the effect writing it) and, unless an effect stacks its inputs (hstack/vstack), its
  * size; frames come at input 0's events.
@@ -2508,6 +2535,8 @@ static int config_output(AVFilterLink *outlink)
     int ret;
 
     if (!s->configured && (ret = config_inputs(ctx)) < 0)
+        return ret;
+    if ((ret = set_start_params(ctx)) < 0)
         return ret;
 
     {

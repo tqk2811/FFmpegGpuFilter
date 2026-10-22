@@ -442,12 +442,14 @@ fn a_param_change_that_changes_the_size_is_an_error() {
     let Some(ctx) = gpu() else { return };
     let pkgs = Packages::new();
     let src = gradient(1);
-    let mut g = pkgs.graph(&ctx, "crop.zip").unwrap();
-    assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (4, 3));
-    run_sized(&mut g, &src, 4, 3).unwrap();
-    g.set_param("w", &[5.0]).unwrap();
-    let err = run_sized(&mut g, &src, 4, 3).unwrap_err().to_string();
-    assert!(err.contains("5x3"), "{err}");
+    for (name, label) in [("crop", "Crop"), ("cropglsl", "Crop GLSL")] {
+        let mut g = pkgs.graph(&ctx, &format!("{name}.zip")).unwrap();
+        assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (4, 3));
+        run_sized(&mut g, &src, 4, 3).unwrap();
+        g.set_param("w", &[5.0]).unwrap();
+        let err = run_sized(&mut g, &src, 4, 3).unwrap_err().to_string();
+        assert!(err.contains(&format!("parameter `w` sets the size of the output of `{label}`")), "{err}");
+    }
 }
 
 #[test]
@@ -465,4 +467,145 @@ fn scale_follows_ffmpeg_size_rules() {
     let src = gradient(2);
     let mut g = pkgs.graph(&ctx, &format!("scale.zip=w={W}:h={H}")).unwrap();
     assert_eq!(run_sized(&mut g, &src, W, H).unwrap(), src);
+}
+
+/// Crop sized by `w` and `h`, with a gain `k` the size does not read.
+fn add_crop_gain(pkgs: &Packages) {
+    pkgs.add(
+        "cropk",
+        r#"{"id":"t.cropk","name":"Crop gain","api":1,"used_for":["gpufx"],
+            "params":[{"name":"w","type":"int","default":4,"min":0,"max":100},{"name":"h","type":"int","default":3,"min":0,"max":100},
+                      {"name":"k","type":"float","default":1,"min":0,"max":1}],
+            "groups":[{"passes":[{"shader":"c.wgsl"}]}]}"#,
+        &[(
+            "c.wgsl",
+            format!(
+                "{}fn gpufx_output_size(o: u32) -> vec2u {{ return vec2u(u32(params.w), u32(params.h)); }}\n",
+                wgsl("gpufx_write(id, textureLoad(src, vec2i(id.xy), 0) * params.k);")
+            ),
+        )],
+    );
+}
+
+#[test]
+fn a_param_the_size_does_not_read_changes_freely_without_gpu_size_work() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    add_crop_gain(&pkgs);
+    let src = gradient(4);
+    let mut g = pkgs.graph(&ctx, "cropk.zip").unwrap();
+    assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (4, 3));
+    for n in 0..20 {
+        g.set_param("k", &[n as f64 / 20.0]).unwrap();
+        run_sized(&mut g, &src, 4, 3).unwrap();
+        assert_eq!(g.output_size(0, &[(W, H)]).unwrap(), (4, 3));
+    }
+    assert_eq!(g.effects()[0].size_dispatches(), 1, "the size is computed once");
+}
+
+#[test]
+fn a_param_the_size_reads_must_not_change_even_to_the_same_size() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    add_crop_gain(&pkgs);
+    let src = gradient(4);
+    let mut g = pkgs.graph(&ctx, "cropk.zip").unwrap();
+    run_sized(&mut g, &src, 4, 3).unwrap();
+    g.set_param("h", &[3.0]).unwrap();
+    run_sized(&mut g, &src, 4, 3).unwrap();
+    g.set_param("h", &[6.0]).unwrap();
+    let err = run_sized(&mut g, &src, 4, 3).unwrap_err().to_string();
+    assert!(err.contains("parameter `h` sets the size of the output of `Crop gain`"), "{err}");
+    assert!(!err.contains("`w`"), "only the changed one is named: {err}");
+}
+
+#[test]
+fn size_function_mistakes_are_errors() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let head = r#""api":1,"used_for":["gpufx"]"#;
+    pkgs.add(
+        "twosizes",
+        &format!(
+            r#"{{"id":"t.two","name":"Two","outputs":[{{"name":"a"}},{{"name":"b"}}],{head},"groups":[{{"passes":[{{"shader":"t.wgsl","inputs":["src"],"outputs":["a","b"]}}]}}]}}"#
+        ),
+        &[(
+            "t.wgsl",
+            format!(
+                "{}fn gpufx_output_size(o: u32) -> vec2u {{ return vec2u(4u + o, 3u); }}\n",
+                wgsl("gpufx_write(id, vec4f(0.0));\n    gpufx_write1(id, vec4f(0.0));")
+            ),
+        )],
+    );
+    pkgs.add(
+        "huge",
+        &format!(r#"{{"id":"t.huge","name":"Huge",{head},"groups":[{{"passes":[{{"shader":"h.wgsl"}}]}}]}}"#),
+        &[(
+            "h.wgsl",
+            format!("{}fn gpufx_output_size(o: u32) -> vec2u {{ return vec2u(1000000u, 4u); }}\n", wgsl("gpufx_write(id, vec4f(0.0));")),
+        )],
+    );
+    pkgs.add(
+        "readtex",
+        &format!(r#"{{"id":"t.readtex","name":"Read tex",{head},"groups":[{{"passes":[{{"shader":"r.wgsl"}}]}}]}}"#),
+        &[(
+            "r.wgsl",
+            format!("{}fn gpufx_output_size(o: u32) -> vec2u {{ return textureDimensions(src); }}\n", wgsl("gpufx_write(id, vec4f(0.0));")),
+        )],
+    );
+    let err = pkgs.graph(&ctx, "twosizes.zip").unwrap().output_size(0, &[(W, H)]).unwrap_err().to_string();
+    assert!(err.contains("the outputs of one pass have one size"), "{err}");
+    let err = pkgs.graph(&ctx, "huge.zip").unwrap().output_size(0, &[(W, H)]).unwrap_err().to_string();
+    assert!(err.contains("would be 1000000x4"), "{err}");
+    let err = pkgs.graph(&ctx, "readtex.zip").err().expect("a size function reading a texture fails").to_string();
+    assert!(err.contains("may read only"), "{err}");
+}
+
+#[test]
+fn a_comment_naming_the_size_function_is_not_one() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    pkgs.add(
+        "comment",
+        r#"{"id":"t.comment","name":"Comment","api":1,"used_for":["gpufx"],"groups":[{"passes":[{"shader":"c.wgsl"}]}]}"#,
+        &[("c.wgsl", format!("// no gpufx_output_size here\n{}", wgsl("gpufx_write(id, textureLoad(src, vec2i(id.xy), 0));")))],
+    );
+    let mut g = pkgs.graph(&ctx, "comment.zip").unwrap();
+    assert!(!g.has_size_functions());
+    let src = gradient(5);
+    assert_eq!(run_sized(&mut g, &src, W, H).unwrap(), src);
+}
+
+#[test]
+fn input_size_indices_are_effect_inputs_on_a_pass_binding_some() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let head = r#""api":1,"used_for":["gpufx"],"inputs":[{"name":"a"},{"name":"b"}]"#;
+    // Pixel: (width of input 1, width of input 0, input count) / 255; the pass binds only `b`.
+    let probe = "vec4f(f32(gpufx_input_size(1u).x) / 255.0, f32(gpufx_input_size(0u).x) / 255.0, f32(gpufx_input_count()) / 255.0, 1.0)";
+    pkgs.add(
+        "probe",
+        &format!(r#"{{"id":"t.probe","name":"Probe",{head},"groups":[{{"passes":[{{"shader":"p.wgsl","inputs":["b"]}}]}}]}}"#),
+        &[("p.wgsl", wgsl(&format!("gpufx_write(id, {probe});")))],
+    );
+    let glsl_probe =
+        "vec4(float(gpufx_input_size(1u).x) / 255.0, float(gpufx_input_size(0u).x) / 255.0, float(gpufx_input_count()) / 255.0, 1.0)";
+    pkgs.add(
+        "probeglsl",
+        &format!(r#"{{"id":"t.probeglsl","name":"Probe GLSL",{head},"groups":[{{"passes":[{{"shader":"p.glsl","inputs":["b"]}}]}}]}}"#),
+        &[(
+            "p.glsl",
+            format!("#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\nvoid main() {{\n    uvec3 id = gl_GlobalInvocationID;\n    if (!gpufx_in_bounds(id)) {{ return; }}\n    gpufx_write(id, {glsl_probe});\n}}\n"),
+        )],
+    );
+    let (wb, hb) = (9u32, 7u32);
+    let a = gradient(1);
+    let b: Vec<u8> = vec![50; (wb * hb * 4) as usize];
+    for name in ["probe", "probeglsl"] {
+        let mut g = pkgs.graph(&ctx, &format!("{name}.zip")).unwrap();
+        let mut out = vec![0u8; (W * H * 4) as usize];
+        let ins = [img(&a), Image { data: &b, width: wb, height: hb, stride: wb * 4 }];
+        g.process(&ins, vec![ImageMut { data: &mut out, width: W, height: H, stride: W * 4 }], &FrameInfo::new(0.0, 0)).unwrap();
+        assert_eq!(&out[..4], &[wb as u8, 0, 2, 255], "{name}: input 1 is `b`, `a` is not bound");
+    }
 }
