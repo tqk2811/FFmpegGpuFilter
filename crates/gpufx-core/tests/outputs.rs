@@ -209,6 +209,23 @@ impl Packages {
                 ("p.wgsl", wgsl(&PARTS_LOOP.replace("BASE", "0u"))),
             ],
         );
+        // Sized by index beside an optional output: part0 (index 2 as written) is half wide,
+        // `mask` off or on.
+        pkgs.add(
+            "optsized",
+            r#"{"id":"t.optsized","name":"OptSized","api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"mask","optional":true},{"name":"part","repeat":{"default":1}}],
+                "groups":[{"passes":[{"shader":"c.wgsl","inputs":["src"],"outputs":["color","mask"]},{"shader":"p.wgsl","inputs":["src"],"outputs":["part"]}]}]}"#,
+            &[
+                ("c.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});"))),
+                (
+                    "p.wgsl",
+                    format!(
+                        "{}fn gpufx_output_size(o: u32) -> vec2u {{ let s = gpufx_input_size(0u); if (o == 2u) {{ return vec2u(s.x / 2u, s.y); }} return s; }}\n",
+                        wgsl(&PARTS_LOOP.replace("BASE", "0u"))
+                    ),
+                ),
+            ],
+        );
         // Sized by params: the top-left `w`x`h` of the input (0 when a param is 0).
         let crop_params =
             r#""params":[{"name":"w","type":"int","default":4,"min":0,"max":100},{"name":"h","type":"int","default":3,"min":0,"max":100}]"#;
@@ -834,6 +851,18 @@ fn an_optional_output_switched_off_has_no_pad_and_its_pass_writes_a_stand_in() {
     let mut g = pkgs.graph(&ctx, "keyoptsep.zip=matte=off").unwrap();
     assert_eq!(g.memory_plan(&[(W, H)], false).unwrap().0, 1);
     assert!(run_graph(&mut g, &[&src]) == [swapped(&src)]);
+}
+
+#[test]
+fn output_size_indices_count_the_outputs_switched_off() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let sizes = |text: &str, n: usize| {
+        let g = pkgs.graph(&ctx, text).unwrap();
+        (0..n).map(|k| g.output_size(k, &[(W, H)]).unwrap()).collect::<Vec<_>>()
+    };
+    assert_eq!(sizes("optsized.zip", 3), [(W, H), (W, H), (W / 2, H)]);
+    assert_eq!(sizes("optsized.zip=mask=off", 2), [(W, H), (W / 2, H)]);
 }
 
 #[test]

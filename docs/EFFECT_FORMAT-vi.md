@@ -251,6 +251,8 @@ fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpu
 
 - `gpufx_output_size(out_index)` được gọi một lần cho mỗi output effect, tức mỗi bản sao một lần với chỉ số output effect
   của nó (bản sao j của `part` đứng sau một output cố định là chỉ số `1 + j`); các bản sao của một pass phải cùng kích thước.
+  Chỉ số vẫn đếm output đã tắt (xem [Output tuỳ chọn](#output-tuỳ-chọn)), nên bản sao j của `part` đứng sau `color` và một
+  `mask` tuỳ chọn là `2 + j`, dù `mask` bật hay tắt.
 
 Gói được biên dịch cho số đó; `gpufx pack --precompile` chỉ biên dịch số `default`.
 
@@ -275,12 +277,14 @@ fn gpufx_output_enabled(i: u32) -> bool   // output i của pass (0 = out_tex, k
 ```
 
   GLSL: `bool gpufx_output_enabled(uint i)`. Mỗi tổ hợp bật/tắt biên dịch pipeline riêng.
-- Phải còn ít nhất một output bật.
+- Phải còn ít nhất một output bật. Mỗi output chỉ tắt một lần (`matte=off:matte=off` là lỗi).
+- `gpufx_output_size(out_index)` giữ chỉ số của manifest như đã viết: output đã tắt vẫn được đếm, nên với
+  `[color, mask (tuỳ chọn), part]` và `mask=off`, `part` là chỉ số 2, không phải 1.
 
 ### Kích thước output
 
 Mặc định output có kích thước input đầu. Shader đặt kích thước khác bằng cách định nghĩa, trong shader của pass ghi output đó, một hàm
-(`out_index` là chỉ số của output trong mảng `outputs` của manifest):
+(`out_index` là chỉ số của output trong mảng `outputs` của manifest như đã viết, kể cả output đã tắt):
 
 ```wgsl
 fn gpufx_output_size(out_index: u32) -> vec2u        // WGSL

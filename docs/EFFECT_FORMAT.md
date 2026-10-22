@@ -252,6 +252,8 @@ fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpu
 
 - `gpufx_output_size(out_index)` is called once per effect output, so once per copy with the copy's effect output
   index (copy j of `part` after one fixed output is index `1 + j`); the copies of one pass must get one size.
+  The index counts outputs switched off (see [Optional outputs](#optional-outputs)), so copy j of `part` after
+  `color` and an optional `mask` is `2 + j`, `mask` on or off.
 
 The package is compiled for that count; `gpufx pack --precompile` compiles the `default` count only.
 
@@ -277,12 +279,14 @@ fn gpufx_output_enabled(i: u32) -> bool   // pass output i (0 = out_tex, k = out
 ```
 
   GLSL: `bool gpufx_output_enabled(uint i)`. Each on/off combination compiles its own pipelines.
-- At least one output must stay on.
+- At least one output must stay on. Each output is switched off once (`matte=off:matte=off` is an error).
+- `gpufx_output_size(out_index)` keeps the index of the manifest as written: an output switched off still counts, so
+  with `[color, mask (optional), part]` and `mask=off`, `part` is index 2, not 1.
 
 ### Output size
 
 By default an output has the size of the first input. A shader can give another size by defining, in the shader of the pass
-that writes that output, a function (`out_index` is the index of the output in the manifest `outputs` array):
+that writes that output, a function (`out_index` is the index of the output in the manifest `outputs` array as written, outputs switched off counted):
 
 ```wgsl
 fn gpufx_output_size(out_index: u32) -> vec2u        // WGSL
