@@ -209,6 +209,25 @@ Shaders are checked before running: naga parses and validates them, and errors c
 the position in the code (try `gpufx check <package>`). The FFmpeg filter prints that error through `av_log` and refuses to
 initialize the graph instead of running incorrectly.
 
+### Planes (`pixel_layout`, step A: manifest and shader side)
+
+- **Plane keys**: a texture of a layout other than `rgba` is bound as one texture per plane, keyed `<name>.y`,
+  `<name>.uv`, `<name>.a` ([`PixelLayout::plane_key`](../../crates/gpufx-core/src/manifest.rs#L185); `.` is no identifier, so no other name takes it); an
+  `rgba` texture keeps its name as key. The effect's input textures come in [`Manifest::input_keys`](../../crates/gpufx-core/src/manifest.rs#L950) order,
+  so an effect without planes binds exactly as before.
+- **A second prelude**: only a pass touching planes ([`Manifest::pass_has_planes`](../../crates/gpufx-core/src/manifest.rs#L930)) gets a
+  [`PassPlanes`](../../crates/gpufx-core/src/runtime.rs#L1251) and [`plane_prelude`](../../crates/gpufx-core/src/runtime.rs#L1297); every other pass keeps the old prelude text byte for byte,
+  so its shader cache key does not change. Bindings stay positional: storage planes in order, the first at 2 and the
+  rest after the sampled textures (`extra_output_binding` counted over the expanded textures).
+- **Plane formats**: [`plane_format`](../../crates/gpufx-core/src/runtime.rs#L80) picks `r16float`/`rg16float` when [`plane_f16`](../../crates/gpufx-core/src/runtime.rs#L71) finds them
+  storage-capable on the adapter (an adapter specific format feature), else `r32float`/`rg32float`. 32-bit float
+  textures are not filterable, so their sampled layout entry says `filterable: false` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1568)).
+- **Validation** ([`validate_layouts`](../../crates/gpufx-core/src/manifest.rs#L869)): the 4 storage textures per pass are counted after expansion, planes
+  are WGSL only and not for `mipmaps`/`repeat`.
+- **Not wired yet**: graphs refuse planar effects ([`no_planes`](../../crates/gpufx-core/src/graph.rs#L736)); the pool, the frame conversions and the
+  converts between layouts come in step B. An output switched off keeps its layout (`off_layouts`) so its 1x1 stand-in
+  has the plane format ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1050)).
+
 ## 5. The `gpufx` FFmpeg filter
 
 Full reference (syntax, options, runtime commands, examples): [filters/gpufx.md](filters/gpufx.md).

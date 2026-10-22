@@ -58,6 +58,7 @@ Quyết định trong mục này ghi đè các chữ "đề xuất" bên dưới
 - (6) Kích thước là của Y, UV làm tròn lên.
 - (7) Vulkan + D3D12, thêm D3D11 nếu đường hiện có hỗ trợ; không được thì báo lỗi rõ khi load.
 
+- (9) Bước A (2026-10-23) chọn thêm: ghi plane bằng `gpufx_write{k}_<plane>(p: vec2u, v)` với `p` là texel của chính plane (đúng ví dụ trên), kèm `gpufx_chroma_scale{k}()`; input/output `rgba` trong pass có plane giữ tên cũ. Plane chỉ cho WGSL, không cho input `mipmaps`/`repeat` và output lặp. Plane 32 bit khai `filterable: false` (chỉ `textureLoad`). Graph từ chối effect có plane tới khi bước B nối convert/pool.
 - (8) Bộ convert hiện KHÔNG ghi được `gray` trên GPU (test-bundle 2026-10-23: `out_format=gray is not converted on the GPU`). Layout `y` phải thêm đường ghi gray vào convert, hoặc đổi format ra mặc định của `y`.
 
 ## Điểm cần chốt khi làm

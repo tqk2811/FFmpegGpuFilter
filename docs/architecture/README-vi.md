@@ -225,6 +225,25 @@ Kiểm tra shader trước khi chạy: naga phân tích và validate, lỗi tr�
 trí trong mã (thử: `gpufx check <gói>`). Filter FFmpeg in lỗi đó qua `av_log` và từ chối khởi
 tạo graph thay vì chạy sai.
 
+### Plane (`pixel_layout`, bước A: phần manifest và shader)
+
+- **Key của plane**: texture có layout khác `rgba` được bind thành mỗi plane một texture, key `<name>.y`, `<name>.uv`,
+  `<name>.a` ([`PixelLayout::plane_key`](../../crates/gpufx-core/src/manifest.rs#L185); `.` không phải identifier nên không tên nào khác trùng được); texture
+  `rgba` giữ key là tên của nó. Texture input của effect theo thứ tự [`Manifest::input_keys`](../../crates/gpufx-core/src/manifest.rs#L950), nên effect
+  không có plane bind y như trước.
+- **Prelude thứ hai**: chỉ pass đụng tới plane ([`Manifest::pass_has_planes`](../../crates/gpufx-core/src/manifest.rs#L930)) mới có
+  [`PassPlanes`](../../crates/gpufx-core/src/runtime.rs#L1251) và [`plane_prelude`](../../crates/gpufx-core/src/runtime.rs#L1297); mọi pass khác giữ nguyên từng byte prelude cũ, nên key
+  shader cache không đổi. Binding vẫn theo vị trí: các plane storage theo thứ tự, cái đầu ở 2, các cái sau xếp sau
+  texture đọc (`extra_output_binding` đếm trên bộ texture đã nở).
+- **Format plane**: [`plane_format`](../../crates/gpufx-core/src/runtime.rs#L80) chọn `r16float`/`rg16float` khi [`plane_f16`](../../crates/gpufx-core/src/runtime.rs#L71) thấy adapter cho
+  chúng làm storage (format feature riêng của adapter), không thì `r32float`/`rg32float`. Texture float 32 bit không
+  lọc được, nên entry layout của texture đọc ghi `filterable: false` ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1568)).
+- **Kiểm manifest** ([`validate_layouts`](../../crates/gpufx-core/src/manifest.rs#L869)): 4 storage texture mỗi pass đếm sau khi nở, plane chỉ cho WGSL và
+  không dùng với `mipmaps`/`repeat`.
+- **Chưa nối**: graph từ chối effect có plane ([`no_planes`](../../crates/gpufx-core/src/graph.rs#L736)); pool, convert frame và convert giữa các layout
+  làm ở bước B. Output bị tắt giữ layout của nó (`off_layouts`) để stand-in 1x1 có đúng format plane
+  ([runtime.rs](../../crates/gpufx-core/src/runtime.rs#L1050)).
+
 ## 5. Filter FFmpeg `gpufx`
 
 Tham chiếu đầy đủ (cú pháp, option, lệnh runtime, ví dụ): [filters/gpufx-vi.md](filters/gpufx-vi.md).

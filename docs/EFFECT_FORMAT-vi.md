@@ -67,6 +67,7 @@ Mỗi phần tử `inputs`:
 | `same_size` | `false` | Kích thước phải bằng input đầu tiên (không dùng cho input đầu) |
 | `mipmaps` | `false` | Texture của input có đủ chuỗi mip, sinh trên GPU mỗi frame, cho shader thu nhỏ ảnh nhiều (`textureSampleLevel(src, smp, uv, lod)`); xem [Mipmap](#mipmap) |
 | `repeat` | không có | (chỉ input cuối, chỉ WGSL) `{ "default": 2, "min": 2, "max": 16 }`: input đại diện cho số pad thay đổi được, xem [Số input thay đổi được](#số-input-thay-đổi-được) |
+| `pixel_layout` | `rgba` | Bộ texture shader thấy: `rgba`, hoặc các plane `yuv420`/`yuv422`/`yuv444`/`yuva420`/`yuva444`/`y`, xem [Pixel layout](#pixel-layout-plane) |
 
 Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là lỗi: `` `outputs` is an array: [{"name": "out", ...}] ``):
 
@@ -76,6 +77,7 @@ Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là l�
 | `bypass` | input đầu | Input mà output này truyền thẳng khi effect bị tắt (`<effect>.enable`) |
 | `repeat` | không | (chỉ output cuối, chỉ WGSL) `{ "default": 2, "min": 1, "max": 3 }`: output đại diện cho số pad thay đổi được, chọn bằng option node `outputs=N`, xem [Số output thay đổi được](#số-output-thay-đổi-được) |
 | `optional` | `false` | `true`: node graph tắt được output này bằng option `<name>=off`, xem [Output tuỳ chọn](#output-tuỳ-chọn) |
+| `pixel_layout` | `rgba` | Bộ texture shader ghi, như với input, xem [Pixel layout](#pixel-layout-plane) |
 
 Pixel format: bộ chuyển đổi trên GPU đọc và ghi `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (và đọc thêm
@@ -280,6 +282,62 @@ fn gpufx_output_enabled(i: u32) -> bool   // output i của pass (0 = out_tex, k
 - Phải còn ít nhất một output bật. Mỗi output chỉ tắt một lần (`matte=off:matte=off` là lỗi).
 - `gpufx_output_size(out_index)` giữ chỉ số của manifest như đã viết: output đã tắt vẫn được đếm, nên với
   `[color, mask (tuỳ chọn), part]` và `mask=off`, `part` là chỉ số 2, không phải 1.
+
+### Pixel layout (plane)
+
+> Đang làm dở: phần manifest và shader đã có, nhưng core chưa nạp plane từ frame và chưa convert giữa các layout, nên
+> effect có `pixel_layout` khác `rgba` bị từ chối trong graph (và trong filter) với lỗi
+> `pixel_layout other than rgba is not supported in a graph yet`.
+
+`pixel_layout` trên input, output, hoặc texture giữa các pass (`intermediates`) chọn bộ texture mà shader thấy. Đây
+không phải tên pixel format: các format cùng loại chỉ khác cách xếp plane và bit depth, shader thấy cùng một bộ texture
+float.
+
+```json
+"inputs":  [ { "name": "src", "pixel_layout": "yuv420" }, { "name": "bg" } ],
+"outputs": [ { "name": "comp", "pixel_layout": "yuva420" }, { "name": "matte", "pixel_layout": "y" } ],
+"intermediates": [ { "name": "tmp", "pixel_layout": "yuv420" } ]
+```
+
+| `pixel_layout` | Texture | Format cùng loại |
+|---|---|---|
+| `rgba` (mặc định) | 1: RGBA | `rgba`, `rgba64le`, ... |
+| `yuv420` / `yuv422` / `yuv444` | 2: Y, UV | `nv12`, `yuv420p`, `p010le`, `yuv420p10le` / `yuv422p*` / `yuv444p*` |
+| `yuva420` / `yuva444` | 3: Y, UV, A | `yuva420p` / `yuva444p` |
+| `y` | 1: Y | `gray*` |
+
+Tên trong shader (WGSL), với input `src` và output k (output 0 không có số, như `gpufx_write`/`gpufx_write1`):
+
+| Mục | Plane |
+|---|---|
+| Input | `in_src_y`, `in_src_uv`, `in_src_a`: `texture_2d<f32>`, Y và A ở `.r`, U và V ở `.rg` |
+| Output | `gpufx_write{k}_y(p: vec2u, v: f32)`, `gpufx_write{k}_uv(p: vec2u, v: vec2f)`, `gpufx_write{k}_a(p: vec2u, v: f32)`; `p` là texel của chính plane đó, giá trị bị kẹp về 0..1 |
+| Subsampling UV | `gpufx_chroma_scale{k}() -> vec2u`: số pixel Y mà một texel UV phủ, `(2, 2)` với 4:2:0, `(2, 1)` với 4:2:2, `(1, 1)` với 4:4:4 |
+
+```wgsl
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    let p = id.xy;
+    gpufx_write_y(p, 1.0 - textureLoad(in_src_y, p, 0).r);
+    let s = gpufx_chroma_scale();
+    if (all(p % s == vec2u(0u))) { gpufx_write_uv(p / s, textureLoad(in_src_uv, p / s, 0).rg); }
+}
+```
+
+- Input `rgba` giữ tên trần (`bg`) và output `rgba` giữ `gpufx_write{k}(id, c)`, kể cả trong pass có plane.
+- Kích thước của một layout là kích thước Y: pass chạy mỗi thread một pixel Y (`globals.size`, `gpufx_in_bounds`),
+  thread ở toạ độ chẵn ghi UV. UV làm tròn lên với kích thước lẻ (5x3 ở 4:2:0 có UV 3x2), A đủ kích thước.
+  `gpufx_input_size(i)` và `gpufx_output_size` là kích thước Y.
+- Plane là `r16float`/`rg16float` khi thiết bị ghi được chúng làm storage texture, không thì `r32float`/`rg32float`;
+  frame 8 và 10 bit đều đi qua float. Đọc plane bằng `textureLoad`: plane 32 bit không lọc được, nên `textureSample`
+  lên chúng lỗi trên các thiết bị đó.
+- Texture giữa các pass là `rgba` nếu không khai trong `intermediates` (tên một output của pass mà không phải output
+  của effect; output của effect khai layout ở `outputs`).
+- Một pass ghi tối đa 4 storage texture, đếm sau khi nở layout thành plane: `yuva420` chiếm 3, nên đi kèm được một
+  output `rgba`, không kèm được một output `yuv420`.
+- Plane chỉ dùng cho WGSL (pass GLSL không đọc hay ghi được), không dùng cho input có `mipmaps` hay `repeat`, và không
+  dùng cho output lặp.
 
 ### Kích thước output
 

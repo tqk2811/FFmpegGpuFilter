@@ -67,6 +67,7 @@ Each element of `inputs`:
 | `same_size` | `false` | The size must equal the first input (not for the first input itself) |
 | `mipmaps` | `false` | The input texture gets a full mip chain, made on the GPU every frame, for shaders that shrink it a lot (`textureSampleLevel(src, smp, uv, lod)`); see [Mipmaps](#mipmaps) |
 | `repeat` | none | (last input only, WGSL only) `{ "default": 2, "min": 2, "max": 16 }`: the input stands for a variable number of pads, see [Variable number of inputs](#variable-number-of-inputs) |
+| `pixel_layout` | `rgba` | The textures the shader sees: `rgba`, or planes `yuv420`/`yuv422`/`yuv444`/`yuva420`/`yuva444`/`y`, see [Pixel layout](#pixel-layout-planes) |
 
 Each element of `outputs` (an array; the object form of earlier versions is an error: `` `outputs` is an array: [{"name": "out", ...}] ``):
 
@@ -76,6 +77,7 @@ Each element of `outputs` (an array; the object form of earlier versions is an e
 | `bypass` | the first input | The input this output passes when the effect is switched off (`<effect>.enable`) |
 | `repeat` | none | (last output only, WGSL only) `{ "default": 2, "min": 1, "max": 3 }`: the output stands for a variable number of pads set by the node option `outputs=N`, see [Variable number of outputs](#variable-number-of-outputs) |
 | `optional` | `false` | `true`: a graph node may switch the output off with its option `<name>=off`, see [Optional outputs](#optional-outputs) |
+| `pixel_layout` | `rgba` | The textures the shader writes, as for inputs, see [Pixel layout](#pixel-layout-planes) |
 
 Pixel formats: the GPU converter reads and writes `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (and reads `yuvj420p`/`yuvj422p`/`yuvj444p`).
@@ -282,6 +284,62 @@ fn gpufx_output_enabled(i: u32) -> bool   // pass output i (0 = out_tex, k = out
 - At least one output must stay on. Each output is switched off once (`matte=off:matte=off` is an error).
 - `gpufx_output_size(out_index)` keeps the index of the manifest as written: an output switched off still counts, so
   with `[color, mask (optional), part]` and `mask=off`, `part` is index 2, not 1.
+
+### Pixel layout (planes)
+
+> Work in progress: the manifest and the shader side are in place, but the core does not yet feed planes from frames
+> nor convert between layouts, so an effect with a `pixel_layout` other than `rgba` fails in a graph (and so in the
+> filter) with `pixel_layout other than rgba is not supported in a graph yet`.
+
+`pixel_layout` on an input, an output, or a texture between passes (`intermediates`) chooses the textures the shader
+sees. It is not a pixel format: the formats of one kind only differ in plane packing and bit depth, the shader sees the
+same float textures.
+
+```json
+"inputs":  [ { "name": "src", "pixel_layout": "yuv420" }, { "name": "bg" } ],
+"outputs": [ { "name": "comp", "pixel_layout": "yuva420" }, { "name": "matte", "pixel_layout": "y" } ],
+"intermediates": [ { "name": "tmp", "pixel_layout": "yuv420" } ]
+```
+
+| `pixel_layout` | Textures | Formats of the same kind |
+|---|---|---|
+| `rgba` (default) | 1: RGBA | `rgba`, `rgba64le`, ... |
+| `yuv420` / `yuv422` / `yuv444` | 2: Y, UV | `nv12`, `yuv420p`, `p010le`, `yuv420p10le` / `yuv422p*` / `yuv444p*` |
+| `yuva420` / `yuva444` | 3: Y, UV, A | `yuva420p` / `yuva444p` |
+| `y` | 1: Y | `gray*` |
+
+Shader names (WGSL), for an input `src` and output k (no number for output 0, as `gpufx_write`/`gpufx_write1`):
+
+| Item | Planes |
+|---|---|
+| Input | `in_src_y`, `in_src_uv`, `in_src_a`: `texture_2d<f32>`, Y and A in `.r`, U and V in `.rg` |
+| Output | `gpufx_write{k}_y(p: vec2u, v: f32)`, `gpufx_write{k}_uv(p: vec2u, v: vec2f)`, `gpufx_write{k}_a(p: vec2u, v: f32)`; `p` is the texel of that plane, values clamped to 0..1 |
+| UV subsampling | `gpufx_chroma_scale{k}() -> vec2u`: the luma pixels one UV texel spans, `(2, 2)` for 4:2:0, `(2, 1)` for 4:2:2, `(1, 1)` for 4:4:4 |
+
+```wgsl
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    let p = id.xy;
+    gpufx_write_y(p, 1.0 - textureLoad(in_src_y, p, 0).r);
+    let s = gpufx_chroma_scale();
+    if (all(p % s == vec2u(0u))) { gpufx_write_uv(p / s, textureLoad(in_src_uv, p / s, 0).rg); }
+}
+```
+
+- An `rgba` input keeps its plain name (`bg`) and an `rgba` output its `gpufx_write{k}(id, c)`, also in a pass with planes.
+- The size of a layout is the size of Y: the pass runs one thread per Y pixel (`globals.size`, `gpufx_in_bounds`), the
+  threads at even positions write UV. UV is rounded up for odd sizes (5x3 in 4:2:0 has a 3x2 UV), A is full size.
+  `gpufx_input_size(i)` and `gpufx_output_size` are Y sizes.
+- Planes are `r16float`/`rg16float` when the device can write them as storage textures, else `r32float`/`rg32float`;
+  8 and 10 bit frames both go through these floats. Use `textureLoad` on planes: 32-bit planes cannot be filtered, so
+  `textureSample` on them fails on such devices.
+- A texture between passes is `rgba` unless listed in `intermediates` (the name of a pass output that is no effect
+  output; an effect output gives its layout in `outputs`).
+- A pass writes at most 4 storage textures, counted after expanding layouts into planes: `yuva420` takes 3, so it fits
+  with one `rgba` output, not with a `yuv420` one.
+- Planes are WGSL only (a GLSL pass may not read or write them), and are not for an input with `mipmaps` or `repeat` nor
+  a repeated output.
 
 ### Output size
 
