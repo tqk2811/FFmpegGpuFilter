@@ -32,22 +32,22 @@
         {
           "shader": "shaders/blend.wgsl",
           "inputs": ["first", "second"],
-          "output": "blended"
+          "output": ["blended"]
         },
         {
           "shader": "shaders/blur-v.wgsl",
           "inputs": ["blended"],
-          "output": "soft_v"
+          "output": ["soft_v"]
         },
         {
           "shader": "shaders/blur-h.wgsl",
           "inputs": ["soft_v"],
-          "output": "soft"
+          "output": ["soft"]
         },
         {
           "shader": "shaders/bokeh.wgsl",
           "inputs": ["soft"],
-          "output": "bokeh"
+          "output": ["bokeh"]
         },
         {
           "shader": "shaders/finish.wgsl",

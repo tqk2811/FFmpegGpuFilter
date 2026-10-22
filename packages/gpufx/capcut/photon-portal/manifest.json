@@ -35,21 +35,21 @@
             "first",
             "second"
           ],
-          "output": "scene"
+          "output": ["scene"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": [
             "scene"
           ],
-          "output": "glow_h"
+          "output": ["glow_h"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "inputs": [
             "glow_h"
           ],
-          "output": "glow"
+          "output": ["glow"]
         },
         {
           "shader": "shaders/finish.wgsl",

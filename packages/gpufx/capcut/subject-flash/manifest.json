@@ -35,21 +35,21 @@
             "first",
             "second"
           ],
-          "output": "bent"
+          "output": ["bent"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
           "inputs": [
             "bent"
           ],
-          "output": "glow_x"
+          "output": ["glow_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
           "inputs": [
             "glow_x"
           ],
-          "output": "glow"
+          "output": ["glow"]
         },
         {
           "shader": "shaders/soft-y.wgsl",
@@ -57,21 +57,21 @@
             "bent",
             "glow"
           ],
-          "output": "soft_y"
+          "output": ["soft_y"]
         },
         {
           "shader": "shaders/soft-x.wgsl",
           "inputs": [
             "soft_y"
           ],
-          "output": "soft"
+          "output": ["soft"]
         },
         {
           "shader": "shaders/bokeh.wgsl",
           "inputs": [
             "soft"
           ],
-          "output": "bokeh"
+          "output": ["bokeh"]
         },
         {
           "shader": "shaders/final.wgsl",

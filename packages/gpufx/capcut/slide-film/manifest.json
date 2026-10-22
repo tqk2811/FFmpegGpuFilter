@@ -35,14 +35,14 @@
             "first",
             "second"
           ],
-          "output": "layered"
+          "output": ["layered"]
         },
         {
           "shader": "shaders/blur.wgsl",
           "inputs": [
             "layered"
           ],
-          "output": "blurred"
+          "output": ["blurred"]
         },
         {
           "shader": "shaders/lens.wgsl",

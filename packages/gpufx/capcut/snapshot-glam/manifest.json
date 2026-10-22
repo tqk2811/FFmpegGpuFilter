@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "scene"
+          "output": ["scene"]
         },
         {
           "shader": "shaders/blur.wgsl",

@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "composed"
+          "output": ["composed"]
         },
         {
           "shader": "shaders/frame-swipe.wgsl",

@@ -283,8 +283,8 @@ fn direct_outputs(effects: &[Effect], topo: &Topology, outs: &[Desc], node_mips:
         // The compiled passes: their inputs are resolved (a pass without any reads the one before).
         let Ok(passes) = effects[k].passes(false) else { continue };
         let Some(last) = passes.last() else { continue };
-        let elsewhere =
-            passes.iter().any(|p| p.inputs.contains(&last.output)) || passes[..passes.len() - 1].iter().any(|p| p.output == last.output);
+        let elsewhere = passes.iter().any(|p| p.inputs.contains(&last.outputs[0]))
+            || passes[..passes.len() - 1].iter().any(|p| p.outputs.contains(&last.outputs[0]));
         if !elsewhere {
             direct[k] = Some(j);
         }
@@ -304,8 +304,7 @@ fn plan(
     direct_out: &[Option<usize>],
     deep: bool,
 ) -> Result<Plan, Error> {
-    let finals: Vec<&str> =
-        effects.iter().map(|fx| fx.program.package.manifest.passes.last().expect("validated").output.as_str()).collect();
+    let finals: Vec<&str> = effects.iter().map(|fx| fx.program.package.manifest.passes.last().expect("validated").output()).collect();
     let mut last: HashMap<(usize, &str), usize> = HashMap::new();
     fn bump<'a>(last: &mut HashMap<(usize, &'a str), usize>, key: (usize, &'a str), g: usize) {
         let end = last.entry(key).or_insert(g);
@@ -326,8 +325,8 @@ fn plan(
         }
         for pass in passes {
             for name in &pass.inputs {
-                if let Some(p) = passes.iter().find(|p| p.output == *name) {
-                    bump(&mut last, (k, p.output.as_str()), g);
+                if let Some(out) = passes.iter().flat_map(|p| &p.outputs).find(|o| *o == name) {
+                    bump(&mut last, (k, out.as_str()), g);
                 } else if let Some(i) = m.inputs.iter().position(|d| d.name == *name) {
                     // The output of another effect is this effect's input.
                     if let Source::Node(j) = topo.node_inputs[k][i] {
@@ -335,7 +334,10 @@ fn plan(
                     }
                 }
             }
-            bump(&mut last, (k, pass.output.as_str()), g);
+            // Every output, read or not, so each one gets an end below.
+            for out in &pass.outputs {
+                bump(&mut last, (k, out.as_str()), g);
+            }
             g += 1;
         }
     }
@@ -359,16 +361,18 @@ fn plan(
                 }
                 end >= g
             });
-            // An output frame written in place takes no pooled texture.
-            let in_place = direct_out[k].is_some() && pass.output == finals[k];
-            if !in_place && !assign[k].contains_key(&pass.output) {
-                let key = (sizes[k].0, sizes[k].1, mips[k] && pass.output == finals[k]);
-                let slot = free.get_mut(&key).and_then(|f| f.pop()).unwrap_or_else(|| {
-                    slots.push(key);
-                    slots.len() - 1
-                });
-                live.push((last[&(k, pass.output.as_str())], slot));
-                assign[k].insert(pass.output.clone(), slot);
+            for out in &pass.outputs {
+                // An output frame written in place takes no pooled texture.
+                let in_place = direct_out[k].is_some() && *out == finals[k];
+                if !in_place && !assign[k].contains_key(out) {
+                    let key = (sizes[k].0, sizes[k].1, mips[k] && *out == finals[k]);
+                    let slot = free.get_mut(&key).and_then(|f| f.pop()).unwrap_or_else(|| {
+                        slots.push(key);
+                        slots.len() - 1
+                    });
+                    live.push((last[&(k, out.as_str())], slot));
+                    assign[k].insert(out.clone(), slot);
+                }
             }
             g += 1;
         }
@@ -641,7 +645,7 @@ fn acquire(effects: &mut [Effect], topo: &Topology, io: &mut FrameIo, ctx: &Arc<
             layout.plan.assign[k].iter().map(|(name, &slot)| (name.clone(), pool[slot].clone())).collect();
         if let Some(j) = layout.direct_out[k] {
             // Written in place: the frame being recorded, bound again for each frame.
-            let last = effects[k].package().manifest.passes.last().expect("validated").output.clone();
+            let last = effects[k].package().manifest.passes.last().expect("validated").output().to_string();
             let frame = io.frame_outs.get(j).cloned().flatten();
             outputs.insert(last, frame.unwrap_or_else(|| crate::convert::stand_in(device, wgpu::TextureUsages::STORAGE_BINDING)));
         }

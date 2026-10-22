@@ -33,25 +33,25 @@
           "shader": "shaders/glow-h.wgsl",
           "entry": "blur_rg",
           "inputs": ["first", "second"],
-          "output": "glow_h_rg"
+          "output": ["glow_h_rg"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "entry": "blur_b",
           "inputs": ["first", "second"],
-          "output": "glow_h_b"
+          "output": ["glow_h_b"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "entry": "blur_rg",
           "inputs": ["glow_h_rg", "glow_h_b"],
-          "output": "glow_rg"
+          "output": ["glow_rg"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "entry": "blur_b",
           "inputs": ["glow_h_rg", "glow_h_b"],
-          "output": "glow_b"
+          "output": ["glow_b"]
         },
         {
           "shader": "shaders/finish.wgsl",

@@ -32,17 +32,17 @@
         {
           "shader": "shaders/tear.wgsl",
           "inputs": ["first"],
-          "output": "torn"
+          "output": ["torn"]
         },
         {
           "shader": "shaders/shadow-h.wgsl",
           "inputs": ["torn"],
-          "output": "shadow_h"
+          "output": ["shadow_h"]
         },
         {
           "shader": "shaders/shadow-v.wgsl",
           "inputs": ["shadow_h"],
-          "output": "shadow"
+          "output": ["shadow"]
         },
         {
           "shader": "shaders/finish.wgsl",

@@ -32,7 +32,7 @@
         {
           "shader": "shaders/blobs.wgsl",
           "inputs": ["first"],
-          "output": "blobs"
+          "output": ["blobs"]
         },
         {
           "shader": "shaders/finish.wgsl",

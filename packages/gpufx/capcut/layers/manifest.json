@@ -41,7 +41,7 @@
             "second",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -50,7 +50,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -59,7 +59,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -68,7 +68,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -77,7 +77,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -86,7 +86,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -95,7 +95,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -104,7 +104,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -113,7 +113,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -122,7 +122,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -131,7 +131,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -140,7 +140,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -149,7 +149,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -158,7 +158,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -167,7 +167,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glow-x.wgsl",
@@ -176,7 +176,7 @@
             "g_y",
             "curves"
           ],
-          "output": "g_x"
+          "output": ["g_x"]
         },
         {
           "shader": "shaders/glow-y.wgsl",
@@ -185,7 +185,7 @@
             "g_x",
             "curves"
           ],
-          "output": "g_y"
+          "output": ["g_y"]
         },
         {
           "shader": "shaders/glowed.wgsl",
@@ -194,7 +194,7 @@
             "g_y",
             "curves"
           ],
-          "output": "bglow"
+          "output": ["bglow"]
         },
         {
           "shader": "shaders/motion.wgsl",
@@ -203,7 +203,7 @@
             "bglow",
             "curves"
           ],
-          "output": "moved"
+          "output": ["moved"]
         },
         {
           "shader": "shaders/zoom.wgsl",
@@ -211,42 +211,42 @@
             "moved",
             "curves"
           ],
-          "output": "back"
+          "output": ["back"]
         },
         {
           "shader": "shaders/edge-first.wgsl",
           "inputs": [
             "first"
           ],
-          "output": "e_raw"
+          "output": ["e_raw"]
         },
         {
           "shader": "shaders/edge-soft-x.wgsl",
           "inputs": [
             "e_raw"
           ],
-          "output": "e_x"
+          "output": ["e_x"]
         },
         {
           "shader": "shaders/edge-soft-y.wgsl",
           "inputs": [
             "e_x"
           ],
-          "output": "e_soft"
+          "output": ["e_soft"]
         },
         {
           "shader": "shaders/clip-soft-x-first.wgsl",
           "inputs": [
             "first"
           ],
-          "output": "c_x"
+          "output": ["c_x"]
         },
         {
           "shader": "shaders/clip-soft-y.wgsl",
           "inputs": [
             "c_x"
           ],
-          "output": "c_soft"
+          "output": ["c_soft"]
         },
         {
           "shader": "shaders/sharp-first.wgsl",
@@ -255,42 +255,42 @@
             "c_soft",
             "e_soft"
           ],
-          "output": "crisp_a"
+          "output": ["crisp_a"]
         },
         {
           "shader": "shaders/edge-second.wgsl",
           "inputs": [
             "second"
           ],
-          "output": "e_raw"
+          "output": ["e_raw"]
         },
         {
           "shader": "shaders/edge-soft-x.wgsl",
           "inputs": [
             "e_raw"
           ],
-          "output": "e_x"
+          "output": ["e_x"]
         },
         {
           "shader": "shaders/edge-soft-y.wgsl",
           "inputs": [
             "e_x"
           ],
-          "output": "e_soft"
+          "output": ["e_soft"]
         },
         {
           "shader": "shaders/clip-soft-x-second.wgsl",
           "inputs": [
             "second"
           ],
-          "output": "c_x"
+          "output": ["c_x"]
         },
         {
           "shader": "shaders/clip-soft-y.wgsl",
           "inputs": [
             "c_x"
           ],
-          "output": "c_soft"
+          "output": ["c_soft"]
         },
         {
           "shader": "shaders/sharp-second.wgsl",
@@ -299,7 +299,7 @@
             "c_soft",
             "e_soft"
           ],
-          "output": "crisp_b"
+          "output": ["crisp_b"]
         },
         {
           "shader": "shaders/final.wgsl",

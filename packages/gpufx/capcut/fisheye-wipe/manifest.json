@@ -32,7 +32,7 @@
         {
           "shader": "shaders/warp.wgsl",
           "inputs": ["first", "second"],
-          "output": "bent"
+          "output": ["bent"]
         },
         {
           "shader": "shaders/blur.wgsl",

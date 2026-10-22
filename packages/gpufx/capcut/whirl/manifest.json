@@ -34,7 +34,7 @@
           "inputs": [
             "second"
           ],
-          "output": "card"
+          "output": ["card"]
         },
         {
           "shader": "shaders/final.wgsl",

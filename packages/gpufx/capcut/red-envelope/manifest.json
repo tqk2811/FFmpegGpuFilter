@@ -32,17 +32,17 @@
         {
           "shader": "shaders/highlight.wgsl",
           "inputs": ["second"],
-          "output": "lit"
+          "output": ["lit"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": ["lit"],
-          "output": "glow_h"
+          "output": ["glow_h"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "inputs": ["glow_h"],
-          "output": "glow_v"
+          "output": ["glow_v"]
         },
         {
           "shader": "shaders/final.wgsl",

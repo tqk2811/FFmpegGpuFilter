@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "warped"
+          "output": ["warped"]
         },
         {
           "shader": "shaders/glow-first.wgsl",
@@ -43,7 +43,7 @@
           "inputs": [
             "warped"
           ],
-          "output": "glow_a"
+          "output": ["glow_a"]
         },
         {
           "shader": "shaders/glow-a.wgsl",
@@ -51,7 +51,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": "glow_b"
+          "output": ["glow_b"]
         },
         {
           "shader": "shaders/glow-b.wgsl",
@@ -59,7 +59,7 @@
           "inputs": [
             "glow_b"
           ],
-          "output": "glow_a"
+          "output": ["glow_a"]
         },
         {
           "shader": "shaders/glow-a.wgsl",
@@ -67,7 +67,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": "glow_b"
+          "output": ["glow_b"]
         },
         {
           "shader": "shaders/glow-b.wgsl",
@@ -75,7 +75,7 @@
           "inputs": [
             "glow_b"
           ],
-          "output": "glow_a"
+          "output": ["glow_a"]
         },
         {
           "shader": "shaders/glow-a.wgsl",
@@ -83,7 +83,7 @@
           "inputs": [
             "glow_a"
           ],
-          "output": "glow_b"
+          "output": ["glow_b"]
         },
         {
           "shader": "shaders/glow-b.wgsl",
@@ -91,7 +91,7 @@
           "inputs": [
             "glow_b"
           ],
-          "output": "glow_a"
+          "output": ["glow_a"]
         },
         {
           "shader": "shaders/sharpen-x.wgsl",
@@ -99,7 +99,7 @@
             "warped",
             "glow_a"
           ],
-          "output": "blur_x"
+          "output": ["blur_x"]
         },
         {
           "shader": "shaders/sharpen-y.wgsl",

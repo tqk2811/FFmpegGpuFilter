@@ -14,8 +14,8 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/prefilter.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/blur.wgsl", "inputs": ["src", "tmp"], "output": "out" }
+        { "shader": "shaders/prefilter.wgsl", "inputs": ["src"], "output": ["tmp"] },
+        { "shader": "shaders/blur.wgsl", "inputs": ["src", "tmp"], "output": ["out"] }
       ]
     }
   ]

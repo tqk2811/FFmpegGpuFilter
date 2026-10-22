@@ -12,7 +12,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/cas.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/cas.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]

@@ -32,12 +32,12 @@
         {
           "shader": "shaders/spin-first.wgsl",
           "inputs": ["first"],
-          "output": "spun_first"
+          "output": ["spun_first"]
         },
         {
           "shader": "shaders/spin-second.wgsl",
           "inputs": ["second"],
-          "output": "spun_second"
+          "output": ["spun_second"]
         },
         {
           "shader": "shaders/blend.wgsl",

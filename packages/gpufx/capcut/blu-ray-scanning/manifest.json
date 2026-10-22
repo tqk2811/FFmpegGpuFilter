@@ -32,42 +32,42 @@
         {
           "shader": "shaders/depth.wgsl",
           "inputs": ["first"],
-          "output": "depth"
+          "output": ["depth"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": ["depth"],
-          "output": "glow_a"
+          "output": ["glow_a"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "inputs": ["glow_a"],
-          "output": "glow_b"
+          "output": ["glow_b"]
         },
         {
           "shader": "shaders/glow-h2.wgsl",
           "inputs": ["glow_b"],
-          "output": "glow_c"
+          "output": ["glow_c"]
         },
         {
           "shader": "shaders/glow-v2.wgsl",
           "inputs": ["glow_c"],
-          "output": "glow"
+          "output": ["glow"]
         },
         {
           "shader": "shaders/blend.wgsl",
           "inputs": ["first", "second", "depth", "glow"],
-          "output": "blended"
+          "output": ["blended"]
         },
         {
           "shader": "shaders/displace.wgsl",
           "inputs": ["blended", "depth"],
-          "output": "displaced"
+          "output": ["displaced"]
         },
         {
           "shader": "shaders/soften-x.wgsl",
           "inputs": ["displaced"],
-          "output": "soft_x"
+          "output": ["soft_x"]
         },
         {
           "shader": "shaders/finish.wgsl",

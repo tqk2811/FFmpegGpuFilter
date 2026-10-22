@@ -86,7 +86,7 @@ fn the_group_of_this_backend_runs() {
         "match",
         &manifest(&format!(
             r#"{{"name":"other","requires":{{"backend":["{other}"]}},"passes":[{{"shader":"bad.wgsl"}}]}},
-               {{"name":"this","requires":{{"backend":["{this}"]}},"passes":[{{"shader":"red.wgsl","output":"x"}},{{"shader":"green.wgsl","inputs":["x"]}}]}},
+               {{"name":"this","requires":{{"backend":["{this}"]}},"passes":[{{"shader":"red.wgsl","output":["x"]}},{{"shader":"green.wgsl","inputs":["x"]}}]}},
                {{"passes":[{{"shader":"blue.wgsl"}}]}}"#
         )),
     );

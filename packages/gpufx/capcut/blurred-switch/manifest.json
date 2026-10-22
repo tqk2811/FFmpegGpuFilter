@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "small"
+          "output": ["small"]
         },
         {
           "shader": "shaders/blur.wgsl",
@@ -44,7 +44,7 @@
             "second",
             "small"
           ],
-          "output": "out"
+          "output": ["out"]
         }
       ]
     }

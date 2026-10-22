@@ -43,21 +43,21 @@
             "first",
             "second"
           ],
-          "output": "shaken"
+          "output": ["shaken"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": [
             "shaken"
           ],
-          "output": "glow_h"
+          "output": ["glow_h"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "inputs": [
             "glow_h"
           ],
-          "output": "glow"
+          "output": ["glow"]
         },
         {
           "shader": "shaders/finish.wgsl",

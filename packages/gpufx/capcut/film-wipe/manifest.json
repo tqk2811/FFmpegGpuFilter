@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "strip"
+          "output": ["strip"]
         },
         {
           "shader": "shaders/blur.wgsl",

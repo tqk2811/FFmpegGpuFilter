@@ -14,12 +14,12 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/box_1_h.wgsl", "inputs": ["src"], "output": "t1" },
-        { "shader": "shaders/box_2_v.wgsl", "inputs": ["t1"], "output": "t2" },
-        { "shader": "shaders/box_3_h.wgsl", "inputs": ["t2"], "output": "t3" },
-        { "shader": "shaders/box_4_v.wgsl", "inputs": ["t3"], "output": "t4" },
-        { "shader": "shaders/box_5_h.wgsl", "inputs": ["t4"], "output": "t5" },
-        { "shader": "shaders/box_6_v.wgsl", "inputs": ["t5"], "output": "out" }
+        { "shader": "shaders/box_1_h.wgsl", "inputs": ["src"], "output": ["t1"] },
+        { "shader": "shaders/box_2_v.wgsl", "inputs": ["t1"], "output": ["t2"] },
+        { "shader": "shaders/box_3_h.wgsl", "inputs": ["t2"], "output": ["t3"] },
+        { "shader": "shaders/box_4_v.wgsl", "inputs": ["t3"], "output": ["t4"] },
+        { "shader": "shaders/box_5_h.wgsl", "inputs": ["t4"], "output": ["t5"] },
+        { "shader": "shaders/box_6_v.wgsl", "inputs": ["t5"], "output": ["out"] }
       ]
     }
   ]

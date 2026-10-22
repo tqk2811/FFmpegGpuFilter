@@ -13,7 +13,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/dblur.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/dblur.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]

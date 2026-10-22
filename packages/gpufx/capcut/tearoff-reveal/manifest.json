@@ -32,32 +32,32 @@
         {
           "shader": "shaders/pages.wgsl",
           "inputs": ["first"],
-          "output": "pages"
+          "output": ["pages"]
         },
         {
           "shader": "shaders/blur-pages-h.wgsl",
           "inputs": ["pages"],
-          "output": "pages_h"
+          "output": ["pages_h"]
         },
         {
           "shader": "shaders/blur-pages-v.wgsl",
           "inputs": ["pages_h"],
-          "output": "pages_b"
+          "output": ["pages_b"]
         },
         {
           "shader": "shaders/shadows.wgsl",
           "inputs": [],
-          "output": "shadows"
+          "output": ["shadows"]
         },
         {
           "shader": "shaders/blur-shadows-h.wgsl",
           "inputs": ["shadows"],
-          "output": "shadows_h"
+          "output": ["shadows_h"]
         },
         {
           "shader": "shaders/blur-shadows-v.wgsl",
           "inputs": ["shadows_h"],
-          "output": "shadows_b"
+          "output": ["shadows_b"]
         },
         {
           "shader": "shaders/finish.wgsl",

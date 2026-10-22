@@ -692,21 +692,21 @@ def main():
     # pass that wrote that name left there.
     passes = []
     for band in ("upper", "lower"):
-        passes.append({"shader": "shaders/band.wgsl", "entry": band, "inputs": ["first"], "output": "band"})
+        passes.append({"shader": "shaders/band.wgsl", "entry": band, "inputs": ["first"], "output": ["band"]})
         for i in range(1, GLOW_ROUNDS + 1):
             if i == 1:
-                passes.append({"shader": "shaders/glow-x-first.wgsl", "entry": "blur_x_1", "inputs": ["band"], "output": "g_x"})
+                passes.append({"shader": "shaders/glow-x-first.wgsl", "entry": "blur_x_1", "inputs": ["band"], "output": ["g_x"]})
             else:
                 src = "g_b" if i % 2 == 0 else "g_a"
-                passes.append({"shader": f"shaders/glow-x-{src[-1]}.wgsl", "entry": f"blur_x_{i}", "inputs": [src], "output": "g_x"})
-            passes.append({"shader": "shaders/glow-y.wgsl", "entry": f"blur_y_{i}", "inputs": ["g_x"], "output": "g_y"})
+                passes.append({"shader": f"shaders/glow-x-{src[-1]}.wgsl", "entry": f"blur_x_{i}", "inputs": [src], "output": ["g_x"]})
+            passes.append({"shader": "shaders/glow-y.wgsl", "entry": f"blur_y_{i}", "inputs": ["g_x"], "output": ["g_y"]})
             if i == 1:
-                passes.append({"shader": "shaders/glow-comp-first.wgsl", "entry": f"comp_1_{band}", "inputs": ["band", "g_y"], "output": "g_b"})
+                passes.append({"shader": "shaders/glow-comp-first.wgsl", "entry": f"comp_1_{band}", "inputs": ["band", "g_y"], "output": ["g_b"]})
             else:
                 src = "g_b" if i % 2 == 0 else "g_a"
                 dst = "g_a" if i % 2 == 0 else "g_b"
-                passes.append({"shader": f"shaders/glow-comp-{src[-1]}.wgsl", "entry": f"comp_{i}_{band}", "inputs": [src, "g_y"], "output": dst})
-        passes.append({"shader": "shaders/glow-post.wgsl", "inputs": ["band", "g_b"], "output": "glow_" + band})
+                passes.append({"shader": f"shaders/glow-comp-{src[-1]}.wgsl", "entry": f"comp_{i}_{band}", "inputs": [src, "g_y"], "output": [dst]})
+        passes.append({"shader": "shaders/glow-post.wgsl", "inputs": ["band", "g_b"], "output": ["glow_" + band]})
     passes.append({"shader": "shaders/finish.wgsl", "inputs": ["first", "second", "glow_upper", "glow_lower"]})
 
     path = EFFECT / "manifest.json"

@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "warped"
+          "output": ["warped"]
         },
         {
           "shader": "shaders/finish.wgsl",

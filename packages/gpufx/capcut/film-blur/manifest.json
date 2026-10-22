@@ -35,14 +35,14 @@
             "first",
             "second"
           ],
-          "output": "look"
+          "output": ["look"]
         },
         {
           "shader": "shaders/crisp.wgsl",
           "inputs": [
             "look"
           ],
-          "output": "crisp"
+          "output": ["crisp"]
         },
         {
           "shader": "shaders/film-blur.wgsl",

@@ -1096,7 +1096,7 @@ def main():
     for shader_name, inputs, output in PASSES:
         p = {"shader": "shaders/%s.wgsl" % shader_name, "inputs": inputs}
         if output:
-            p["output"] = output
+            p["output"] = [output]
         MANIFEST["groups"][0]["passes"].append(p)
     (EFFECT / "manifest.json").write_bytes((json.dumps(MANIFEST, indent=2) + "\n").encode("utf-8"))
     print("wrote %d shaders and manifest.json" % len(files))

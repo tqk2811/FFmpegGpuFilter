@@ -35,7 +35,7 @@
             "first",
             "second"
           ],
-          "output": "smeared"
+          "output": ["smeared"]
         },
         {
           "shader": "shaders/scanlines.wgsl",

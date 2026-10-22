@@ -32,12 +32,12 @@
         {
           "shader": "shaders/fade.wgsl",
           "inputs": ["first", "second"],
-          "output": "faded"
+          "output": ["faded"]
         },
         {
           "shader": "shaders/blur-h.wgsl",
           "inputs": ["faded"],
-          "output": "blur_h"
+          "output": ["blur_h"]
         },
         {
           "shader": "shaders/finish.wgsl",

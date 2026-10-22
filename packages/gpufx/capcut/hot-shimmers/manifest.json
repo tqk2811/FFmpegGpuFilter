@@ -32,17 +32,17 @@
         {
           "shader": "shaders/warp.wgsl",
           "inputs": ["first", "second"],
-          "output": "warped"
+          "output": ["warped"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": ["warped"],
-          "output": "glow_h"
+          "output": ["glow_h"]
         },
         {
           "shader": "shaders/glow-v.wgsl",
           "inputs": ["glow_h"],
-          "output": "glow"
+          "output": ["glow"]
         },
         {
           "shader": "shaders/finish.wgsl",

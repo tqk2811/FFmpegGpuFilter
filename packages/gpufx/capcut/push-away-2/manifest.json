@@ -32,17 +32,17 @@
         {
           "shader": "shaders/compose.wgsl",
           "inputs": ["first", "second"],
-          "output": "layer"
+          "output": ["layer"]
         },
         {
           "shader": "shaders/spin.wgsl",
           "inputs": ["layer"],
-          "output": "spun"
+          "output": ["spun"]
         },
         {
           "shader": "shaders/glow-h.wgsl",
           "inputs": ["spun"],
-          "output": "glow_h"
+          "output": ["glow_h"]
         },
         {
           "shader": "shaders/finish.wgsl",

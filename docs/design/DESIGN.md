@@ -83,8 +83,8 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": "tmp" },
-        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": "out" }
+        { "shader": "shaders/blur_h.wgsl", "inputs": ["src"], "output": ["tmp"] },
+        { "shader": "shaders/blur_v.wgsl", "inputs": ["tmp"], "output": ["out"] }
       ]
     }
   ]

@@ -32,12 +32,12 @@
         {
           "shader": "shaders/blur-first.wgsl",
           "inputs": ["first"],
-          "output": "blur_a"
+          "output": ["blur_a"]
         },
         {
           "shader": "shaders/blur-second.wgsl",
           "inputs": ["second"],
-          "output": "blur_b"
+          "output": ["blur_b"]
         },
         {
           "shader": "shaders/tremor.wgsl",

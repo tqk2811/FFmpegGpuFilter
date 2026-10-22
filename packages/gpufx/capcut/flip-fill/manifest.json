@@ -32,12 +32,12 @@
         {
           "shader": "shaders/scene.wgsl",
           "inputs": ["first", "second"],
-          "output": "lit"
+          "output": ["lit"]
         },
         {
           "shader": "shaders/streak.wgsl",
           "inputs": ["lit"],
-          "output": "streak"
+          "output": ["streak"]
         },
         {
           "shader": "shaders/zoom.wgsl",

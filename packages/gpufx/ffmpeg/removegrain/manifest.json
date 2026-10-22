@@ -14,7 +14,7 @@
   "groups": [
     {
       "passes": [
-        { "shader": "shaders/removegrain.wgsl", "inputs": ["src"], "output": "out" }
+        { "shader": "shaders/removegrain.wgsl", "inputs": ["src"], "output": ["out"] }
       ]
     }
   ]
