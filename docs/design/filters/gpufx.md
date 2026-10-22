@@ -110,7 +110,8 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   `pkg.zip=key=value:key2=value2`, in `graph=` (also in a chain: `graph='a.zip=k=1|b.zip'`) and in every node of
   `graph=` (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`). Keys are named (no positional values). A value is
   a literal (`0.5`, `1,0,0`, `#ff8800`) or an **FFmpeg expression** in `t`, `n`, `w`, `h`, `a` (`w/h`), `sar`,
-  `dar` (`a*sar`), re-evaluated for every frame. This is how you do keyframes/transitions without external tools.
+  `dar` (`a*sar`), re-evaluated for every frame; a vector parameter takes one expression per component, split at
+  the commas outside parentheses (`anchor=0.5+0.1*t,0.5`). This is how you do keyframes/transitions without external tools.
   An unknown key is an error naming the effect and the key; so is a key given twice. The filter has no
   `params` option; to change values while the stream runs use the `sendcmd` command below.
   - **Escaping.** Put the whole `graph=` value in `'...'`. FFmpeg's own option parser splits the filter

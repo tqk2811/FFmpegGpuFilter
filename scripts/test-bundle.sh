@@ -321,6 +321,8 @@ ok "expression params: mixed & and escaped colon separators" -i "$A" -vf "gpufx=
 # shellcheck disable=SC2086
 ok "expression params: a, sar, dar" -i "$E" -vf "gpufx=graph='$FX/ffmpeg/vignette.zip=strength=clip(dar/a/sar-0.5\,0\,1)'" $NULL
 # shellcheck disable=SC2086
+ok "expression params: one per component of a vec2" -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/zoom-canvas.zip=zoom=1+t&anchor=0.5+0.1*sin(t)\,if(lt(t\,0.5)\,0.3\,0.7)'" $NULL
+# shellcheck disable=SC2086
 ok "sendcmd + chain" -i "$A" -vf "gpufx=graph=$FX/ffmpeg/gaussian-blur.zip,sendcmd=c='0.5 gpufx@g params intensity=0.2',gpufx@g=graph=$FX/standalone/gradient-map.zip,gpufx=graph=$FX/standalone/rgb-split.zip" $NULL
 # shellcheck disable=SC2086
 ok "timeline enable" -i "$A" -vf "format=yuv420p,gpufx=graph=$FX/ffmpeg/chroma-key.zip:enable='gte(t\,0.5)',hwdownload,format=rgba" $NULL
@@ -407,6 +409,8 @@ rejects "inline option that is not key=value" "is not key=value" -i "$A" -an -vf
 rejects "enum number that is not a value" "Invalid value for 'transition'" -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/xfade.zip=transition=99'" $NULL
 # shellcheck disable=SC2086
 rejects "enum name the package does not have" "unknown value .wipeup2." -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/xfade.zip=transition=wipeup2'" $NULL
+# shellcheck disable=SC2086
+rejects "more expressions than components" "3 expressions for 2 component(s)" -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/zoom-canvas.zip=anchor=t\,t\,t'" $NULL
 # shellcheck disable=SC2086
 rejects "the params option is gone" "params" -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip:params='amount=0'" $NULL
 # shellcheck disable=SC2086

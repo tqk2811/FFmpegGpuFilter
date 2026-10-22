@@ -38,7 +38,7 @@ impl ParamType {
         }
     }
 
-    fn components(self) -> usize {
+    pub(crate) fn components(self) -> usize {
         match self {
             ParamType::Expr => 0,
             ParamType::Float | ParamType::Int | ParamType::Enum | ParamType::Bool => 1,
@@ -166,6 +166,10 @@ impl ParamBlock {
         let i = self.index(name).ok_or_else(|| Error::Param(format!("unknown parameter `{name}`")))?;
         if self.defs[i].kind == ParamType::Expr {
             return Err(Error::Param(format!("`{name}` is an expression parameter: it takes text such as `0.1*sin(u)`, not numbers")));
+        }
+        let n = self.defs[i].kind.components();
+        if comps.len() > n {
+            return Err(Error::Param(format!("`{name}` has {n} component(s), got {}", comps.len())));
         }
         let mut v = self.values[i];
         for (dst, src) in v.0.iter_mut().zip(comps) {
@@ -413,5 +417,16 @@ mod tests {
         assert_eq!(b.expr_key(), ["sin(u)"], "a bad expression keeps the last good one");
         assert!(b.set("path", &[1.0]).unwrap_err().to_string().contains("expression parameter"));
         assert!(b.expr_functions(false).contains("\nfn gpufx_expr_path(gpufx_v_u: f32) -> f32"));
+    }
+
+    #[test]
+    fn numbers_set_the_first_components_and_no_more() {
+        let mut b = ParamBlock::new(&[def("v", ParamType::Vec2)]).unwrap();
+        b.set("v", &[0.25, 0.75]).unwrap();
+        assert_eq!(b.get("v").unwrap().0[..2], [0.25, 0.75]);
+        b.set("v", &[0.5]).unwrap();
+        assert_eq!(b.get("v").unwrap().0[..2], [0.5, 0.75], "missing components keep their value");
+        let err = b.set("v", &[1.0, 2.0, 3.0]).unwrap_err().to_string();
+        assert!(err.contains("2 component(s), got 3"), "{err}");
     }
 }

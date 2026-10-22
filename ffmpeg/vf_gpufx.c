@@ -86,7 +86,9 @@ enum {
 
 typedef struct ParamExpr {
     char *name;
-    AVExpr *expr;
+    /* One expression per component: "0.5+t/20,0.5" of a vec2 has two. */
+    AVExpr *expr[4];
+    int nb;
 } ParamExpr;
 
 /* bypass option and the inline bypass= of an effect: which input a disabled filter or effect passes. */
@@ -196,8 +198,9 @@ static int check_format_name(AVFilterContext *ctx, const char *name, int output)
 static void free_expr(ParamExpr *e)
 {
     av_freep(&e->name);
-    av_expr_free(e->expr);
-    e->expr = NULL;
+    for (int i = 0; i < e->nb; i++)
+        av_expr_free(e->expr[i]);
+    e->nb = 0;
 }
 
 static void drop_expr(GpufxContext *s, const char *name)
@@ -309,17 +312,16 @@ end:
 
 /*
  * Sets parameter name (a name gpufx_effect_find_param() takes) to value: either a literal
- * the package understands ("0.5", "1,0,0", "#ff8800") or, for scalar parameters, an
- * expression of t, n, w, h, a (w/h), sar and dar evaluated for every frame
- * ("clip((t-2)/1.5,0,1)"). Expressions are stored by the full parameter name.
+ * the package understands ("0.5", "1,0,0", "#ff8800") or expressions of t, n, w, h, a (w/h),
+ * sar and dar evaluated for every frame ("clip((t-2)/1.5,0,1)"), one per component of a
+ * vector parameter ("0.5+t/20,0.5"). Expressions are stored by the full parameter name.
  */
 static int set_param(AVFilterContext *ctx, const char *item, const char *value)
 {
     GpufxContext *s = ctx->priv;
-    AVExpr *expr = NULL;
-    ParamExpr *tmp;
+    ParamExpr e, *tmp;
     const char *name;
-    int index, ret;
+    int index, ret, n, depth = 0;
 
     if ((index = gpufx_effect_find_param(s->fx, item)) < 0) {
         av_log(ctx, AV_LOG_ERROR, "Effect '%s': %s\n", gpufx_effect_name(s->fx), gpufx_last_error());
@@ -341,24 +343,66 @@ static int set_param(AVFilterContext *ctx, const char *item, const char *value)
         }
     }
 
-    ret = av_expr_parse(&expr, value, var_names, NULL, NULL, NULL, NULL, 0, ctx);
-    if (ret < 0) {
-        av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': %s\n", name, gpufx_last_error());
-        return ret;
+    /* One expression per component, split at the commas outside parentheses:
+     * "0.5+t/20,if(lt(t,2),0.3,0.7)" sets the two components of a vec2. */
+    e = (ParamExpr){ 0 };
+    for (const char *p = value, *start = value; ; p++) {
+        if (*p == '(') {
+            depth++;
+        } else if (*p == ')') {
+            depth--;
+        } else if (!*p || (*p == ',' && depth == 0)) {
+            char *part;
+            if (e.nb == FF_ARRAY_ELEMS(e.expr)) {
+                av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': more than 4 components\n", name);
+                ret = AVERROR(EINVAL);
+                goto fail;
+            }
+            if (!(part = av_strndup(start, p - start))) {
+                ret = AVERROR(ENOMEM);
+                goto fail;
+            }
+            ret = av_expr_parse(&e.expr[e.nb], part, var_names, NULL, NULL, NULL, NULL, 0, ctx);
+            av_free(part);
+            if (ret < 0) {
+                /* A single part: the package's error on the literal says more (e.g. an enum name). */
+                if (e.nb == 0 && !*p)
+                    av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': %s\n", name, gpufx_last_error());
+                else
+                    av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': component %d is not a valid expression\n",
+                           name, e.nb + 1);
+                goto fail;
+            }
+            e.nb++;
+            if (!*p)
+                break;
+            start = p + 1;
+        }
+    }
+    if (e.nb > (n = gpufx_effect_param_components(s->fx, index))) {
+        /* An expression parameter (0 components) takes its text, already refused above. */
+        if (n <= 0)
+            av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': %s\n", name, gpufx_last_error());
+        else
+            av_log(ctx, AV_LOG_ERROR, "Invalid value for '%s': %d expressions for %d component(s)\n",
+                   name, e.nb, n);
+        ret = AVERROR(EINVAL);
+        goto fail;
     }
     if (!(tmp = av_realloc_array(s->exprs, s->nb_exprs + 1, sizeof(*s->exprs)))) {
-        av_expr_free(expr);
-        return AVERROR(ENOMEM);
+        ret = AVERROR(ENOMEM);
+        goto fail;
     }
     s->exprs = tmp;
-    s->exprs[s->nb_exprs].name = av_strdup(name);
-    s->exprs[s->nb_exprs].expr = expr;
-    if (!s->exprs[s->nb_exprs].name) {
-        av_expr_free(expr);
-        return AVERROR(ENOMEM);
+    if (!(e.name = av_strdup(name))) {
+        ret = AVERROR(ENOMEM);
+        goto fail;
     }
-    s->nb_exprs++;
+    s->exprs[s->nb_exprs++] = e;
     return 0;
+fail:
+    free_expr(&e);
+    return ret;
 }
 
 /*
@@ -2157,8 +2201,10 @@ static int process_frame(FFFrameSync *fs)
             goto fail;
     } else {
         for (int i = 0; i < s->nb_exprs; i++) {
-            double v = av_expr_eval(s->exprs[i].expr, vars, NULL);
-            if (gpufx_effect_set_param_values(s->fx, s->exprs[i].name, &v, 1) < 0) {
+            double v[4];
+            for (int j = 0; j < s->exprs[i].nb; j++)
+                v[j] = av_expr_eval(s->exprs[i].expr[j], vars, NULL);
+            if (gpufx_effect_set_param_values(s->fx, s->exprs[i].name, v, s->exprs[i].nb) < 0) {
                 ret = gpufx_error(ctx, s->exprs[i].name);
                 goto fail;
             }

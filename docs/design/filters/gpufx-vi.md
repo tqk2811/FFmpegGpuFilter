@@ -109,7 +109,8 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
   `pkg.zip=key=value:key2=value2`, trong `graph=` (kể cả chain: `graph='a.zip=k=1|b.zip'`) và trong mọi node của
   `graph=` (`[b]grayscale.zip|vignette.zip=strength=0.6[gb]`). Key phải có tên (không có giá trị theo vị trí). Giá
   trị là literal (`0.5`, `1,0,0`, `#ff8800`) hoặc **biểu thức FFmpeg** theo `t`, `n`, `w`, `h`, `a` (`w/h`), `sar`,
-  `dar` (`a*sar`), tính lại mỗi frame. Đây là cách làm keyframe/transition không cần tool ngoài.
+  `dar` (`a*sar`), tính lại mỗi frame; tham số vector nhận mỗi thành phần một biểu thức, tách ở dấu phẩy nằm ngoài
+  ngoặc (`anchor=0.5+0.1*t,0.5`). Đây là cách làm keyframe/transition không cần tool ngoài.
   Key lạ là lỗi có nêu tên effect và key; key cho hai lần cũng vậy. Filter không có option `params`; muốn đổi
   giá trị trong lúc stream chạy thì dùng lệnh `sendcmd` bên dưới.
   - **Escape.** Bọc cả giá trị `graph=` trong `'...'`. Bộ parse option của FFmpeg tách option của filter
