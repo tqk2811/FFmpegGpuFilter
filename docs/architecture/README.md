@@ -116,19 +116,23 @@ Details of the format and how to write shaders: [EFFECT_FORMAT.md](../EFFECT_FOR
   - **Load checks**: a `max` above what fits beside the other outputs, and any other name of the form `<name>d+`, fail
     in [`validate`](../../crates/gpufx-core/src/manifest.rs#L604); an omitted output `max` is set to what fits in `parse`.
 - An output may be `optional`: the node option `<name>=off` switches it off. How it works, for programmers:
-  - **Removal, not a flag**: [`Manifest::with_outputs_off`](../../crates/gpufx-core/src/manifest.rs#L947) moves the output
+  - **Removal, not a flag**: [`Manifest::with_outputs_off`](../../crates/gpufx-core/src/manifest.rs#L951) moves the output
     from `outputs` to `off_outputs`, applied before `with_output_count` (so the 4-output check after the expansion counts
     only the outputs left); the graph, the FFI and the `gpufx` filter then see an effect with fewer outputs, and
     `nb_outputs` follows with no change on the C side. [`Package::with_outputs`](../../crates/gpufx-core/src/package.rs#L87)
     rebuilds from the manifest as written (kept for any package with an optional output) and keeps the off list beside
     the copy counts.
   - **The pass keeps its bindings**: the pass still lists the texture, so `out_tex{k}` and `gpufx_write{k}` stay and the
-    shader compiles unchanged; [`make_bound`](../../crates/gpufx-core/src/runtime.rs#L990) binds it to a 1x1 stand-in of
+    shader compiles unchanged; [`make_bound`](../../crates/gpufx-core/src/runtime.rs#L991) binds it to a 1x1 stand-in of
     the work format, and [`plan`](../../crates/gpufx-core/src/graph.rs#L405) gives it no pooled texture. Out-of-range
     storage writes are dropped (or land in the stand-in), so the writes cost nothing visible. A pass writing only outputs
     that are off is skipped by the existing `set_used_outputs` (nothing needs it).
   - **Nothing reads an optional output** (checked in `validate`): otherwise a later pass would read the stand-in.
-  - **The helper**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1101) adds `gpufx_output_enabled(i)` (an
+  - **Size indices stay as written**: `off_indices` keeps where each output switched off stood, and
+    [`Manifest::size_index`](../../crates/gpufx-core/src/manifest.rs#L987) maps an output left (or a copy, after
+    `with_output_count`) back to that index for `gpufx_output_size`, so a shader sizing by index needs no case for
+    `off`. The size checks skip the outputs that are off (a stand-in has no size of its own).
+  - **The helper**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1102) adds `gpufx_output_enabled(i)` (an
     `i != k` test per output that is off, `true` when none) only to a pass writing an optional output, mirroring the
     `repeat` helpers: other passes keep their source and shader cache key.
   - **The option** is taken out of the inline options in [graph.rs](../../crates/gpufx-core/src/graph.rs#L1338) together

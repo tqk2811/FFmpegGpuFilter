@@ -51,6 +51,10 @@ pub struct Manifest {
     /// into a 1x1 stand-in texture. Not read from JSON.
     #[serde(skip)]
     pub off_outputs: Vec<String>,
+    /// Indices in the manifest `outputs` as written of the outputs in [`Manifest::off_outputs`],
+    /// ascending (see [`Manifest::size_index`]). Not read from JSON.
+    #[serde(skip)]
+    pub off_indices: Vec<usize>,
 }
 
 /// One alternative pass list of an effect (see [`Manifest::groups`]).
@@ -950,9 +954,13 @@ impl Manifest {
         }
         let mut m = self.clone();
         for name in off {
+            if m.off_outputs.contains(name) {
+                return Err(Error::Manifest(format!("effect `{}`: output `{name}` is switched off twice", self.name)));
+            }
             let Some(k) = m.outputs.iter().position(|o| o.name == *name) else {
                 return Err(Error::Manifest(format!("effect `{}` has no output `{name}` to switch off", self.name)));
             };
+            let index = m.size_index(k);
             if !m.outputs[k].optional {
                 let optional: Vec<&str> = self.outputs.iter().filter(|o| o.optional).map(|o| o.name.as_str()).collect();
                 return Err(Error::Manifest(format!(
@@ -963,12 +971,27 @@ impl Manifest {
             }
             m.outputs.remove(k);
             m.off_outputs.push(name.clone());
+            m.off_indices.push(index);
+            m.off_indices.sort_unstable();
         }
         if m.outputs.is_empty() {
             return Err(Error::Manifest(format!("effect `{}`: every output is off", self.name)));
         }
         m.validate()?;
         Ok(m)
+    }
+
+    /// The index `gpufx_output_size` gets for output `o` of `outputs`: its index in the
+    /// manifest `outputs` as written, the outputs switched off counted; copy j of a repeated
+    /// output is the index of that output plus j.
+    pub fn size_index(&self, o: usize) -> usize {
+        let mut index = o;
+        for &off in &self.off_indices {
+            if off <= index {
+                index += 1;
+            }
+        }
+        index
     }
 
     /// Whether pass `def` writes an optional output, on or off (its prelude then declares
@@ -1211,6 +1234,8 @@ mod tests {
         let err = |m: &Manifest, n: &str| m.with_outputs_off(&[n.into()]).unwrap_err().to_string();
         assert!(err(&m, "color").contains("output `color` is not optional, it cannot be off (optional: matte)"));
         assert!(err(&m, "nope").contains("has no output `nope`"));
+        let twice = m.with_outputs_off(&["matte".into(), "matte".into()]).unwrap_err().to_string();
+        assert!(twice.contains("output `matte` is switched off twice"), "{twice}");
         let all = parse(r#"[{"name":"color","optional":true}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#).unwrap();
         assert!(err(&all, "color").contains("every output is off"));
 
@@ -1224,6 +1249,10 @@ mod tests {
         assert_eq!(rep.output_repeat().map(|r| r.max), Some(3));
         assert!(rep.with_output_count(Some(3)).unwrap_err().to_string().contains("make 5 outputs, more than 4"));
         assert_eq!(rep.with_outputs_off(&["mask".into()]).unwrap().with_output_count(Some(3)).unwrap().outputs.len(), 4);
+        // gpufx_output_size indices are those of the manifest as written, off outputs counted.
+        let idx = |m: &Manifest| (0..m.outputs.len()).map(|o| m.size_index(o)).collect::<Vec<_>>();
+        assert_eq!(idx(&rep.with_output_count(Some(2)).unwrap()), [0, 1, 2, 3]);
+        assert_eq!(idx(&rep.with_outputs_off(&["mask".into()]).unwrap().with_output_count(Some(3)).unwrap()), [0, 2, 3, 4]);
 
         let bad = |outputs: &str, passes: &str| parse(outputs, passes).unwrap_err();
         let e = bad(r#"[{"name":"part","optional":true,"repeat":{"default":2}}]"#, r#"{"shader":"a.wgsl","outputs":["part"]}"#);

@@ -135,18 +135,22 @@ Tóm tắt `manifest.json`:
   - **Kiểm lúc nạp**: `max` lớn hơn số vừa bên cạnh các output khác, và tên khác dạng `<name>d+`, bị từ chối ở
     [`validate`](../../crates/gpufx-core/src/manifest.rs#L604); output không ghi `max` thì `parse` đặt bằng số vừa.
 - Output có thể `optional`: option node `<name>=off` tắt nó. Cách làm, cho lập trình viên:
-  - **Bỏ hẳn, không phải cờ**: [`Manifest::with_outputs_off`](../../crates/gpufx-core/src/manifest.rs#L947) chuyển output
+  - **Bỏ hẳn, không phải cờ**: [`Manifest::with_outputs_off`](../../crates/gpufx-core/src/manifest.rs#L951) chuyển output
     từ `outputs` sang `off_outputs`, chạy trước `with_output_count` (nên kiểm 4 output sau khi nở chỉ đếm output còn lại);
     graph, FFI và filter `gpufx` thấy một effect ít output hơn, `nb_outputs` theo đó mà phía C không phải sửa.
     [`Package::with_outputs`](../../crates/gpufx-core/src/package.rs#L87) dựng lại từ manifest gốc (giữ cho mọi package có
     output tuỳ chọn) và giữ danh sách tắt cạnh số bản sao.
   - **Pass giữ nguyên binding**: pass vẫn liệt kê texture đó, nên `out_tex{k}` và `gpufx_write{k}` còn nguyên, shader biên
-    dịch không đổi; [`make_bound`](../../crates/gpufx-core/src/runtime.rs#L990) bind nó vào một texture thế chỗ 1x1 đúng
+    dịch không đổi; [`make_bound`](../../crates/gpufx-core/src/runtime.rs#L991) bind nó vào một texture thế chỗ 1x1 đúng
     format làm việc, và [`plan`](../../crates/gpufx-core/src/graph.rs#L405) không cấp texture pool cho nó. Ghi storage ngoài
     khoảng bị bỏ (hoặc rơi vào texture thế chỗ), nên ghi vào đó không hiện ra đâu. Pass chỉ ghi output đã tắt thì
     `set_used_outputs` có sẵn bỏ qua (không ai cần).
   - **Không gì đọc output tuỳ chọn** (kiểm ở `validate`): không thì pass sau sẽ đọc texture thế chỗ.
-  - **Hàm hỗ trợ**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1101) thêm `gpufx_output_enabled(i)` (mỗi
+  - **Chỉ số size giữ như đã viết**: `off_indices` giữ vị trí của từng output đã tắt, và
+    [`Manifest::size_index`](../../crates/gpufx-core/src/manifest.rs#L987) đổi một output còn lại (hoặc một bản sao,
+    sau `with_output_count`) về chỉ số đó cho `gpufx_output_size`, nên shader định kích thước theo chỉ số không cần
+    xét `off`. Các bước kiểm kích thước bỏ qua output đã tắt (texture thế chỗ không có kích thước riêng).
+  - **Hàm hỗ trợ**: [`output_enabled`](../../crates/gpufx-core/src/runtime.rs#L1102) thêm `gpufx_output_enabled(i)` (mỗi
     output tắt một phép `i != k`, không có thì `true`) chỉ cho pass ghi output tuỳ chọn, giống các hàm của `repeat`: pass
     khác giữ nguyên source và key shader cache.
   - **Option** được lấy ra khỏi inline option ở [graph.rs](../../crates/gpufx-core/src/graph.rs#L1338) cùng `outputs=N`

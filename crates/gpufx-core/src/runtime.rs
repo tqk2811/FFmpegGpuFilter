@@ -776,7 +776,7 @@ impl Effect {
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let mut data: Vec<u32> = vec![ins.len() as u32, o as u32];
+            let mut data: Vec<u32> = vec![ins.len() as u32, m.size_index(o) as u32];
             data.extend(ins.iter().flat_map(|&(w, h)| [w, h]));
             queue.write_buffer(&io, 0, &data.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>());
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -824,7 +824,8 @@ impl Effect {
                     )));
                 }
             }
-            for out in &pass.outputs {
+            // An output switched off is a 1x1 stand-in, not at the size of the pass.
+            for out in pass.outputs.iter().filter(|n| !m.off_outputs.contains(n)) {
                 if let Some(&had) = texture.get(out.as_str()) {
                     if had != size {
                         return Err(Error::Unsupported(format!(
