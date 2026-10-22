@@ -454,3 +454,14 @@ Vấn đề: đưa file yuv thô không gắn `colorspace`/`range` qua `gpufx_up
 - **Vấn đề**: nhiều shader dưới `packages/gpufx/capcut/` gọi `smoothstep(hi, lo, x)` (edge0 > edge1) để lấy đường dốc xuống, vd `neon-graffiti/shaders/neon-graffiti.wgsl:137`, `glowing-graffiti/shaders/glowing-graffiti.wgsl:51,70,101,106,111,118` và khoảng 8 shader cũ hơn. MSL/GLSL coi kết quả là undefined khi edge0 >= edge1; driver phổ biến vẫn chạy đúng nhưng không bảo đảm trên Metal.
 - **Vì sao nên làm**: đổi sang `1.0 - smoothstep(lo, hi, x)` cho chắc chắn trên mọi backend; kết quả số học không đổi.
 - **Ngày ghi**: 2026-10-18.
+
+### [Thấp] Đề xuất filter `gpufx_select`: chọn frame theo `scene` tính trên GPU
+- **Vấn đề**: `select` gốc của FFmpeg cần pixel trên CPU (biến `scene`), nên với frame GPU phải `gpufx_download` trước. `gpufx` hiện luôn 1 frame vào → 1 frame ra mỗi output, không bỏ frame hay chọn pad được.
+- **Đề xuất**: filter riêng `gpufx_select` (cùng kiểu `gpufx_ai_*`), cú pháp như `select` gốc (`gpufx_select='gt(scene\,0.3)'`, `outputs=N`).
+  - GPU: compute shader viết cứng (như `convert_*.wgsl`) tính SAD giữa frame hiện tại và frame trước (filter giữ texture frame trước), reduce trong workgroup rồi `atomicAdd` vào storage buffer vài byte; `copy_buffer_to_buffer` sang buffer `MAP_READ` trong cùng submit.
+  - CPU: `map_async` đọc về, tính `mafd`, `diff = |mafd - mafd_trước|`, `scene = clip(min(mafd, diff)/100, 0, 1)` như `get_scene_score` của `vf_select.c`; `av_expr_eval` với `n`, `t`, `pts`, `scene` (thêm `key`, `pict_type` từ metadata) để bỏ/giữ/chọn pad. Frame giữ lại đi ra nguyên là frame GPU.
+  - Giữ 1–2 frame trong queue để readback không làm GPU đứng chờ.
+- **Cần chốt khi lên kế hoạch**: tính SAD trên plane gốc 8-bit để ngưỡng khớp FFmpeg hay trên RGBA sau convert; backend Vulkan + D3D12.
+- **Hướng mở rộng sau**: manifest khai output dạng số (`"stats"`) để gói tự định nghĩa thước đo cho select.
+- **Vì sao**: chọn frame theo chuyển cảnh mà không phải tải frame về CPU.
+- **Ngày ghi**: 2026-10-23.
