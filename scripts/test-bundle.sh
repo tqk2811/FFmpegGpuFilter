@@ -321,9 +321,9 @@ ok "two output pads of one effect" -i "$A" -an -filter_complex "[0]gpufx=graph='
 ok "an output in a graph and one along the chain" -i "$A" -an     -filter_complex "[0]gpufx=graph='[0]$LM[matte=m]|$FX/ffmpeg/invert.zip[x]'[x][m]" -map "[x]" $NULL -map "[m]" $NULL
 # Both outputs: same frames, same timestamps; one output ending early does not stop the other.
 pts_of() { grep -v '^#' "$1" | cut -d, -f3 | tr -d ' '; }
-if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM'[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c.md5" -map "[mo]" -f framemd5 -y "$CLIPS/lm_m.md5" > "$CLIPS/last.log" 2>&1     && [ -s "$CLIPS/lm_c.md5" ] && [ "$(pts_of "$CLIPS/lm_c.md5")" = "$(pts_of "$CLIPS/lm_m.md5")" ]     && [ "$(grep -vc '^#' "$CLIPS/lm_c.md5")" -gt 5 ]; then pass "two outputs: same frame count and pts"
+if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|yuv420p[c][m];[c]hwdownload,format=rgba[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c.md5" -map "[mo]" -f framemd5 -y "$CLIPS/lm_m.md5" > "$CLIPS/last.log" 2>&1     && [ -s "$CLIPS/lm_c.md5" ] && [ "$(pts_of "$CLIPS/lm_c.md5")" = "$(pts_of "$CLIPS/lm_m.md5")" ]     && [ "$(grep -vc '^#' "$CLIPS/lm_c.md5")" -gt 5 ]; then pass "two outputs: same frame count and pts"
 else fail "two outputs: same frame count and pts"; cat "$CLIPS/last.log"; fi
-if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM'[c][m];[c]hwdownload,format=yuva420p[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c2.md5" -map "[mo]" -frames:v 3 -f framemd5 -y "$CLIPS/lm_m2.md5" > "$CLIPS/last.log" 2>&1     && [ "$(grep -vc '^#' "$CLIPS/lm_m2.md5")" -eq 3 ] && [ "$(pts_of "$CLIPS/lm_c2.md5")" = "$(pts_of "$CLIPS/lm_c.md5")" ]; then
+if gpu_ff -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|yuv420p[c][m];[c]hwdownload,format=rgba[co];[m]hwdownload,format=yuv420p[mo]"     -map "[co]" -f framemd5 -y "$CLIPS/lm_c2.md5" -map "[mo]" -frames:v 3 -f framemd5 -y "$CLIPS/lm_m2.md5" > "$CLIPS/last.log" 2>&1     && [ "$(grep -vc '^#' "$CLIPS/lm_m2.md5")" -eq 3 ] && [ "$(pts_of "$CLIPS/lm_c2.md5")" = "$(pts_of "$CLIPS/lm_c.md5")" ]; then
     pass "two outputs: the second ends early, the first runs to the end"
 else fail "two outputs: the second ends early, the first runs to the end"; cat "$CLIPS/last.log"; fi
 # out_format per output pad: one entry per pad, an empty entry keeps the default.
@@ -336,7 +336,7 @@ rejects "out_format with the wrong number of entries" "has 3 entries" -i "$A" -a
 # shellcheck disable=SC2086
 rejects "out_format with an unknown format" "unknown pixel format 'nope'" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|nope[c][m]" -map "[c]" $NULL -map "[m]" $NULL
 # shellcheck disable=SC2086
-ok "out_format: any GPU format for any output" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=rgba|yuva420p[c][m]" -map "[c]" $NULL -map "[m]" $NULL
+ok "out_format: a different GPU format for each output (p010le, rgba)" -i "$A" -an -filter_complex "[0]gpufx=graph='$LM':out_format=p010le|rgba[c][m]" -map "[c]" $NULL -map "[m]" $NULL
 for m in 0 1 2 3; do
     # shellcheck disable=SC2086
     ok "fit mode $m (different sizes)" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph='$FX/tqk2811/FFmpegArgs.TanersenerSlideShow/fit.zip=mode=$m'" -an $NULL
@@ -353,14 +353,14 @@ ok "expression params: one per component of a vec2" -i "$A" -i "$A" -an -filter_
 # shellcheck disable=SC2086
 ok "sendcmd + chain" -i "$A" -vf "gpufx=graph=$FX/ffmpeg/gaussian-blur.zip,sendcmd=c='0.5 gpufx@g params intensity=0.2',gpufx@g=graph=$FX/standalone/gradient-map.zip,gpufx=graph=$FX/standalone/rgb-split.zip" $NULL
 # shellcheck disable=SC2086
-ok "timeline enable" -i "$A" -vf "format=yuv420p,gpufx=graph=$FX/ffmpeg/chroma-key.zip:enable='gte(t\,0.5)',hwdownload,format=rgba" $NULL
+ok "timeline enable" -i "$A" -vf "format=yuv420p,gpufx=graph=$FX/ffmpeg/chroma-key.zip:out_format=rgba:enable='gte(t\,0.5)',hwdownload,format=rgba" $NULL
 # shellcheck disable=SC2086
 ok "encode mpeg4 + aac (hwdownload)" -i "$A" -vf "gpufx=graph=$FX/ffmpeg/sepia.zip,hwdownload,format=yuv420p" -c:v mpeg4 -c:a aac -y "$CLIPS/out.mp4"
 echo "manifest rules:"
 # shellcheck disable=SC2086
-ok "chroma-key: yuv420p in, rgba out" -i "$A" -vf "format=yuv420p,gpufx=graph=$FX/ffmpeg/chroma-key.zip,hwdownload,format=rgba" $NULL
+ok "chroma-key: yuv420p in, rgba out" -i "$A" -vf "format=yuv420p,gpufx=graph=$FX/ffmpeg/chroma-key.zip:out_format=rgba,hwdownload,format=rgba" $NULL
 # shellcheck disable=SC2086
-rejects "chroma-key: gray input" "pixel format .gray. is not supported" -i "$A" -vf "format=gray,gpufx=graph=$FX/ffmpeg/chroma-key.zip" $NULL
+ok "chroma-key: gray input is accepted" -i "$A" -vf "format=gray,gpufx=graph=$FX/ffmpeg/chroma-key.zip" $NULL
 # shellcheck disable=SC2086
 rejects "crossfade: inputs of different sizes" "must equal the first input" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip" -an $NULL
 # Without graph reinit, frames of the new size reach gpufx: it must refuse them, not
@@ -432,7 +432,11 @@ rejects "inline key the effect does not have" "has no parameter" -i "$A" -an -vf
 # shellcheck disable=SC2086
 rejects "inline key given twice" "given twice" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip=amount=0&amount=1'" $NULL
 # shellcheck disable=SC2086
-rejects "inline option that is not key=value" "is not key=value" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip=0'" $NULL
+ok "inline positional value" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip=0'" $NULL
+# shellcheck disable=SC2086
+rejects "inline positional value after a named key" "after a named key" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip=amount=0&1'" $NULL
+# shellcheck disable=SC2086
+rejects "inline too many positional values" "positional values, but it has" -i "$A" -an -vf "gpufx=graph='$FX/ffmpeg/invert.zip=0&1'" $NULL
 # shellcheck disable=SC2086
 rejects "enum number that is not a value" "Invalid value for 'transition'" -i "$A" -i "$A" -an -filter_complex "[0][1]gpufx=graph='$FX/ffmpeg/xfade.zip=transition=99'" $NULL
 # shellcheck disable=SC2086
