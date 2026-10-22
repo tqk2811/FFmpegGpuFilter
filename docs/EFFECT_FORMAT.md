@@ -75,6 +75,7 @@ Each element of `outputs` (an array; the object form of earlier versions is an e
 | `name` | (required) | The texture a pass writes (see [Several outputs](#several-outputs)), also the output pad name of an effect with several outputs |
 | `bypass` | the first input | The input this output passes when the effect is switched off (`<effect>.enable`) |
 | `repeat` | none | (last output only, WGSL only) `{ "default": 2, "min": 1, "max": 3 }`: the output stands for a variable number of pads set by the node option `outputs=N`, see [Variable number of outputs](#variable-number-of-outputs) |
+| `optional` | `false` | `true`: a graph node may switch the output off with its option `<name>=off`, see [Optional outputs](#optional-outputs) |
 
 Pixel formats: the GPU converter reads and writes `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (and reads `yuvj420p`/`yuvj422p`/`yuvj444p`).
@@ -188,7 +189,7 @@ Rules:
 - Omitted, `outputs` is one output named after the main output of the last pass (`[{"name": "out"}]` for a last pass
   without `outputs`), so effects with one output need not declare it.
 - Each output name is written by exactly one pass of every group; that pass need not be the last.
-- Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable`, `bypass` or `outputs`. Only the last output may `repeat` (see [Variable number of outputs](#variable-number-of-outputs)).
+- Output names are identifiers, differ from each other, from the inputs, textures and params, and are not `enable`, `bypass` or `outputs`. Only the last output may `repeat` (see [Variable number of outputs](#variable-number-of-outputs)). An output may be `optional` (see [Optional outputs](#optional-outputs)).
 - A pass runs at the size of the first effect output it writes, or of output 0 when it writes none (a pass making
   textures for later passes); `globals.size`, `gpufx_uv` and `gpufx_in_bounds` follow that size. The outputs one
   pass writes must have the same size (the `gpufx_output_size` of the pass gives the same size for each of them), and a texture written by several passes is written at one size.
@@ -253,6 +254,30 @@ fn gpufx_write_at(i: u32, id: vec3u, c: vec4f)       // gpufx_write (i = 0), gpu
   index (copy j of `part` after one fixed output is index `1 + j`); the copies of one pass must get one size.
 
 The package is compiled for that count; `gpufx pack --precompile` compiles the `default` count only.
+
+### Optional outputs
+
+An output with `"optional": true` is on by default; the node option `<name>=off` switches it off (`<name>=on` is the
+default): `graph='key.zip=matte=off'`, `[0]key.zip=matte=off[c]`. An output switched off has no output pad and no
+texture, and a pass that writes only outputs switched off does not run. The option is fixed when the graph is built (it
+sets the filter's output pads; a runtime command `node.matte` is an error), and an output name is never a param name, so
+the key cannot clash with one.
+
+- Nothing may read an optional output: no later pass lists it in `inputs` (it would have no texture when off).
+- A repeated output cannot be optional (`outputs=N` with `min: 1` covers that).
+- The 4-output limit counts the outputs after the `repeat` expansion and after the outputs switched off: with
+  `[{"name":"color"},{"name":"mask","optional":true},{"name":"part","repeat":{"default":2}}]`, `outputs=3` needs
+  `mask=off`. A `repeat` `max` is checked (and, omitted, set) beside the outputs that cannot be off only.
+- A pass writing an output switched off keeps its bindings: the output is bound to a 1x1 stand-in texture, so
+  `gpufx_write1(...)` still compiles and stores nothing useful. The prelude of a pass writing an optional output (on or
+  off) adds a helper to skip that work; other passes do not get it:
+
+```wgsl
+fn gpufx_output_enabled(i: u32) -> bool   // pass output i (0 = out_tex, k = out_tex{k}) is on
+```
+
+  GLSL: `bool gpufx_output_enabled(uint i)`. Each on/off combination compiles its own pipelines.
+- At least one output must stay on.
 
 ### Output size
 

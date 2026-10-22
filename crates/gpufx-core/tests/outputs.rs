@@ -173,6 +173,42 @@ impl Packages {
                 )),
             )],
         );
+        // An optional matte (`matte=off`): with it off, the color is the matte instead, so the
+        // pixels show what gpufx_output_enabled said.
+        let opt = format!(
+            "if (gpufx_output_enabled(1u)) {{ gpufx_write(id, {SWAP});\n    gpufx_write1(id, {MATTE}); }} else {{ gpufx_write(id, {MATTE});\n    gpufx_write1(id, vec4f(1.0)); }}"
+        );
+        let opt_head = r#""api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"matte","optional":true}]"#;
+        pkgs.add(
+            "keyopt",
+            &format!(r#"{{"id":"t.keyopt","name":"Key opt",{opt_head},"groups":[{{"passes":[{{"shader":"k.wgsl","inputs":["src"],"outputs":["color","matte"]}}]}}]}}"#),
+            &[("k.wgsl", wgsl(&opt))],
+        );
+        let opt_glsl = "#version 450\nlayout(local_size_x = 8, local_size_y = 8) in;\nvoid main() {\n    uvec3 id = gl_GlobalInvocationID;\n    if (!gpufx_in_bounds(id)) { return; }\n    vec4 c = texelFetch(sampler2D(src, smp), ivec2(id.xy), 0);\n    vec4 m = vec4(vec3(c.r), 1.0);\n    if (gpufx_output_enabled(1u)) { gpufx_write(id, c.bgra); gpufx_write1(id, m); } else { gpufx_write(id, m); gpufx_write1(id, vec4(1.0)); }\n}\n";
+        pkgs.add(
+            "keyoptglsl",
+            &format!(r#"{{"id":"t.keyoptglsl","name":"Key opt GLSL",{opt_head},"groups":[{{"passes":[{{"shader":"k.glsl","inputs":["src"],"outputs":["color","matte"]}}]}}]}}"#),
+            &[("k.glsl", opt_glsl.to_string())],
+        );
+        // The optional matte from a pass of its own, which does not run when it is off.
+        pkgs.add(
+            "keyoptsep",
+            &format!(
+                r#"{{"id":"t.keyoptsep","name":"Key opt sep",{opt_head},"groups":[{{"passes":[{{"shader":"c.wgsl","inputs":["src"],"outputs":["color"]}},{{"shader":"m.wgsl","inputs":["src"],"outputs":["matte"]}}]}}]}}"#
+            ),
+            &[("m.wgsl", wgsl(&format!("gpufx_write(id, {MATTE});"))), ("c.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});")))],
+        );
+        // An optional output beside a repeated one: four outputs by default, outputs=3 only
+        // with the optional one off.
+        pkgs.add(
+            "optparts",
+            r#"{"id":"t.optparts","name":"OptParts","api":1,"used_for":["gpufx"],"outputs":[{"name":"color"},{"name":"mask","optional":true},{"name":"part","repeat":{"default":2}}],
+                "groups":[{"passes":[{"shader":"c.wgsl","inputs":["src"],"outputs":["color","mask"]},{"shader":"p.wgsl","inputs":["src"],"outputs":["part"]}]}]}"#,
+            &[
+                ("c.wgsl", wgsl(&format!("gpufx_write(id, {SWAP});\n    if (gpufx_output_enabled(1u)) {{ gpufx_write1(id, {MATTE}); }}"))),
+                ("p.wgsl", wgsl(&PARTS_LOOP.replace("BASE", "0u"))),
+            ],
+        );
         // Sized by params: the top-left `w`x`h` of the input (0 when a param is 0).
         let crop_params =
             r#""params":[{"name":"w","type":"int","default":4,"min":0,"max":100},{"name":"h","type":"int","default":3,"min":0,"max":100}]"#;
@@ -767,4 +803,78 @@ fn outputs_cannot_be_set_by_a_command_after_the_graph_is_built() {
         assert!(e.contains("outputs=N is fixed when the"), "{name}: {e}");
     }
     assert_eq!(g.output_names(), ["part0", "part1"]);
+}
+
+#[test]
+fn an_optional_output_switched_off_has_no_pad_and_its_pass_writes_a_stand_in() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(7);
+    for name in ["keyopt", "keyoptglsl"] {
+        // On by default, or with `matte=on`.
+        for text in [format!("{name}.zip"), format!("{name}.zip=matte=on")] {
+            let mut g = pkgs.graph(&ctx, &text).unwrap();
+            assert_eq!(g.output_names(), ["color", "matte"], "{text}");
+            assert!(run_graph(&mut g, &[&src]) == [swapped(&src), matte(&src)], "{text}");
+            assert!(g.inline_options()[0].is_empty(), "{text}");
+        }
+        // Off: one pad, no matte texture, and the shader sees gpufx_output_enabled(1) false.
+        let mut g = pkgs.graph(&ctx, &format!("{name}.zip=matte=off")).unwrap();
+        assert_eq!(g.output_names(), ["default"]);
+        assert!(g.inline_options()[0].is_empty());
+        assert!(run_graph(&mut g, &[&src]) == [matte(&src)], "{name}: off");
+        let on = pkgs.graph(&ctx, &format!("{name}.zip")).unwrap().memory_plan(&[(W, H)], false).unwrap().0;
+        assert_eq!(g.memory_plan(&[(W, H)], false).unwrap().0, on - 1, "{name}: the matte took a texture");
+        // Labels go to the outputs left.
+        let mut g = pkgs.graph(&ctx, &format!("[0]{name}.zip=matte=off[c]")).unwrap();
+        assert_eq!(g.output_names(), ["c"]);
+        assert!(run_graph(&mut g, &[&src]) == [matte(&src)]);
+    }
+    // A pass writing only outputs that are off does not run.
+    let mut g = pkgs.graph(&ctx, "keyoptsep.zip=matte=off").unwrap();
+    assert_eq!(g.memory_plan(&[(W, H)], false).unwrap().0, 1);
+    assert!(run_graph(&mut g, &[&src]) == [swapped(&src)]);
+}
+
+#[test]
+fn the_four_outputs_count_after_repeat_and_off() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    let src = gradient(8);
+    let g = pkgs.graph(&ctx, "optparts.zip").unwrap();
+    assert_eq!(g.output_names(), ["color", "mask", "part0", "part1"]);
+    let mut g = pkgs.graph(&ctx, "optparts.zip=outputs=3:mask=off").unwrap();
+    assert_eq!(g.output_names(), ["color", "part0", "part1", "part2"]);
+    assert!(run_graph(&mut g, &[&src]) == [swapped(&src), part(&src, 0), part(&src, 1), part(&src, 2)]);
+    let mut g = pkgs.graph(&ctx, "optparts.zip=mask=off&outputs=1").unwrap();
+    assert_eq!(g.output_names(), ["color", "part0"]);
+    assert!(run_graph(&mut g, &[&src]) == [swapped(&src), part(&src, 0)]);
+
+    let cases = [
+        ("optparts.zip=outputs=3", "2 other outputs and outputs=3 make 5 outputs, more than 4"),
+        ("keyopt.zip=matte=maybe", "matte=maybe, the optional output `matte` is on or off"),
+        ("key.zip=matte=off", "has no parameter `matte`"),
+        ("keyopt.zip=color=off", "has no parameter `color` (keys: enable, bypass, matte)"),
+        ("[0]keyopt.zip=matte=off[c][m]", "got 2 labels"),
+    ];
+    for (text, want) in cases {
+        let got = match pkgs.graph(&ctx, text) {
+            Ok(_) => panic!("`{text}` was accepted"),
+            Err(e) => e.to_string(),
+        };
+        assert!(got.contains(want), "`{text}`: {got}");
+    }
+}
+
+#[test]
+fn an_optional_output_cannot_be_switched_by_a_command_after_the_graph_is_built() {
+    let Some(ctx) = gpu() else { return };
+    let pkgs = Packages::new();
+    for text in ["keyopt.zip", "keyopt.zip=matte=off"] {
+        let mut g = pkgs.graph(&ctx, text).unwrap();
+        for name in ["matte", "keyopt.matte", "0.matte"] {
+            let e = g.set_param_str(name, "off").unwrap_err().to_string();
+            assert!(e.contains("the optional output `matte` is switched on or off when the"), "{text} {name}: {e}");
+        }
+    }
 }

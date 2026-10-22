@@ -399,9 +399,11 @@ fn plan(
             let (w, h) = sizes[k][pass.size_of];
             for out in &pass.outputs {
                 let o = finals[k].iter().position(|n| n == out);
-                // An output frame written in place takes no pooled texture.
+                // An output frame written in place takes no pooled texture, nor does an output
+                // switched off (its pass writes a stand-in, see `Effect::bind`).
                 let in_place = o.is_some_and(|o| direct_out[k][o].is_some());
-                if !in_place && !assign[k].contains_key(out) {
+                let off = effects[k].package().manifest.off_outputs.contains(out);
+                if !in_place && !off && !assign[k].contains_key(out) {
                     let key = (w, h, o.is_some_and(|o| mips[k][o]));
                     let slot = free.get_mut(&key).and_then(|f| f.pop()).unwrap_or_else(|| {
                         slots.push(key);
@@ -1214,6 +1216,13 @@ fn check_options(path: &str, fx: &Effect, options: &InlineOptions) -> Result<(),
         if key == "outputs" && value.parse::<u32>().is_err() {
             return Err(graph_err(format!("effect `{path}`: outputs={value}, outputs is the number of copies of its repeated output")));
         }
+        let optional = fx.package().optional_outputs();
+        if optional.contains(&key.as_str()) {
+            if value != "on" && value != "off" {
+                return Err(graph_err(format!("effect `{path}`: {key}={value}, the optional output `{key}` is on or off")));
+            }
+            continue;
+        }
         if !NODE_KEYS.contains(&key.as_str()) && !fx.params.defs().iter().any(|d| d.name == *key) {
             let known: Vec<&str> = fx
                 .params
@@ -1221,6 +1230,7 @@ fn check_options(path: &str, fx: &Effect, options: &InlineOptions) -> Result<(),
                 .iter()
                 .map(|d| d.name.as_str())
                 .chain(NODE_KEYS.into_iter().filter(|k| *k != "outputs" || fx.package().repeated_output().is_some()))
+                .chain(optional.iter().copied())
                 .collect();
             return Err(graph_err(format!("effect `{path}` has no parameter `{key}` (keys: {})", known.join(", "))));
         }
@@ -1325,13 +1335,26 @@ fn open_items(
         let (label, mut fx) = open(&path)?;
         name_positional(&path, &fx, &mut options)?;
         check_options(&path, &fx, &options)?;
-        // `outputs=N`: the copies of a repeated output, fixed when the graph is built.
+        // `outputs=N` (the copies of a repeated output) and `<name>=off` (an optional output),
+        // fixed when the graph is built: they set the outputs of the package.
+        let mut count = None;
         if let Some(i) = options.iter().position(|(k, _)| k == "outputs") {
             let (_, value) = options.remove(i);
-            let n: u32 = value.parse().map_err(|_| {
+            count = Some(value.parse::<u32>().map_err(|_| {
                 graph_err(format!("effect `{path}`: outputs={value}, outputs is the number of copies of its repeated output"))
-            })?;
-            let package = fx.package().with_output_count(n).map_err(|e| graph_err(format!("effect `{path}`: {e}")))?;
+            })?);
+        }
+        let optional: Vec<String> = fx.package().optional_outputs().into_iter().map(String::from).collect();
+        let mut off = Vec::new();
+        options.retain(|(k, v)| {
+            let switch = optional.contains(k);
+            if switch && v == "off" {
+                off.push(k.clone());
+            }
+            !switch
+        });
+        if count.is_some() || !off.is_empty() {
+            let package = fx.package().with_outputs(count, &off).map_err(|e| graph_err(format!("effect `{path}`: {e}")))?;
             fx = Effect::new(fx.program.ctx.clone(), package)?;
         }
         apply_constants(&mut fx, &options);
@@ -1960,6 +1983,14 @@ impl EffectGraph {
         if name == "outputs" || name.rsplit_once('.').is_some_and(|(_, p)| p == "outputs") {
             return Err(Error::Param(format!(
                 "`{name}`: outputs=N is fixed when the {} is built (it sets the output pads); give it inline, e.g. `effect.zip=outputs=3`",
+                self.what
+            )));
+        }
+        // `<output>=off` too: it sets the pads (an output name is never a param name).
+        let last = name.rsplit_once('.').map_or(name, |(_, p)| p);
+        if self.effects.iter().any(|fx| fx.package().optional_outputs().contains(&last)) {
+            return Err(Error::Param(format!(
+                "`{name}`: the optional output `{last}` is switched on or off when the {} is built (it sets the output pads); give it inline, e.g. `effect.zip={last}=off`",
                 self.what
             )));
         }

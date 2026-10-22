@@ -46,6 +46,11 @@ pub struct Manifest {
     /// Alternative pass lists, the first whose `requires` match the device runs. Required
     /// in JSON; empty once the manifest is resolved to one group (then in `passes`).
     pub groups: Vec<GroupDef>,
+    /// Optional outputs a graph node switched off (`<name>=off`, see
+    /// [`Manifest::with_outputs_off`]): no longer in `outputs`, still written by their pass,
+    /// into a 1x1 stand-in texture. Not read from JSON.
+    #[serde(skip)]
+    pub off_outputs: Vec<String>,
 }
 
 /// One alternative pass list of an effect (see [`Manifest::groups`]).
@@ -148,6 +153,10 @@ pub struct OutputDef {
     /// `max` defaults to what fits in [`MAX_OUTPUTS`] beside the other outputs.
     #[serde(default, deserialize_with = "output_repeat")]
     pub repeat: Option<RepeatRule>,
+    /// A graph node may switch the output off with its option `<name>=off` (on by default):
+    /// no pad, no texture. See [`Manifest::with_outputs_off`].
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// Most outputs an effect may have.
@@ -488,9 +497,10 @@ impl Manifest {
         if m.outputs.is_empty() {
             // One output: what the last pass writes first (every group must write it).
             let last = m.pass_lists().first().and_then(|(_, l)| l.last()).and_then(|p| p.outputs.first().cloned());
-            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None, repeat: None });
+            m.outputs.push(OutputDef { name: last.unwrap_or_else(|| "out".into()), bypass: None, repeat: None, optional: false });
         }
-        let fixed = m.outputs.len().saturating_sub(1) as u32;
+        // Optional outputs may be off: the copies fit beside the others that are not.
+        let fixed = m.outputs.iter().take(m.outputs.len().saturating_sub(1)).filter(|o| !o.optional).count() as u32;
         if let Some(r) = m.outputs.last_mut().and_then(|o| o.repeat.as_mut()) {
             if r.max == OUTPUT_REPEAT_MAX_UNSET {
                 r.max = (MAX_OUTPUTS as u32).saturating_sub(fixed).max(1);
@@ -583,7 +593,8 @@ impl Manifest {
                 if k + 1 != self.outputs.len() {
                     return bad(format!("output `{n}`: only the last output may repeat"));
                 }
-                let fixed = self.outputs.len() as u32 - 1;
+                // Counted without the optional outputs, which may be off.
+                let fixed = self.outputs[..k].iter().filter(|o| !o.optional).count() as u32;
                 if r.min == 0 || r.min > r.max || r.default < r.min || r.default > r.max {
                     return bad(format!(
                         "output `{n}`: repeat needs 1 <= min <= default <= max (got min {}, default {}, max {})",
@@ -599,6 +610,9 @@ impl Manifest {
                 }
                 if self.pass_lists().iter().flat_map(|(_, l)| l.iter()).any(|p| p.language() == ShaderLanguage::Glsl) {
                     return bad(format!("output `{n}`: repeat is only for WGSL shaders"));
+                }
+                if o.optional {
+                    return bad(format!("output `{n}`: a repeated output is not optional (outputs=N sets its copies)"));
                 }
                 // The copies are named `<name>0`, `<name>1`...: no other name may look like one.
                 let is_copy = |s: &str| s.strip_prefix(n.as_str()).is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()));
@@ -706,12 +720,17 @@ impl Manifest {
             for (i, pass) in passes.iter().enumerate() {
                 for out in &pass.outputs {
                     let read = passes[i + 1..].iter().any(|p| p.inputs.iter().flatten().any(|s| s == out));
-                    if !read && !self.outputs.iter().any(|o| o.name == *out) {
+                    if !read && !self.outputs.iter().any(|o| o.name == *out) && !self.off_outputs.contains(out) {
                         return bad(format!("{} writes `{out}`, which no later pass reads and is no output of the effect", at(i)));
                     }
                 }
             }
             for o in &self.outputs {
+                if o.optional && passes.iter().any(|p| p.inputs.iter().flatten().any(|s| *s == o.name)) {
+                    // Off, its pass writes a stand-in: nothing may read it.
+                    let group = label.as_ref().map(|g| format!("group {g}: ")).unwrap_or_default();
+                    return bad(format!("{group}optional output `{}` is read by a pass; only the effect may output it", o.name));
+                }
                 let writers: Vec<usize> = (0..passes.len()).filter(|&i| passes[i].outputs.contains(&o.name)).collect();
                 if writers.len() != 1 {
                     let what = if writers.is_empty() { "no pass writes it".to_string() } else { format!("passes {writers:?} write it") };
@@ -918,6 +937,44 @@ impl Manifest {
         }
         m.validate()?;
         Ok(m)
+    }
+
+    /// The manifest with the optional outputs named in `off` switched off: they leave
+    /// `outputs` (no pad) and go to [`Manifest::off_outputs`]; the pass writing one still
+    /// writes it, into a stand-in, and a pass writing only such outputs does not run. Fails for
+    /// a name that is no optional output and when no output is left. Applied before
+    /// [`Manifest::with_output_count`], so only the outputs left count toward [`MAX_OUTPUTS`].
+    pub fn with_outputs_off(&self, off: &[String]) -> Result<Manifest, Error> {
+        if off.is_empty() {
+            return Ok(self.clone());
+        }
+        let mut m = self.clone();
+        for name in off {
+            let Some(k) = m.outputs.iter().position(|o| o.name == *name) else {
+                return Err(Error::Manifest(format!("effect `{}` has no output `{name}` to switch off", self.name)));
+            };
+            if !m.outputs[k].optional {
+                let optional: Vec<&str> = self.outputs.iter().filter(|o| o.optional).map(|o| o.name.as_str()).collect();
+                return Err(Error::Manifest(format!(
+                    "effect `{}`: output `{name}` is not optional, it cannot be off (optional: {})",
+                    self.name,
+                    if optional.is_empty() { "none".to_string() } else { optional.join(", ") }
+                )));
+            }
+            m.outputs.remove(k);
+            m.off_outputs.push(name.clone());
+        }
+        if m.outputs.is_empty() {
+            return Err(Error::Manifest(format!("effect `{}`: every output is off", self.name)));
+        }
+        m.validate()?;
+        Ok(m)
+    }
+
+    /// Whether pass `def` writes an optional output, on or off (its prelude then declares
+    /// `gpufx_output_enabled`).
+    pub fn writes_optional(&self, def: &PassDef) -> bool {
+        def.outputs.iter().any(|n| self.off_outputs.contains(n) || self.outputs.iter().any(|o| o.optional && o.name == *n))
     }
 
     /// Checks that output `k` may have `format`.
@@ -1131,6 +1188,52 @@ mod tests {
             parse(r#"[{"name":"color"}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#, r#","params":[{"name":"outputs","type":"int"}]"#)
                 .unwrap_err();
         assert!(e.contains("param name `outputs` is reserved"), "{e}");
+    }
+
+    #[test]
+    fn optional_outputs_switch_off_and_free_room_for_copies() {
+        let parse = |outputs: &str, passes: &str| {
+            Manifest::parse(
+                format!(r#"{{"api":1,"id":"t.x","name":"X","used_for":["gpufx"],"outputs":{outputs},"groups":[{{"passes":[{passes}]}}]}}"#)
+                    .as_bytes(),
+            )
+            .map_err(|e| e.to_string())
+        };
+        let two = r#"{"shader":"a.wgsl","outputs":["color","matte"]}"#;
+        let m = parse(r#"[{"name":"color"},{"name":"matte","optional":true}]"#, two).unwrap();
+        assert!(m.outputs[1].optional && !m.outputs[0].optional);
+        let off = m.with_outputs_off(&["matte".into()]).unwrap();
+        assert_eq!(off.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["color"]);
+        assert_eq!(off.off_outputs, ["matte"]);
+        // The pass still writes it (into a stand-in), so the shader keeps its bindings.
+        assert_eq!(off.groups[0].passes[0].outputs, ["color", "matte"]);
+        assert!(off.writes_optional(&off.groups[0].passes[0]) && m.writes_optional(&m.groups[0].passes[0]));
+        let err = |m: &Manifest, n: &str| m.with_outputs_off(&[n.into()]).unwrap_err().to_string();
+        assert!(err(&m, "color").contains("output `color` is not optional, it cannot be off (optional: matte)"));
+        assert!(err(&m, "nope").contains("has no output `nope`"));
+        let all = parse(r#"[{"name":"color","optional":true}]"#, r#"{"shader":"a.wgsl","outputs":["color"]}"#).unwrap();
+        assert!(err(&all, "color").contains("every output is off"));
+
+        // Copies fit beside the outputs that cannot be off: max 3 here, 2 copies at most with
+        // the optional output on (checked when the count is set).
+        let rep = parse(
+            r#"[{"name":"color"},{"name":"mask","optional":true},{"name":"part","repeat":{"default":2}}]"#,
+            r#"{"shader":"a.wgsl","outputs":["color","mask"]},{"shader":"b.wgsl","outputs":["part"]}"#,
+        )
+        .unwrap();
+        assert_eq!(rep.output_repeat().map(|r| r.max), Some(3));
+        assert!(rep.with_output_count(Some(3)).unwrap_err().to_string().contains("make 5 outputs, more than 4"));
+        assert_eq!(rep.with_outputs_off(&["mask".into()]).unwrap().with_output_count(Some(3)).unwrap().outputs.len(), 4);
+
+        let bad = |outputs: &str, passes: &str| parse(outputs, passes).unwrap_err();
+        let e = bad(r#"[{"name":"part","optional":true,"repeat":{"default":2}}]"#, r#"{"shader":"a.wgsl","outputs":["part"]}"#);
+        assert!(e.contains("a repeated output is not optional"), "{e}");
+        // Off, nothing would hold it for a later pass.
+        let e = bad(
+            r#"[{"name":"color"},{"name":"matte","optional":true}]"#,
+            r#"{"shader":"a.wgsl","outputs":["matte"]},{"shader":"b.wgsl","inputs":["matte"],"outputs":["color"]}"#,
+        );
+        assert!(e.contains("optional output `matte` is read by a pass"), "{e}");
     }
 
     fn textures(api: u32, list: &str) -> Result<Manifest, Error> {
