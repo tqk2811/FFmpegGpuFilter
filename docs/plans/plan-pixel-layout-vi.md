@@ -58,6 +58,8 @@ Quyết định trong mục này ghi đè các chữ "đề xuất" bên dưới
 - (6) Kích thước là của Y, UV làm tròn lên.
 - (7) Vulkan + D3D12, thêm D3D11 nếu đường hiện có hỗ trợ; không được thì báo lỗi rõ khi load.
 
+- (8) Bộ convert hiện KHÔNG ghi được `gray` trên GPU (test-bundle 2026-10-23: `out_format=gray is not converted on the GPU`). Layout `y` phải thêm đường ghi gray vào convert, hoặc đổi format ra mặc định của `y`.
+
 ## Điểm cần chốt khi làm
 
 1. **Giới hạn 4 storage texture mỗi pass** tính theo số texture: `yuva420` chiếm 3. Manifest kiểm theo số texture sau khi nở `pixel_layout`.
