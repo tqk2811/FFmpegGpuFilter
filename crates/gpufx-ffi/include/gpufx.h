@@ -282,6 +282,9 @@ int gpufx_effect_check_inputs(const GpufxEffect *fx, const GpufxStreamInfo *stre
  */
 uint32_t gpufx_effect_param_count(const GpufxEffect *fx);
 const char *gpufx_effect_param_name(const GpufxEffect *fx, uint32_t index);
+/* Numbers parameter index takes: 1 for a scalar, 2 to 4 for a vector or a color, 0 for an
+ * expression parameter. Negative (gpufx_last_error()) for a bad index. */
+int gpufx_effect_param_components(const GpufxEffect *fx, uint32_t index);
 
 /*
  * Index of a parameter for gpufx_effect_param_name(). Takes the full name, "label.name",

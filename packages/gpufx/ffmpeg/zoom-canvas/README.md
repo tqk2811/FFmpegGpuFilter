@@ -38,6 +38,9 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk \
 
 Zoom into the top-left corner instead: `anchor=0,0&pivot=0,0`.
 
+Zoom in while moving: each component of `anchor` (and `pivot`) takes its own expression of `t`. This one slides the picture from the left third to the right third in 5 seconds while it bobs up and down:
+`zoom=1+0.2*t&anchor=0.33+0.34*min(t/5\,1)\,0.5+0.1*sin(2*t)`.
+
 The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal on macOS); see the [README](https://github.com/tqk2811/FFmpegGpuFilter/blob/master/README.md).
 
 ## Notes

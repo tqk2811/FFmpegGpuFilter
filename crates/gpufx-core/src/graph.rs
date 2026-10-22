@@ -1837,6 +1837,13 @@ impl EffectGraph {
         Ok((block, name))
     }
 
+    /// Numbers a parameter takes (1 for a scalar, 2 to 4 for a vector or a color, 0 for an
+    /// expression parameter), by index of `param_names`.
+    pub fn param_components(&self, index: usize) -> Result<usize, Error> {
+        let &(k, p) = self.params.get(index).ok_or_else(|| Error::Param(format!("no parameter {index}")))?;
+        Ok(self.effects[k].params.defs()[p].kind.components())
+    }
+
     /// Sets a parameter (any name `find_param` takes) from text.
     pub fn set_param_str(&mut self, name: &str, text: &str) -> Result<(), Error> {
         let index = self.find_param(name)?;

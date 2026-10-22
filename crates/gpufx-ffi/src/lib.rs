@@ -594,6 +594,15 @@ pub unsafe extern "C" fn gpufx_effect_param_name(fx: *const GpufxEffect, index: 
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn gpufx_effect_param_components(fx: *const GpufxEffect, index: u32) -> c_int {
+    guard(-1, || {
+        let fx = fx.as_ref().ok_or("effect is NULL")?;
+        let n = fx.graph.param_components(index as usize).map_err(|e| e.to_string())?;
+        Ok(n as c_int)
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn gpufx_effect_find_param(fx: *const GpufxEffect, name: *const c_char) -> c_int {
     guard(-1, || {
         let fx = fx.as_ref().ok_or("effect is NULL")?;
@@ -1567,6 +1576,9 @@ mod tests {
         assert_eq!(find("1.strength"), find("strength"));
         assert!(find("nothing") < 0);
         assert!(unsafe { CStr::from_ptr(gpufx_last_error()) }.to_str().unwrap().contains("nothing"));
+        assert_eq!(unsafe { gpufx_effect_param_components(fx, find("strength") as u32) }, 1);
+        assert_eq!(unsafe { gpufx_effect_param_components(fx, find("color") as u32) }, 4);
+        assert!(unsafe { gpufx_effect_param_components(fx, 999) } < 0);
         assert_eq!(unsafe { CStr::from_ptr(gpufx_effect_name(fx)) }.to_str().unwrap(), "Invert | Vignette");
 
         let src = [200u8; 4 * 4 * 4];
