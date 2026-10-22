@@ -47,3 +47,11 @@ Số thực dấu phẩy động 16 bit (half precision, 11 bit mantissa, tối 
 ## Pass group
 
 Một bộ pass trong `groups` của manifest effect, kèm `requires` (os, backend, vendor, feature) nói thiết bị nào chạy được. Runtime dùng group đầu tiên khớp thiết bị; các group chia sẻ input, output, param và texture nhưng có thể có số pass khác nhau. Xem [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md#nhóm-pass-và-yêu-cầu-thiết-bị).
+
+## Pass
+
+Một lần chạy compute shader bên trong effect, khai báo trong `passes` của manifest. Pass đọc các texture trong `inputs` (input của effect, package texture, output của pass trước) và ghi 1..4 texture trong `output`. Effect có thể có nhiều pass nối nhau; FFmpeg không biết gì về pass, số pass không làm đổi số [pad](#L55). Xem [EFFECT_FORMAT-vi.md](EFFECT_FORMAT-vi.md).
+
+## Pad
+
+"Cổng" vào hoặc ra của một filter FFmpeg, nơi filtergraph nối luồng video: `[0]gpufx=...[c][m]` nối luồng `[0]` vào input pad và lấy hai output pad `[c]`, `[m]`. Mỗi pad đàm phán format riêng với filter nối với nó. Với `gpufx`, mỗi phần tử `inputs` của manifest là một input pad, mỗi phần tử `output` là một output pad (phần tử `repeat` nở thành N pad); với `graph=` thì mỗi `[N]` là một input pad và mỗi label không ai đọc là một output pad.
