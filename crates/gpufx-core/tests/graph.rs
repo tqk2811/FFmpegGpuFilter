@@ -216,7 +216,7 @@ fn labels_left_out_bind_as_in_ffmpeg() {
     assert_eq!(single.output_names(), ["default"]);
     let chain = graph(&ctx, "invert.zip=amount=0.5|vignette.zip").unwrap();
     assert_eq!(chain.input_count(), 1);
-    assert_eq!(chain.effect_inputs(1), [Source::Node(0)]);
+    assert_eq!(chain.effect_inputs(1), [Source::Node(0, 0)]);
     assert_eq!(chain.effects()[0].params().get("amount").unwrap().0[0], 0.5);
     assert_eq!(chain.output_names(), ["default"]);
     let two = graph(&ctx, "crossfade.zip|invert.zip").unwrap();
@@ -234,7 +234,7 @@ fn labels_left_out_bind_as_in_ffmpeg() {
     assert_eq!(g.input_names(), ["in0", "in1", "in2"]);
     assert_eq!(g.effect_inputs(0), [Source::Input(1)]);
     assert_eq!(g.effect_inputs(1), [Source::Input(0), Source::Input(2)]);
-    assert_eq!(g.effect_inputs(2), [Source::Node(0), Source::Node(1)]);
+    assert_eq!(g.effect_inputs(2), [Source::Node(0, 0), Source::Node(1, 0)]);
     assert_eq!(g.output_names(), ["out0"]);
     let got = g.check_inputs(&[s(8), s(8)]).unwrap_err().to_string();
     assert!(got.contains("takes 3 input(s), got 2"), "{got}");
@@ -281,7 +281,7 @@ fn graph_mistakes_are_explained() {
         ("[0]crossfade.zip[a]", "takes 2 inputs, the node gives it 1"),
         ("[0]invert.zip|crossfade.zip[a]", "only the first effect"),
         ("[0][1]invert.zip[a]", "takes 1 inputs, the node gives it 2"),
-        ("[0]invert.zip[a][b]", "writes one label, got 2"),
+        ("[0]invert.zip[a][b]", "writes 1 output (out), got 2 labels"),
         ("[0]invert.zip[1]", "names an input pad"),
         ("[0]invert.zip[a b]", "bad label"),
         ("[0]invert.zip[a.b]", "clash with `label.param`"),
@@ -588,7 +588,7 @@ fn an_effect_switched_off_passes_the_input_bypass_picks() {
         g.set_node_enabled(k, false).unwrap();
         assert_eq!(run_graph(&mut g, &[&src], &info)[0], then(&inv), "`{text}`: bypass 0 is the first input");
         g.set_node_bypass(k, 1).unwrap();
-        assert_eq!(g.node_bypass(k), 1);
+        assert_eq!(g.node_bypass(k, 0), 1);
         assert_eq!(run_graph(&mut g, &[&src], &info)[0], then(&gray), "`{text}`: bypass 1 is the second input");
         g.set_node_bypass(k, 0).unwrap();
         assert_eq!(run_graph(&mut g, &[&src], &info)[0], then(&inv), "`{text}`: back to the first input");

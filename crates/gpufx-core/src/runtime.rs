@@ -373,6 +373,8 @@ pub(crate) struct Pass {
     /// The textures it writes: the main one at binding 2, then the extra ones bound after
     /// the inputs (see [`extra_output_binding`]).
     pub(crate) outputs: Vec<String>,
+    /// The effect output whose size the pass runs at (see [`crate::Manifest::pass_size`]).
+    pub(crate) size_of: usize,
 }
 
 /// Binding of extra output `k` (1-based: `out_tex{k}`) of a pass reading `n_inputs` textures.
@@ -385,11 +387,13 @@ fn extra_output_binding(n_inputs: usize, k: usize) -> u32 {
 pub(crate) struct Bound {
     /// The input textures, to bind again when the pipelines change.
     inputs: Vec<wgpu::Texture>,
-    size: (u32, u32),
+    /// The size of each effect output; a pass runs at the size of one of them.
+    sizes: Vec<(u32, u32)>,
     /// Pass outputs are `rgba16float` (else `rgba8unorm`).
     deep: bool,
     outputs: HashMap<String, wgpu::Texture>,
-    bind_groups: Vec<wgpu::BindGroup>,
+    /// One per pass, `None` for a pass that does not run (see [`Effect::set_used_outputs`]).
+    bind_groups: Vec<Option<wgpu::BindGroup>>,
 }
 
 /// The immutable, compiled part of an effect: package, pipelines, textures and sampler.
@@ -449,12 +453,6 @@ impl Program {
     /// [`Program::new`] for a package resolved to one group.
     fn compile(ctx: Arc<GpuContext>, package: Package) -> Result<Arc<Self>, Error> {
         debug_assert!(package.manifest.groups.is_empty(), "only a package resolved to one group is compiled (see Program::new)");
-        if package.manifest.outputs.len() > 1 {
-            return Err(Error::Unsupported(format!(
-                "effect `{}`: effects with several outputs are not supported yet",
-                package.manifest.name
-            )));
-        }
         // Only the layout of the block matters for compiling; values live in each Effect.
         let params = ParamBlock::new(&package.manifest.params)?;
         let device = &ctx.device;
@@ -548,16 +546,20 @@ impl Program {
 pub struct Effect {
     pub(crate) program: Arc<Program>,
     pub(crate) params: ParamBlock,
-    globals: wgpu::Buffer,
+    /// `globals` of the passes running at the size of each output.
+    globals: Vec<wgpu::Buffer>,
     params_buf: wgpu::Buffer,
     pub(crate) bound: Option<Bound>,
+    /// The passes that run: those writing the outputs in use and what they read. Empty
+    /// when all run.
+    active: Vec<bool>,
     /// Upload and readback buffers of [`Effect::process`]; a graph has its own.
     io: Option<FrameIo>,
     /// Pipelines built for this effect's own `expr` values, when they differ from the
     /// package defaults the program was compiled with.
     own: Option<OwnPasses>,
     /// Bindings of recent frame textures made by [`Effect::rebind`], until the next `bind`.
-    rebinds: crate::lru::Lru<(Vec<wgpu::Texture>, Option<wgpu::Texture>), Bound>,
+    rebinds: crate::lru::Lru<(Vec<wgpu::Texture>, Vec<Option<wgpu::Texture>>), Bound>,
 }
 
 /// Pipelines of an effect whose `expr` parameters were changed.
@@ -577,19 +579,33 @@ impl Effect {
     pub fn from_program(program: Arc<Program>) -> Result<Self, Error> {
         let params = ParamBlock::new(&program.package.manifest.params)?;
         let device = &program.ctx.device;
-        let globals = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpufx globals"),
-            size: GLOBALS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let globals = (0..program.package.manifest.outputs.len())
+            .map(|_| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("gpufx globals"),
+                    size: GLOBALS_SIZE,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
         let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpufx params"),
             size: params.size() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        Ok(Effect { program, params, globals, params_buf, bound: None, io: None, own: None, rebinds: Default::default() })
+        Ok(Effect {
+            program,
+            params,
+            globals,
+            params_buf,
+            bound: None,
+            active: Vec::new(),
+            io: None,
+            own: None,
+            rebinds: Default::default(),
+        })
     }
 
     pub fn program(&self) -> &Arc<Program> {
@@ -610,6 +626,37 @@ impl Effect {
 
     pub fn input_count(&self) -> usize {
         self.program.package.manifest.inputs.len()
+    }
+
+    pub fn output_count(&self) -> usize {
+        self.program.package.manifest.outputs.len()
+    }
+
+    /// Runs only the passes that the outputs in `used` (one flag per output) need: the
+    /// passes writing them and, back to front, those writing what these read. The textures
+    /// of the others are not made. All run by default.
+    pub(crate) fn set_used_outputs(&mut self, used: &[bool]) {
+        let m = &self.program.package.manifest;
+        let mut needed: Vec<&str> = m.outputs.iter().zip(used).filter(|(_, &u)| u).map(|(o, _)| o.name.as_str()).collect();
+        let mut active = vec![false; m.passes.len()];
+        for (i, pass) in m.passes.iter().enumerate().rev() {
+            if pass.outputs.iter().any(|o| needed.contains(&o.as_str())) {
+                active[i] = true;
+                // A pass without `inputs` reads every input and texture, none of the passes.
+                needed.extend(pass.inputs.iter().flatten().map(String::as_str));
+            }
+        }
+        let active = if active.iter().all(|&a| a) { Vec::new() } else { active };
+        if active != self.active {
+            self.active = active;
+            self.bound = None;
+            self.rebinds.clear();
+        }
+    }
+
+    /// Whether pass `i` runs (see [`Effect::set_used_outputs`]).
+    pub(crate) fn runs(&self, i: usize) -> bool {
+        self.active.get(i).copied().unwrap_or(true)
     }
 
     /// The pipelines for one work format: the program's, or this effect's own.
@@ -668,7 +715,7 @@ impl Effect {
         }
         if let Some(bound) = self.bound.take() {
             let inputs = bound.inputs.clone();
-            self.bind(&inputs.iter().collect::<Vec<_>>(), bound.outputs, bound.size, bound.deep)?;
+            self.bind(&inputs.iter().collect::<Vec<_>>(), bound.outputs, &bound.sizes, bound.deep)?;
         }
         Ok(())
     }
@@ -685,6 +732,13 @@ impl Effect {
     /// [`Effect::process`] for frames in any [`PixelFormat`]: they are converted to and
     /// from RGBA on the GPU.
     pub fn process_frames(&mut self, inputs: &[Frame], out: FrameMut, info: &FrameInfo) -> Result<(), Error> {
+        if self.output_count() != 1 {
+            return Err(Error::Unsupported(format!(
+                "effect `{}` has {} outputs; run it in an EffectGraph",
+                self.package().manifest.name,
+                self.output_count()
+            )));
+        }
         let mut io = self.io.take().unwrap_or_default();
         let topo = Topology::single(self.input_count());
         let res = run(std::slice::from_mut(self), &topo, &mut io, inputs, &mut [out], Some(info));
@@ -698,11 +752,11 @@ impl Effect {
         &mut self,
         inputs: &[&wgpu::Texture],
         outputs: HashMap<String, wgpu::Texture>,
-        size: (u32, u32),
+        sizes: &[(u32, u32)],
         deep: bool,
     ) -> Result<(), Error> {
         self.rebinds.clear();
-        self.bound = Some(self.make_bound(inputs, outputs, size, deep)?);
+        self.bound = Some(self.make_bound(inputs, outputs, sizes, deep)?);
         Ok(())
     }
 
@@ -710,7 +764,7 @@ impl Effect {
         &self,
         inputs: &[&wgpu::Texture],
         outputs: HashMap<String, wgpu::Texture>,
-        size: (u32, u32),
+        sizes: &[(u32, u32)],
         deep: bool,
     ) -> Result<Bound, Error> {
         let program = &self.program;
@@ -734,12 +788,16 @@ impl Effect {
         };
         let bind_groups = passes
             .iter()
-            .map(|pass| {
+            .enumerate()
+            .map(|(i, pass)| {
+                if !self.runs(i) {
+                    return None;
+                }
                 let views: Vec<wgpu::TextureView> = pass.inputs.iter().map(|n| lookup(n)).collect();
                 let out_view = level0(&outputs[&pass.outputs[0]]);
                 let extra_views: Vec<wgpu::TextureView> = pass.outputs[1..].iter().map(|n| level0(&outputs[n])).collect();
                 let mut entries = vec![
-                    wgpu::BindGroupEntry { binding: 0, resource: self.globals.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 0, resource: self.globals[pass.size_of].as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 1, resource: self.params_buf.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&out_view) },
                     wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&program.sampler) },
@@ -756,28 +814,33 @@ impl Effect {
                         resource: wgpu::BindingResource::TextureView(v),
                     });
                 }
-                device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("gpufx pass"), layout: &pass.layout, entries: &entries })
+                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("gpufx pass"),
+                    layout: &pass.layout,
+                    entries: &entries,
+                }))
             })
             .collect();
         let inputs = inputs.iter().map(|&t| t.clone()).collect();
-        Ok(Bound { inputs, size, deep, outputs, bind_groups })
+        Ok(Bound { inputs, sizes: sizes.to_vec(), deep, outputs, bind_groups })
     }
 
-    /// The texture the last pass writes. Only valid after `bind`.
     /// Binds the effect again on `inputs`, keeping its pass textures, with the texture of
-    /// its last pass replaced by `output` when given (a frame written in place). The
+    /// output `o` replaced by `outputs[o]` when given (a frame written in place). The
     /// bindings of recent textures are reused (the frames of a pool come back in turn);
     /// returns whether new ones were made.
-    pub(crate) fn rebind(&mut self, inputs: &[&wgpu::Texture], output: Option<&wgpu::Texture>) -> Result<bool, Error> {
+    pub(crate) fn rebind(&mut self, inputs: &[&wgpu::Texture], outputs: &[Option<&wgpu::Texture>]) -> Result<bool, Error> {
         let bound = self.bound.as_ref().ok_or_else(|| Error::Gpu("the effect is not bound".into()))?;
-        let mut outputs = bound.outputs.clone();
-        if let Some(t) = output {
-            outputs.insert(self.program.package.manifest.outputs[0].name.clone(), t.clone());
+        let mut textures = bound.outputs.clone();
+        for (def, t) in self.program.package.manifest.outputs.iter().zip(outputs) {
+            if let Some(t) = t {
+                textures.insert(def.name.clone(), (*t).clone());
+            }
         }
-        let (size, deep) = (bound.size, bound.deep);
-        let key = (inputs.iter().map(|&t| t.clone()).collect(), output.cloned());
+        let (sizes, deep) = (bound.sizes.clone(), bound.deep);
+        let key = (inputs.iter().map(|&t| t.clone()).collect(), outputs.iter().map(|t| t.cloned()).collect());
         let mut rebinds = std::mem::take(&mut self.rebinds);
-        let made = rebinds.get_or_make(key, |_| self.make_bound(inputs, outputs, size, deep)).map(|(bound, made)| {
+        let made = rebinds.get_or_make(key, |_| self.make_bound(inputs, textures, &sizes, deep)).map(|(bound, made)| {
             self.bound = Some(bound.clone());
             made
         });
@@ -785,19 +848,25 @@ impl Effect {
         made
     }
 
-    pub(crate) fn output(&self) -> &wgpu::Texture {
+    /// The texture of output `o`. Only valid after `bind`, for an output in use.
+    pub(crate) fn output(&self, o: usize) -> &wgpu::Texture {
         let bound = self.bound.as_ref().expect("bound before use");
-        &bound.outputs[&self.program.package.manifest.outputs[0].name]
+        &bound.outputs[&self.program.package.manifest.outputs[o].name]
     }
 
     pub(crate) fn encode(&self, cpass: &mut wgpu::ComputePass, info: &FrameInfo) {
         let bound = self.bound.as_ref().expect("bound before use");
         let queue = &self.program.ctx.queue;
-        queue.write_buffer(&self.globals, 0, &globals_bytes(bound.size, info));
-        queue.write_buffer(&self.params_buf, 0, &self.params.bytes());
-        let (w, h) = bound.size;
         let passes = self.passes(bound.deep).expect("compiled in bind");
+        for (o, globals) in self.globals.iter().enumerate() {
+            if passes.iter().enumerate().any(|(i, p)| p.size_of == o && self.runs(i)) {
+                queue.write_buffer(globals, 0, &globals_bytes(bound.sizes[o], info));
+            }
+        }
+        queue.write_buffer(&self.params_buf, 0, &self.params.bytes());
         for (pass, bg) in passes.iter().zip(&bound.bind_groups) {
+            let Some(bg) = bg else { continue };
+            let (w, h) = bound.sizes[pass.size_of];
             cpass.set_pipeline(&pass.pipeline);
             cpass.set_bind_group(0, bg, &[]);
             cpass.dispatch_workgroups(w.div_ceil(WORKGROUP), h.div_ceil(WORKGROUP), 1);
@@ -1015,7 +1084,7 @@ fn compile_pass(ctx: &GpuContext, pkg: &Package, params: &ParamBlock, index: usi
         &[language, entry, format, &source],
         Some(pkg),
     );
-    Ok(Pass { pipeline, layout, inputs, outputs: def.outputs.clone() })
+    Ok(Pass { pipeline, layout, inputs, outputs: def.outputs.clone(), size_of: pkg.manifest.pass_size(def) })
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {

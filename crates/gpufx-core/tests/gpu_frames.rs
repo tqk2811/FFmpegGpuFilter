@@ -365,13 +365,34 @@ impl MipPackage {
     gpufx_write(id, textureSampleLevel(src, smp, gpufx_uv(id), 20.0));
 }";
         std::fs::write(dir.join("main.wgsl"), shader).unwrap();
+        // And `key.zip` beside it: two outputs written by one pass, `color` (red and blue
+        // swapped) and `matte` (red as gray).
+        let key = Self::key_dir(&dir);
+        std::fs::remove_dir_all(&key).ok();
+        std::fs::create_dir_all(&key).unwrap();
+        let manifest = r#"{"api":1,"id":"t.key","name":"Key","used_for":["gpufx"],"output":[{"name":"color"},{"name":"matte"}],"groups":[{"passes":[{"shader":"k.wgsl","inputs":["src"],"output":["color","matte"]}]}]}"#;
+        std::fs::write(key.join("manifest.json"), manifest).unwrap();
+        let shader = "@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
+    if (!gpufx_in_bounds(id)) { return; }
+    let c = textureLoad(src, vec2i(id.xy), 0);
+    gpufx_write(id, c.bgra);
+    gpufx_write1(id, vec4f(vec3f(c.r), 1.0));
+}";
+        std::fs::write(key.join("k.wgsl"), shader).unwrap();
         MipPackage(dir)
+    }
+}
+
+impl MipPackage {
+    fn key_dir(dir: &Path) -> PathBuf {
+        dir.with_extension("key")
     }
 }
 
 impl Drop for MipPackage {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.0).ok();
+        std::fs::remove_dir_all(Self::key_dir(&self.0)).ok();
     }
 }
 
@@ -379,7 +400,11 @@ impl Drop for MipPackage {
 fn graph_with_mips(ctx: &Arc<GpuContext>, text: &str, mips: &MipPackage) -> EffectGraph {
     EffectGraph::parse(text, |path| {
         let name = path.trim_end_matches(".zip");
-        let dir = if name == "mips" { mips.0.clone() } else { example(name) };
+        let dir = match name {
+            "mips" => mips.0.clone(),
+            "key" => MipPackage::key_dir(&mips.0),
+            _ => example(name),
+        };
         Ok((name.to_string(), Effect::new(ctx.clone(), Package::open(dir)?)?))
     })
     .unwrap()
@@ -474,6 +499,24 @@ fn rgba_gpu_outputs_are_written_in_place() {
     }
     // Bypassed between two frames: the output conversion comes back, then goes again.
     if let Some((direct, _)) = in_place_matches_copies("[0]grayscale.zip[out]", &[Rgba], &[Rgba], &[Some(&info), None, Some(&info), None]) {
+        assert_eq!(direct.pass_textures, 0);
+    }
+}
+
+#[test]
+fn each_output_of_an_effect_is_written_in_place_or_converted_on_its_own() {
+    use PixelFormat::*;
+    let info = FrameInfo::new(0.5, 3);
+    let on = [Some(&info); 3];
+    // One pass writes both: the straight RGBA output is the frame itself, the NV12 one
+    // goes through a pooled texture and its conversion.
+    for outs in [[Nv12, Rgba], [Rgba, Nv12]] {
+        if let Some((direct, copied)) = in_place_matches_copies("[0]key.zip[c][m]", &[Rgba], &outs, &on) {
+            assert_eq!((direct.pass_textures, copied.pass_textures), (1, 2), "{outs:?}");
+        }
+    }
+    // Both in place, and switched off now and then.
+    if let Some((direct, _)) = in_place_matches_copies("[0]key.zip[c][m]", &[Rgba], &[Rgba, Rgba], &[Some(&info), None, Some(&info)]) {
         assert_eq!(direct.pass_textures, 0);
     }
 }
