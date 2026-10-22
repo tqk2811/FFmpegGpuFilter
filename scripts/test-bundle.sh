@@ -957,36 +957,47 @@ close_to() {
 }
 # planar_tests LABEL UPLOAD [full]: the default output formats of planar effects (no RGBA
 # between yuv420 effects, y into gray) and of the keying packages (rgba, alpha kept).
-# full: also yuva420p frames (Vulkan; D3D frames have no format with alpha).
+# full: also yuva420p frames and odd sizes (Vulkan; D3D has no format with alpha, no odd nv12).
+# Each hwdownload names the format expected: without one FFmpeg negotiates the first
+# software format (monow), which the frames context cannot download to.
 planar_tests() {
     T=$CLIPS/planar
     I2="tplanar/inv420|tplanar/inv420"
     rm -f "$T".*
     raw "$T.ref" -i "$A" -vf "format=nv12" || true
-    raw "$T.out" -i "$A" -vf "format=nv12,$2,gpufx=graph='$I2',hwdownload" || true
+    raw "$T.out" -i "$A" -vf "format=nv12,$2,gpufx=graph='$I2',hwdownload,format=nv12" || true
     close_to "$1: nv12 through two yuv420 effects stays nv12, no RGBA" 1 1 "$T.out" "$T.ref"
-    raw "$T.gray" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/luma,hwdownload" || true
-    bytes_is "$1: output y is gray by default" $((3 * 320 * 180)) "$T.gray"
-    if grep -qw extractplanes "$CLIPS/filters.txt"; then
+    # A y output is gray on Vulkan; D3D frames have no gray format (vf_gpufx.c
+    # sw_format_ok), so there it falls back to rgba.
+    G=rgba GB=4; [ "${3:-}" = full ] && G=gray GB=1
+    raw "$T.gray" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/luma,hwdownload,format=$G" || true
+    bytes_is "$1: output y is $G by default" $((3 * 320 * 180 * GB)) "$T.gray"
+    if [ $G = gray ] && grep -qw extractplanes "$CLIPS/filters.txt"; then
         raw "$T.yref" -i "$A" -vf "format=nv12,extractplanes=y" || true
         close_to "$1: gray output holds the Y codes" 0 1 "$T.gray" "$T.yref"
     fi
-    raw "$T.rgba" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/inv420:out_format=rgba,hwdownload" || true
+    raw "$T.rgba" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/inv420:out_format=rgba,hwdownload,format=rgba" || true
     bytes_is "$1: out_format=rgba overrides a yuv420 output" $((3 * 320 * 180 * 4)) "$T.rgba"
     raw "$T.pref" -i "$A" -vf "format=p010le" || true
-    raw "$T.p010" -i "$A" -vf "format=p010le,$2,gpufx=graph='$I2',hwdownload" || true
+    raw "$T.p010" -i "$A" -vf "format=p010le,$2,gpufx=graph='$I2',hwdownload,format=p010le" || true
     close_to "$1: p010le through two yuv420 effects stays p010le" 64 2 "$T.p010" "$T.pref"
-    raw "$T.oref" -i "$A" -vf "scale=319:179,format=nv12" || true
-    raw "$T.odd" -i "$A" -vf "scale=319:179,format=nv12,gpufx=graph='$I2',hwdownload,format=nv12" || true
-    close_to "$1: odd size 319x179 through yuv420 effects" 1 1 "$T.odd" "$T.oref"
+    # Odd sizes: Vulkan only. D3D11/D3D12 refuse nv12 textures of odd width or height
+    # (CreateTexture2D E_INVALIDARG), so FFmpeg cannot make those frames at all.
+    if [ "${3:-}" = full ]; then
+        raw "$T.oref" -i "$A" -vf "scale=319:179,format=nv12" || true
+        raw "$T.odd" -i "$A" -vf "scale=319:179,format=nv12,gpufx=graph='$I2',hwdownload,format=nv12" || true
+        close_to "$1: odd size 319x179 through yuv420 effects" 1 1 "$T.odd" "$T.oref"
+    else
+        echo "  skip  $1: odd size 319x179 (D3D nv12 textures must have even sizes)"
+    fi
     # shellcheck disable=SC2086
     ok "$1: bypass toggled every frame on a planar graph" -i "$A" -an -frames:v 8 \
-        -vf "format=nv12,$2,gpufx=graph='$I2|tplanar/luma':enable='eq(mod(n\,2)\,0)',hwdownload" $NULL
+        -vf "format=nv12,$2,gpufx=graph='$I2|tplanar/luma':enable='eq(mod(n\,2)\,0)',hwdownload,format=$G" $NULL
     for k in chroma-key color-key hsv-key luma-key; do
-        raw "$T.$k" -i "$A" -vf "format=nv12,$2,gpufx=graph=$(fx $k),hwdownload" || true
+        raw "$T.$k" -i "$A" -vf "format=nv12,$2,gpufx=graph=$(fx $k),hwdownload,format=rgba" || true
         bytes_is "$1: $k gives rgba (alpha) by default" $((3 * 320 * 180 * 4)) "$T.$k"
     done
-    gpu_ff -i "$A" -an -filter_complex "[0]format=nv12,$2,gpufx=graph='$(fx luma-matte)'[c][m];[c]hwdownload[co]" \
+    gpu_ff -i "$A" -an -filter_complex "[0]format=nv12,$2,gpufx=graph='$(fx luma-matte)'[c][m];[c]hwdownload,format=rgba[co]" \
         -map "[co]" -frames:v 3 -f rawvideo -y "$T.lm" -map "[m]" -f null - 2> "$CLIPS/last.log" || true
     bytes_is "$1: luma-matte color gives rgba (alpha) by default" $((3 * 320 * 180 * 4)) "$T.lm"
     if [ "${3:-}" = full ]; then
@@ -994,8 +1005,10 @@ planar_tests() {
         # gpufx refuses as not sampleable (vf_gpufx.c config_inputs); gpufx uploads the
         # software frame itself.
         raw "$T.aref" -i "$P" -vf "format=yuva420p" || true
-        raw "$T.a" -i "$P" -vf "format=yuva420p,gpufx=graph=tplanar/keya,hwdownload" || true
+        raw "$T.a" -i "$P" -vf "format=yuva420p,gpufx=graph=tplanar/keya,hwdownload,format=yuva420p" || true
         close_to "$1: yuva420p through a yuva420 effect keeps its alpha" 1 1 "$T.a" "$T.aref"
+    else
+        echo "  skip  $1: yuva420p through a yuva420 effect (D3D frames have no format with alpha)"
     fi
 }
 if [ -n "$VK" ]; then
