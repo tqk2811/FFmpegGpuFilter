@@ -80,8 +80,8 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
 - **out_format**: ép pixel format của mọi output (với frame Vulkan/D3D: sw_format của frames context đầu
   ra). Format có thể là bất kỳ format nào libgpufx chuyển được trên GPU
   (`gpufx_format_supported`; manifest không có danh sách `formats`), và với frame GPU thì FFmpeg phải tạo được storage image của nó; không thì
-  filter báo lỗi lúc configure. Mặc định: format của input nguồn của output (input đầu, hoặc input `bypass` của output; input CPU: format nó được upload) nếu
-  libgpufx ghi được, không thì `rgba` (xem "Frame Vulkan" trong [Kiến trúc](../README-vi.md)). Mặc định bỏ alpha khi input không có alpha: muốn giữ thì `out_format=rgba` (hoặc `yuva420p`). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
+  filter báo lỗi lúc configure. Mặc định: libgpufx chọn (`gpufx_effect_output_default_format`) theo `pixel_layout` của output: format của input đầu (input CPU: format nó được upload) nếu
+  cùng layout, không thì format mặc định của layout (`nv12` cho `yuv420`, `gray` cho `y`, `yuva420p` cho `yuva420`, `rgba` cho `rgba`; xem "Frame Vulkan" trong [Kiến trúc](../README-vi.md)). Frame output giữ matrix và range của input đầu. Alpha được giữ mặc định khi output khai `rgba` hoặc `yuva420`/`yuva444` (các gói keying khai vậy). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
   đổi YUV ↔ RGBA (filter cuối quay về bằng `out_format=nv12`).
   Giới hạn: với frame D3D chỉ nv12, p010le, rgba, rgba64le; với frame VideoToolbox chỉ nv12, p010le.
 - **passthrough** (`auto`, `off`; mặc định `auto`): filter làm gì khi timeline `enable=` tắt nó.

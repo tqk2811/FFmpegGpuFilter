@@ -10,8 +10,8 @@ Luma key with two outputs: `color`, the video with the keyed range transparent (
 
 Two output pads, in this order, both the size of `src`:
 
-- `color`: has alpha; the format defaults to that of `src`, so use `out_format=rgba|...` (or `yuva420p`) to keep the alpha.
-- `matte`: opaque gray image; the format defaults to that of `src`, any GPU-converted format works (for example `out_format=rgba|yuv420p` gives `color` rgba and `matte` yuv420p).
+- `color`: has alpha; it is `rgba` by default (`"pixel_layout": "rgba"`), so the alpha is kept without `out_format`.
+- `matte`: opaque gray image; the format defaults to that of `src`, any GPU-converted format works (for example `out_format=|yuv420p` gives `color` rgba and `matte` yuv420p).
 
 ## Options
 

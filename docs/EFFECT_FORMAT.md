@@ -81,10 +81,11 @@ Each element of `outputs` (an array; the object form of earlier versions is an e
 
 Pixel formats: the GPU converter reads and writes `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (and reads `yuvj420p`/`yuvj422p`/`yuvj444p`).
-The `sw_format` of an output defaults to the format of the output's source input (the first input, or the output's
-`bypass` input) when the converter can write it, else `rgba`. The filter option `out_format` (one entry, or one per
-output pad separated by `|`) overrides it and may be any GPU-converted format. **An effect that produces alpha loses it
-when the default is a format without alpha** (`yuv420p`): set `out_format=rgba` (or `yuva420p`) to keep it.
+The `sw_format` of an output defaults by its `pixel_layout` (see [Pixel layout](#pixel-layout-planes)): the first
+input's format when it is of that layout, else the layout's default (`nv12` for `yuv420`, `gray` for `y`, `yuva420p`
+for `yuva420`, `rgba` for `rgba`). The filter option `out_format` (one entry, or one per output pad separated by `|`)
+overrides it and may be any GPU-converted format. An effect that produces alpha keeps it by default when its output
+declares `rgba` or `yuva420`/`yuva444`.
 
 The size of an output is not in the manifest: it comes from an optional shader function, see [Output size](#output-size).
 
@@ -783,7 +784,7 @@ The examples live in group folders under `packages/gpufx/`: `ffmpeg/` (equivalen
 | `packages/gpufx/ffmpeg/mirror` | Horizontal/vertical flip, an `int` parameter |
 | `packages/gpufx/ffmpeg/transform` | Zoom, rotate, pan (Ken Burns), a `vec2` parameter |
 | `packages/gpufx/ffmpeg/fade` | Fade to a color |
-| `packages/gpufx/ffmpeg/chroma-key` | Green screen → alpha; the output defaults to the input's format, so keep alpha with `out_format=rgba` (or `yuva420p`) |
+| `packages/gpufx/ffmpeg/chroma-key` | Green screen → alpha; the output declares `"pixel_layout": "rgba"`, so it keeps alpha by default |
 | `packages/gpufx/ffmpeg/alpha-extract` | Alpha as a gray matte (`invert` option), to carry alpha through D3D frames and join it back with `alphamerge` |
 | `packages/gpufx/ffmpeg/overlay` | 2-input picture-in-picture, with a border |
 | `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | FFmpeg's `hstack`/`vstack`: a `repeat` input (as many inputs as labels, 2 to 16) and a `gpufx_output_size` that stacks the inputs (an output larger than the inputs) |

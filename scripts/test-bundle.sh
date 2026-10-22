@@ -236,8 +236,8 @@ NULL="-f null -"
 # Without a device gpufx has nowhere to put its GPU frames: refused, with the fix.
 NODEV=1 rejects "software input without a device" "gpufx outputs GPU frames: add -init_hw_device" \
     -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip" $NULL
-NODEV=1 rejects "out_format the GPU does not convert" "out_format=gray is not converted" -i "$A" -an \
-    -vf "gpufx=graph=$FX/ffmpeg/sepia.zip:out_format=gray" $NULL
+NODEV=1 rejects "out_format the GPU does not convert" "out_format=pal8 is not converted" -i "$A" -an \
+    -vf "gpufx=graph=$FX/ffmpeg/sepia.zip:out_format=pal8" $NULL
 NODEV=1 rejects "backend=gl in the filter" "backend=gl" -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip:backend=gl" $NULL
 
 # Every test below needs the Vulkan device. Hosted runners may have none: skipped with a
@@ -926,8 +926,72 @@ else
     echo "  skip  hwupload refused on Intel host image copy (not the Intel Windows driver with host image copy)"
 fi
 }
+# Effects with a pixel_layout of planes (tplanar/: directory packages written here, as in
+# crates/gpufx-core/tests/planes.rs). planar_pkg NAME IN_LAYOUT OUT_LAYOUT BODY
+planar_pkg() {
+    mkdir -p "tplanar/$1"
+    printf '{"id":"t.%s","name":"%s","api":1,"used_for":["gpufx"],"inputs":[{"name":"src","pixel_layout":"%s"}],"outputs":[{"name":"out","pixel_layout":"%s"}],"groups":[{"passes":[{"shader":"a.wgsl"}]}]}\n' \
+        "$1" "$1" "$2" "$3" > "tplanar/$1/manifest.json"
+    printf '@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {\n    if (!gpufx_in_bounds(id)) { return; }\n    let p = id.xy;\n    %s\n}\n' \
+        "$4" > "tplanar/$1/a.wgsl"
+}
+planar_pkg inv420 yuv420 yuv420 'let s = gpufx_chroma_scale(); gpufx_write_y(p, 1.0 - textureLoad(in_src_y, p, 0).r); if (all(p % s == vec2u(0u))) { gpufx_write_uv(p / s, textureLoad(in_src_uv, p / s, 0).rg); }'
+planar_pkg luma yuv420 y 'gpufx_write_y(p, textureLoad(in_src_y, p, 0).r);'
+planar_pkg keya yuva420 yuva420 'let s = gpufx_chroma_scale(); gpufx_write_y(p, textureLoad(in_src_y, p, 0).r); gpufx_write_a(p, textureLoad(in_src_a, p, 0).r); if (all(p % s == vec2u(0u))) { gpufx_write_uv(p / s, textureLoad(in_src_uv, p / s, 0).rg); }'
+# bytes_is NAME BYTES FILE: FILE (raw frames of the sw_format gpufx chose) has BYTES bytes.
+bytes_is() {
+    got=$(wc -c < "$3" 2>/dev/null | tr -d ' ')
+    if [ "$got" = "$2" ]; then pass "$1"; else fail "$1 (want $2 bytes, got ${got:-none})"; cat "$CLIPS/last.log"; fi
+}
+# close_to NAME MAX BYTES OUT REF: same size and every sample within MAX.
+close_to() {
+    d=-
+    if [ -s "$4" ] && [ "$(wc -c < "$4")" = "$(wc -c < "$5")" ]; then d=$(diff_stats "$4" "$5" "$3" | cut -d' ' -f1); d=${d:--}; fi
+    if [ "$d" != - ] && [ "$d" -le "$2" ]; then pass "$1"; else fail "$1 (max difference $d)"; cat "$CLIPS/last.log"; fi
+}
+# planar_tests LABEL UPLOAD [full]: the default output formats of planar effects (no RGBA
+# between yuv420 effects, y into gray) and of the keying packages (rgba, alpha kept).
+# full: also yuva420p frames (Vulkan; D3D frames have no format with alpha).
+planar_tests() {
+    T=$CLIPS/planar
+    I2="tplanar/inv420|tplanar/inv420"
+    rm -f "$T".*
+    raw "$T.ref" -i "$A" -vf "format=nv12" || true
+    raw "$T.out" -i "$A" -vf "format=nv12,$2,gpufx=graph='$I2',hwdownload" || true
+    close_to "$1: nv12 through two yuv420 effects stays nv12, no RGBA" 1 1 "$T.out" "$T.ref"
+    raw "$T.gray" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/luma,hwdownload" || true
+    bytes_is "$1: output y is gray by default" $((3 * 320 * 180)) "$T.gray"
+    if grep -qw extractplanes "$CLIPS/filters.txt"; then
+        raw "$T.yref" -i "$A" -vf "format=nv12,extractplanes=y" || true
+        close_to "$1: gray output holds the Y codes" 0 1 "$T.gray" "$T.yref"
+    fi
+    raw "$T.rgba" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/inv420:out_format=rgba,hwdownload" || true
+    bytes_is "$1: out_format=rgba overrides a yuv420 output" $((3 * 320 * 180 * 4)) "$T.rgba"
+    raw "$T.pref" -i "$A" -vf "format=p010le" || true
+    raw "$T.p010" -i "$A" -vf "format=p010le,$2,gpufx=graph='$I2',hwdownload" || true
+    close_to "$1: p010le through two yuv420 effects stays p010le" 64 2 "$T.p010" "$T.pref"
+    raw "$T.oref" -i "$A" -vf "scale=319:179,format=nv12" || true
+    raw "$T.odd" -i "$A" -vf "scale=319:179,format=nv12,gpufx=graph='$I2',hwdownload,format=nv12" || true
+    close_to "$1: odd size 319x179 through yuv420 effects" 1 1 "$T.odd" "$T.oref"
+    # shellcheck disable=SC2086
+    ok "$1: bypass toggled every frame on a planar graph" -i "$A" -an -frames:v 8 \
+        -vf "format=nv12,$2,gpufx=graph='$I2|tplanar/luma':enable='eq(mod(n\,2)\,0)',hwdownload" $NULL
+    for k in chroma-key color-key hsv-key luma-key; do
+        raw "$T.$k" -i "$A" -vf "format=nv12,$2,gpufx=graph=$(fx $k),hwdownload" || true
+        bytes_is "$1: $k gives rgba (alpha) by default" $((3 * 320 * 180 * 4)) "$T.$k"
+    done
+    gpu_ff -i "$A" -an -filter_complex "[0]format=nv12,$2,gpufx=graph='$(fx luma-matte)'[c][m];[c]hwdownload[co]" \
+        -map "[co]" -frames:v 3 -f rawvideo -y "$T.lm" -map "[m]" -f null - 2> "$CLIPS/last.log" || true
+    bytes_is "$1: luma-matte color gives rgba (alpha) by default" $((3 * 320 * 180 * 4)) "$T.lm"
+    if [ "${3:-}" = full ]; then
+        raw "$T.aref" -i "$P" -vf "format=yuva420p" || true
+        raw "$T.a" -i "$P" -vf "format=yuva420p,gpufx=graph=tplanar/keya,hwdownload" || true
+        close_to "$1: yuva420p through a yuva420 effect keeps its alpha" 1 1 "$T.a" "$T.aref"
+    fi
+}
 if [ -n "$VK" ]; then
     vulkan_tests
+    planar_tests Vulkan "$UP" full
 fi
 
 echo "D3D12 and D3D11 frames:"
@@ -1034,6 +1098,7 @@ for api in d3d12va d3d11va; do
     same "$API: invert twice equals software frames" \
         "$(dx_md5 nv12 "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")" \
         "$(sw_md5 nv12 "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")"
+    planar_tests "$API" hwupload
     pt_tests "$API nv12" nv12 hwupload 0
     # One frame on two input pads (split before gpufx).
     G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"

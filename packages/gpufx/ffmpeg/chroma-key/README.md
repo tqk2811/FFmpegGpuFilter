@@ -8,7 +8,7 @@ Removes a key color (green screen) into alpha. Use a format with alpha after it,
 
 ## Output
 
-Same size as the first input (`src`). Pixel format: that of `src` by default (the output has alpha, which a format without alpha such as `yuv420p` drops), so use `out_format=rgba` (or `yuva420p`) to keep the alpha.
+Same size as the first input (`src`). Pixel format: `rgba` (the output declares `"pixel_layout": "rgba"`), so the alpha is kept without `out_format`.
 
 ## Options
 
@@ -41,4 +41,4 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 
 ## Notes
 
-The output carries alpha. The output format defaults to the input's, so set `out_format=rgba` (or `yuva420p`) on `gpufx` to keep it, and any filter after it must take an alpha format; `overlay.zip` honours it. Converting to a format without alpha drops it.
+The output carries alpha. The output is `rgba` by default, so the alpha is kept; any filter after it must take an alpha format; `overlay.zip` honours it. Converting to a format without alpha drops it.

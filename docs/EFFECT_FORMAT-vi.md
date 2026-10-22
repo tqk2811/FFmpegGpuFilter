@@ -81,11 +81,11 @@ Mỗi phần tử `outputs` (một mảng; dạng object của bản cũ là l�
 
 Pixel format: bộ chuyển đổi trên GPU đọc và ghi `rgba`, `rgba64le`, `nv12`, `p010le`, `yuv420p`, `yuv422p`,
 `yuv444p`, `yuv420p10le`, `yuv422p10le`, `yuv444p10le`, `yuva420p`, `yuva444p` (và đọc thêm
-`yuvj420p`/`yuvj422p`/`yuvj444p`). `sw_format` của output mặc định là format của input nguồn của output đó (input đầu,
-hoặc input `bypass` của output) nếu bộ chuyển đổi ghi được, không thì `rgba`. Option `out_format` của filter (một mục,
-hoặc mỗi output pad một mục cách nhau bằng `|`) ghi đè và có thể là bất kỳ format nào GPU chuyển được.
-**Hiệu ứng tạo ra alpha sẽ mất alpha khi mặc định là format không có alpha** (`yuv420p`): đặt `out_format=rgba`
-(hoặc `yuva420p`) để giữ.
+`yuvj420p`/`yuvj422p`/`yuvj444p`). `sw_format` của output mặc định theo `pixel_layout` của nó: format của input đầu nếu cùng
+layout, không thì format mặc định của layout (`nv12` cho `yuv420`, `gray` cho `y`, `yuva420p` cho `yuva420`, `rgba` cho
+`rgba`). Option `out_format` của filter (một mục, hoặc mỗi output pad một mục cách nhau bằng `|`) ghi đè và có thể là
+bất kỳ format nào GPU chuyển được. Hiệu ứng tạo ra alpha giữ alpha mặc định khi output khai `rgba` hoặc
+`yuva420`/`yuva444`.
 
 Kích thước của output không nằm trong manifest: nó đến từ một hàm shader tuỳ chọn, xem [Kích thước output](#kích-thước-output).
 
@@ -772,7 +772,7 @@ Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmp
 | `packages/gpufx/ffmpeg/mirror` | Lật ngang/dọc, tham số `int` |
 | `packages/gpufx/ffmpeg/transform` | Zoom, xoay, pan (Ken Burns), tham số `vec2` |
 | `packages/gpufx/ffmpeg/fade` | Fade về một màu |
-| `packages/gpufx/ffmpeg/chroma-key` | Phông xanh → alpha; output mặc định theo format của input, nên muốn giữ alpha thì dùng `out_format=rgba` (hoặc `yuva420p`) |
+| `packages/gpufx/ffmpeg/chroma-key` | Phông xanh → alpha; output khai `"pixel_layout": "rgba"` nên mặc định giữ alpha |
 | `packages/gpufx/ffmpeg/overlay` | Picture-in-picture 2 input, có viền |
 | `packages/gpufx/ffmpeg/hstack`, `packages/gpufx/ffmpeg/vstack` | `hstack`/`vstack` của FFmpeg: input `repeat` (bao nhiêu label thì bấy nhiêu input, 2 đến 16) và `gpufx_output_size` xếp các input lại (output lớn hơn input) |
 | `packages/gpufx/ffmpeg/scale` | `scale` của FFmpeg (`w`, `h` với quy tắc `0` và `-n`, bilinear): `gpufx_output_size` tính kích thước từ param và input, ví dụ `scale.zip=w=1280:h=-2` |

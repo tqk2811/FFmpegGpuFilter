@@ -8,7 +8,7 @@ Turns pixels of a chosen brightness range into transparency. Use a format with a
 
 ## Output
 
-Same size as the first input (`src`). Pixel format: that of `src` by default (the output has alpha, which a format without alpha such as `yuv420p` drops), so use `out_format=rgba` (or `yuva420p`) to keep the alpha.
+Same size as the first input (`src`). Pixel format: `rgba` (the output declares `"pixel_layout": "rgba"`), so the alpha is kept without `out_format`.
 
 ## Options
 
@@ -44,6 +44,6 @@ gpufx run 'luma-key.zip=threshold=0.9:tolerance=0.1:softness=0.05' -i in.png -o 
 
 ## Notes
 
-The output carries alpha. The output format defaults to the input's, so set `out_format=rgba` (or `yuva420p`) on `gpufx` to keep it, and any filter after it must take an alpha format; `overlay.zip` honours it. Converting to a format without alpha drops it.
+The output carries alpha. The output is `rgba` by default, so the alpha is kept; any filter after it must take an alpha format; `overlay.zip` honours it. Converting to a format without alpha drops it.
 
 Port of FFmpeg's `lumakey` filter. Differences: FFmpeg compares the raw Y plane of the video, so for limited-range video black is about 0.06 and white about 0.92; the shader computes BT.709 luma from RGB and maps it to that limited range (16 to 235) before comparing, so the same numbers work. For full-range (`yuvj`) video the values are slightly off. The output alpha is multiplied by the input alpha.

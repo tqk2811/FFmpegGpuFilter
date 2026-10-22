@@ -22,6 +22,12 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
 - **Ngày ghi**: 2026-10-19
 
+### [Thấp] Bật/tắt bypass trên graph có pad planar dựng lại plan và input slot mỗi lần
+
+- Vấn đề: mỗi lần toggle bypass trên graph có pad planar, plan và các input slot bị dựng lại (`pad_layouts` / `InputKey` trong `crates/gpufx-core/src/graph.rs:375`). Chỉ tốn chi phí, không sai kết quả.
+- Vì sao nên làm: toggle bypass theo frame (sendcmd) sẽ dựng lại liên tục.
+- Ngày ghi: 2026-10-23.
+
 ### [Thấp] Input `repeat` chưa kiểm trùng tên với bản sao như output `repeat`
 - **Vấn đề**: output `repeat` từ chối mọi tên khác của package có dạng bản sao (`<name>0`, `<name>12`...), còn input `repeat` thì không: input `src` `repeat` cạnh texture/output pass tên `src1` chỉ lỗi mơ hồ "duplicate name" lúc nở, hoặc khó hiểu hơn khi tên chỉ trùng ở một số N.
 - **Vị trí**: kiểm của output ở `validate` trong [manifest.rs](../crates/gpufx-core/src/manifest.rs#L618) (`is_copy`); nhánh input `repeat` cùng hàm (~dòng 559-572) thiếu phần tương ứng.
