@@ -417,10 +417,10 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 - **Vì sao**: (1) nguồn đổi độ phân giải làm dừng cả graph; (2) nên khớp phiên bản header với libavutil thay vì vá lúc chạy.
 - **Ngày ghi**: 2026-10-13
 
-### [Vừa] `out_api=d3d11` + QSV treo trên adapter Intel
-- **Vấn đề**: `-init_hw_device d3d12va=dx:1` (Intel UHD) + `-hwaccel d3d12va` → `gpufx=...:out_api=d3d11` (device `d3d11va=d11:1`) → `hwmap=derive_device=qsv,format=qsv` → `h264_qsv` đứng ở frame=0 hơn 2 phút (phải kill), không có log lỗi. Cùng máy, `d3d11va` decode → gpufx → `h264_qsv` trên adapter 1 chạy được; `out_api=d3d11` → nvenc trên RTX 4060 chạy được. Test `dx_out_d3d11_tests` chỉ chạy adapter 0 (NVIDIA) nên bài QSV bị skip.
-- **Vị trí**: [crates/gpufx-core/src/d3d12.rs](../crates/gpufx-core/src/d3d12.rs) (`run_dx12_d3d11`, chờ fence CPU), [ffmpeg/vf_gpufx.c](../ffmpeg/vf_gpufx.c) (`process_d3d12_to_d3d11`), [scripts/test-bundle.sh](../scripts/test-bundle.sh) (`dx_out_d3d11_tests`).
-- **Vì sao nên làm**: QSV là encoder chính trên máy chỉ có Intel; nghi treo ở chờ fence (decoder D3D12 + device D3D11 trên driver Intel) hoặc lock device D3D11 khi hwmap QSV cùng giữ. Cần chạy lại với `-loglevel debug` trên adapter Intel và cho test chạy cả adapter Intel.
+### [Thấp] Decode H.264 `d3d12va` đa luồng treo trên Intel UHD (FFmpeg/driver, không phải gpufx)
+- **Vấn đề**: trên Intel UHD (RaptorLake-S, adapter 1 của máy test) `-hwaccel d3d12va` decode H.264 đứng ở frame 1 tới hết timeout, kể cả chỉ `hwdownload` không có gpufx; `-threads 1` thì chạy hết, MPEG-2 cũng chạy, NVIDIA không bị. Vì vậy `d3d12va` → gpufx `out_api=d3d11` → `h264_qsv` trên Intel cần `-threads 1` (đã ghi trong README, LIMITATIONS, gpufx.md). Bộ test chỉ chạy adapter 0 (NVIDIA) và input MPEG-2 nên không thấy; ca QSV của `dx_out_d3d11_tests` chưa từng chạy tự động trên Intel.
+- **Vị trí**: decoder `d3d12va` trong FFmpeg (external/FFmpeg/libavcodec/d3d12va_*.c, không patch theo luật project); [scripts/test-bundle.sh](../scripts/test-bundle.sh) (`dx_out_d3d11_tests`).
+- **Vì sao nên làm**: thử lại khi lên bản FFmpeg/driver Intel mới; nếu vẫn treo thì báo upstream FFmpeg. Có thể cho test-bundle chạy thêm một lượt DXDEV trên adapter Intel để phủ QSV.
 - **Ngày ghi**: 2026-10-24
 
 ### [Vừa] Frame VideoToolbox (macOS): chưa chạy trên máy Mac, còn các giới hạn

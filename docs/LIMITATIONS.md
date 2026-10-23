@@ -60,7 +60,7 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
   as `-filter_hw_device` (`-init_hw_device d3d11va=d11:N -filter_hw_device d11`); without it the filter refuses.
 - **Tested:** `out_api=d3d11` with `-hwaccel d3d12va` decoding -> gpufx -> `h264_nvenc`/`hevc_nvenc` (also p010 main10)
   on an RTX 4060 Laptop (2026-10-24).
-- **Untested:** `out_api=d3d11` -> `h264_qsv`: adapter 0 of the test machine is NVIDIA, so the QSV path was skipped.
+- `out_api=d3d11` -> `h264_qsv` ran by hand on Intel UHD (the test bundle runs adapter 0, NVIDIA, and skips it). FFmpeg's H.264 `d3d12va` decoder hangs on that Intel driver when frame-threaded, with or without gpufx: add `-threads 1` before `-i`, or decode with `d3d11va`.
 
 ## VideoToolbox (macOS)
 

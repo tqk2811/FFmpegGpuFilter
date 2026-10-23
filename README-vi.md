@@ -151,7 +151,7 @@ pipeline nào cho encoder nào:
 |---|---|---|---|
 | `h264_d3d12va`, `hevc_d3d12va`, `av1_d3d12va` | `-hwaccel d3d12va` trên device `d3d12va`: giữ nguyên D3D12 | không cần gì thêm | RTX 4060 Laptop, Intel UHD (h264, hevc kể cả p010 main10); driver RTX 4060 không hỗ trợ `av1_d3d12va` |
 | `h264_nvenc`, `hevc_nvenc` | `-hwaccel d3d11va` trên device `d3d11va`, hoặc decode D3D12 kèm `out_api=d3d11` | với `out_api=d3d11`: device D3D11 thứ hai cùng adapter, `-init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11`, và `gpufx=graph=...:out_api=d3d11` | RTX 4060 Laptop (cả hai cách, hevc main10 cũng chạy) |
-| `h264_qsv` | như NVENC, rồi `hwmap=derive_device=qsv,format=qsv` sau `gpufx` | device QSV derive từ device D3D11 | Intel UHD với decode `d3d11va`; `out_api=d3d11` + QSV bị treo trên Intel UHD (lỗi đã biết, đang điều tra) |
+| `h264_qsv` | như NVENC, rồi `hwmap=derive_device=qsv,format=qsv` sau `gpufx` | device QSV derive từ device D3D11 | Intel UHD với decode `d3d11va`; `out_api=d3d11` + QSV trên Intel UHD với `-threads 1` (decode H.264 `d3d12va` đa luồng của FFmpeg treo ở đó, xem [giới hạn](docs/LIMITATIONS-vi.md)) |
 | `h264_vulkan`, `hevc_vulkan` | `-hwaccel vulkan`, hoặc nguồn bất kỳ qua `gpufx_upload`/`hwupload`, trên device Vulkan mở **không** có `disable_multiplane=1` | encoder Vulkan chỉ nhận frame multiplane | RTX 4060 Laptop; `av1_vulkan` lệch ~20 dB ở đó kể cả khi không có gpufx |
 
 Lệnh `out_api=d3d11` đầy đủ (NVENC; với QSV thêm `,hwmap=derive_device=qsv,format=qsv` vào `-vf` và dùng `h264_qsv`):

@@ -408,7 +408,7 @@ Chỉ dùng khi decoder cho frame D3D12 (`-hwaccel d3d12va`) nhưng encoder ch�
 (`*_d3d12va`) giữ frame D3D12 nên không cần nó; input D3D11 cũng không cần. Cần một device `d3d11va` cùng adapter với
 device D3D12, đưa vào làm `-filter_hw_device`; thiếu nó thì filter lỗi `out_api=d3d11 writes D3D11 frames of
 -filter_hw_device`. Option như `dx_out_d3d11_tests` trong `scripts/test-bundle.sh` (chỉ số adapter `:0` phải giống nhau ở
-hai device). Lệnh NVENC đã chạy; lệnh QSV chưa kiểm (QSV cần adapter Intel, và decode D3D12 ở đó bị treo khi thử).
+hai device). Lệnh NVENC đã chạy; lệnh QSV đã chạy trên adapter Intel UHD (`dx:1`/`d11:1`) với `-threads 1` trước `-i`: thiếu nó thì decoder H.264 `d3d12va` đa luồng của FFmpeg treo trên driver Intel đó, kể cả khi không có gpufx (MPEG-2 decode bình thường).
 
 ```sh
 ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 \
