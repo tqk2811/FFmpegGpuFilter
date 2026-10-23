@@ -679,8 +679,8 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   barriers: on the compute-only family that NVIDIA lists first the device is lost; libgpufx refuses such a family). The filter holds FFmpeg's `lock_queue` around
   each call, so FFmpeg's own submissions (hwupload, other Vulkan filters) never race with wgpu's.
 - **Frames.** One `VkImage` per plane, in FFmpeg's per-plane formats (`R8`, `R8G8`, `R8G8B8A8`, `R16`,
-  `R16G16`, `R16G16B16A16` `_UNORM`), read and written in place; the output frames contexts gpufx makes use
-  `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` and need `STORAGE` usage. Input frames without `SAMPLED` usage are
+  `R16G16`, `R16G16B16A16` `_UNORM`), read and written in place; the per-plane output frames contexts gpufx
+  makes use `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` and need `STORAGE` usage. Input frames without `SAMPLED` usage are
   refused at configuration with a message saying so.
 - **Multiplane inputs** (one image of `G8_B8R8_2PLANE_420`, `G10X6_B10X6R10X6_2PLANE_420_3PACK16`,
   `G8_B8_R8_3PLANE_*`, `G16_B16_R16_3PLANE_*`: Vulkan decoders, `hwupload` without `disable_multiplane=1`)
@@ -692,7 +692,22 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   go from `UNDEFINED` to `GENERAL` (overwritten whole), the source to `GENERAL`, then a barrier after the copies
   makes the transfer writes visible (wgpu's own barrier from `STORAGE_READ_WRITE` only covers shader writes).
   Same submission, same semaphore wait and signal. The frame needs `TRANSFER_SRC` usage (decoders and
-  `hwupload` set it). Outputs stay one image per plane. FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without any usage by default (the
+  `hwupload` set it).
+- **Multiplane outputs.** The Vulkan encoders (`h264_vulkan`, `hevc_vulkan`, `av1_vulkan`) only take multiplane
+  images (`vulkan_encode.c` makes its `VIDEO_ENCODE_SRC` view with `format[0]` of the frames context). So an
+  output frames context is first made the way FFmpeg makes hwupload's: no flags, no `create_pnext`, usage
+  `SAMPLED | TRANSFER_SRC | TRANSFER_DST` (FFmpeg adds what else the format supports, `VIDEO_ENCODE_SRC` and the
+  profile-independent flag included). It is kept when FFmpeg made multiplane images of a format in the table
+  above (the device was opened without `disable_multiplane=1`), else gpufx falls back to per-plane storage
+  images (`gpufx_vk_multiplane_frames` in `ffmpeg/vf_gpufx_vk.h`; also used by `gpufx_ai_upscale` and
+  `gpufx_ai_framerate`). No option: the device option already says which kind the user wants, as for hwupload.
+  libgpufx writes such an output into single-plane storage images of its own (made like the input scratch
+  images, `STORAGE | COPY_SRC`, kept per output pad), then a raw command buffer after wgpu's work copies each
+  into `dstSubresource` aspect `PLANE_n`: a barrier from wgpu's `STORAGE_READ_WRITE` state (shader writes) to
+  the transfer reads, the copies, then a barrier making the transfer writes visible and keeping the next
+  frame's shader writes into the scratch images after the reads. The frame image goes `UNDEFINED` to `GENERAL`
+  before the work, same submission and semaphore signal as other outputs, left in `GENERAL`.
+  FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without any usage by default (the
   ones `hwupload` makes work), so outputs fall back to another format, e.g. `rgba`. The output
   sw_format is the source input's when libgpufx can write it and FFmpeg can make storage images of it, else
   `rgba`. `out_format` replaces that choice

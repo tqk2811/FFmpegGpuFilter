@@ -21,8 +21,9 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 - **Limitation:** frames with one VkImage per plane (`-init_hw_device vulkan=...,disable_multiplane=1`) are
   read in place; a multiplane input (Vulkan decoders, `-hwaccel vulkan`, or `hwupload` without
   `disable_multiplane=1`) costs one GPU copy of each plane per frame (nv12, p010, yuv420p/422p/444p and their
-  10-bit forms; it needs `TRANSFER_SRC` usage). Outputs are always one image per plane, so a Vulkan encoder
-  that wants multiplane frames needs `hwdownload,hwupload` or a copy after gpufx.
+  10-bit forms; it needs `TRANSFER_SRC` usage). On such a device nv12/p010/yuv outputs are multiplane images too, written
+  through one GPU copy of each plane (the Vulkan encoders take only those); with `disable_multiplane=1` outputs
+  are one image per plane (written in place) and the Vulkan encoders refuse them. Tested: `h264_vulkan`, `hevc_vulkan` (also p010 main10) on an RTX 4060; `av1_vulkan` is ~20 dB off there without gpufx too.
 - **Limitation:** FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without usage flags, so Vulkan outputs
   cannot be those formats (inputs through `hwupload` work).
 - **Limitation:** a queue family with both graphics and compute is required; a compute-only family is not used.
@@ -31,7 +32,7 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 - **Limitation:** the effect is compiled twice at startup (default device at init, FFmpeg's device at configure).
 - **Limitation:** Intel on Windows (FFmpeg 9): `hwupload`/`hwdownload` break through the driver's host image copy,
   so gpufx refuses those frames. Use `gpufx_upload`/`gpufx_download`. See [INTEL_VULKAN.md](INTEL_VULKAN.md).
-- **Untested:** Vulkan encoders, `hwmap` from CUDA/VAAPI, `gpufx_download` with `-hwaccel vulkan` frames.
+- **Untested:** `hwmap` from CUDA/VAAPI, `gpufx_download` with `-hwaccel vulkan` frames.
 
 ## D3D12 / D3D11
 

@@ -21,8 +21,9 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 - **Hạn chế:** frame một VkImage mỗi plane (`-init_hw_device vulkan=...,disable_multiplane=1`) được đọc tại
   chỗ; input multiplane (decoder Vulkan `-hwaccel vulkan`, hoặc `hwupload` không có `disable_multiplane=1`)
   tốn một lần copy trên GPU cho mỗi plane mỗi frame (nv12, p010, yuv420p/422p/444p và bản 10-bit; cần usage
-  `TRANSFER_SRC`). Output luôn là mỗi plane một image, nên encoder Vulkan cần frame multiplane thì phải
-  `hwdownload,hwupload` hoặc copy sau gpufx.
+  `TRANSFER_SRC`). Trên device đó output nv12/p010/yuv cũng là image multiplane, ghi qua một lần
+  copy trên GPU mỗi plane (encoder Vulkan chỉ nhận loại này); với `disable_multiplane=1` output mỗi plane một image
+  (ghi tại chỗ) và encoder Vulkan không nhận. Đã test: `h264_vulkan`, `hevc_vulkan` (cả p010 main10) trên RTX 4060; `av1_vulkan` ở đó lệch ~20 dB cả khi không có gpufx.
 - **Hạn chế:** FFmpeg 9.0 tạo frames context `yuva420p`/`yuva444p` không có usage, nên output Vulkan không ra được
   hai dạng này (input qua `hwupload` vẫn được).
 - **Hạn chế:** cần queue family có cả graphics lẫn compute; không chạy trên family chỉ có compute.
@@ -32,7 +33,7 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   configure).
 - **Hạn chế:** Intel trên Windows (FFmpeg 9): `hwupload`/`hwdownload` hỏng qua host image copy của driver, nên gpufx
   từ chối frame đó. Dùng `gpufx_upload`/`gpufx_download`. Xem [INTEL_VULKAN-vi.md](INTEL_VULKAN-vi.md).
-- **Chưa test:** encoder Vulkan, `hwmap` từ CUDA/VAAPI, `gpufx_download` với frame của `-hwaccel vulkan`.
+- **Chưa test:** `hwmap` từ CUDA/VAAPI, `gpufx_download` với frame của `-hwaccel vulkan`.
 
 ## D3D12 / D3D11
 

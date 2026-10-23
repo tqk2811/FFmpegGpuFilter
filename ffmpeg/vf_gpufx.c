@@ -1001,9 +1001,12 @@ static int config_vulkan(AVFilterContext *ctx)
  * The output frames context is made here by gpufx alone: relabel_hold() relies on nobody
  * else setting its free / user_opaque.
  *
- * The frames context of a Vulkan output: one image per plane (libgpufx writes each plane
- * as its own storage image), in the source input's sw_format when the effect may output
- * it, else the first format of the output that gpufx converts on the GPU.
+ * The frames context of a Vulkan output, in the source input's sw_format when the effect
+ * may output it, else the first format of the output that gpufx converts on the GPU: one
+ * multiplane image per frame when the device makes those (opened without
+ * disable_multiplane=1, like FFmpeg's own hwupload and decoder frames; Vulkan encoders
+ * take only those), which libgpufx fills by copying its own plane images into; else one
+ * image per plane, which libgpufx writes as storage images.
  */
 static int config_vulkan_output(AVFilterLink *outlink, unsigned k)
 {
@@ -1030,6 +1033,13 @@ static int config_vulkan_output(AVFilterLink *outlink, unsigned k)
             break; /* out_format: that format or nothing */
         if (!listed || (j >= 0 && fmt == want) || !gpufx_format_supported(name) || !av_vkfmt_from_pixfmt(fmt))
             continue;
+        if ((ref = gpufx_vk_multiplane_frames(s->hw_device, fmt, outlink->w, outlink->h))) {
+            av_log(ctx, AV_LOG_VERBOSE, "Multiplane Vulkan frames of %s for output '%s'.\n",
+                   name, ctx->output_pads[k].name);
+            av_buffer_unref(&ff_filter_link(outlink)->hw_frames_ctx);
+            ff_filter_link(outlink)->hw_frames_ctx = ref;
+            return hold_vk_frames(s, ref);
+        }
         if (!(ref = av_hwframe_ctx_alloc(s->hw_device)))
             return AVERROR(ENOMEM);
         fc            = (AVHWFramesContext *)ref->data;
@@ -1962,10 +1972,12 @@ static const char *relabel_compatible(AVHWFramesContext *ifc, AVHWFramesContext 
         const AVVulkanFramesContext *iv = ifc->hwctx, *ov = ofc->hwctx;
         /* Read by gpufx (sampled) and copied to buffers by hwdownload and gpufx_download.
          * hwdownload takes the host image copy path when the output context has the usage
-         * (gpufx drops it, gpufx_hwframe_ctx_init): then the texture needs it too. */
+         * (gpufx drops it, gpufx_hwframe_ctx_init): then the texture needs it too.
+         * Vulkan encoders make video encode source views of the multiplane images. */
         const VkImageUsageFlags need = ov->usage & (VK_IMAGE_USAGE_SAMPLED_BIT |
                                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                    VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT);
+                                                    VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT |
+                                                    VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR);
 
         if (iv->tiling != ov->tiling)
             return "Vulkan image tiling";

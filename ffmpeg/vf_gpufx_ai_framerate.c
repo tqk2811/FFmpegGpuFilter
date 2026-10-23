@@ -313,8 +313,16 @@ static int input_writable(const AiFramerateContext *s, AVHWFramesContext *in)
 {
     switch (s->hw_fmt) {
 #if CONFIG_VULKAN
-    case AV_PIX_FMT_VULKAN:
-        return !!(((AVVulkanFramesContext *)in->hwctx)->usage & VK_IMAGE_USAGE_STORAGE_BIT);
+    case AV_PIX_FMT_VULKAN: {
+        const VkImageUsageFlags usage = ((AVVulkanFramesContext *)in->hwctx)->usage;
+        /* A decoder's pool (video profile in create_pnext) is not borrowed for the new frames. */
+        if (((AVVulkanFramesContext *)in->hwctx)->create_pnext)
+            return 0;
+        /* Multiplane images are written through copies of libgpufx's own plane images. */
+        if (gpufx_vk_multiplane_known(in))
+            return !!(usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        return !!(usage & VK_IMAGE_USAGE_STORAGE_BIT);
+    }
 #endif
 #if CONFIG_D3D12VA
     case AV_PIX_FMT_D3D12:
@@ -346,6 +354,10 @@ static int config_out_frames(AVFilterContext *ctx, AVHWFramesContext *in)
     }
     s->own_out = 1;
     av_log(ctx, AV_LOG_VERBOSE, "The input frames cannot be written by the GPU: source frames are copied.\n");
+    /* Multiplane images where the device makes them (Vulkan encoders take only those). */
+    if (s->hw_fmt == AV_PIX_FMT_VULKAN &&
+        (s->out_frames = gpufx_vk_multiplane_frames(s->hw_device, in->sw_format, in->width, in->height)))
+        return 0;
     for (int uav = 1; uav >= 0; uav--) {
         AVBufferRef *ref = av_hwframe_ctx_alloc(s->hw_device);
         AVHWFramesContext *fc;
