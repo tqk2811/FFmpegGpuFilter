@@ -39,7 +39,8 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT, DXGI_FORMAT_NV12, DXGI_FORMAT_P010, DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
+    DXGI_FORMAT, DXGI_FORMAT_NV12, DXGI_FORMAT_P010, DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8_UNORM,
+    DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIResource1, DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_PIN};
@@ -57,7 +58,7 @@ pub struct D3d12Frame {
     pub width: u32,
     pub height: u32,
     /// `ID3D12Resource *`: NV12 or P010 (the planes are its plane slices), or RGBA8 /
-    /// RGBA16 for `rgba` / `rgba64le`.
+    /// RGBA16 / R8 for `rgba` / `rgba64le` / `gray`.
     pub resource: *mut c_void,
     /// Array slice of the frame in `resource` (`subresource_index`).
     pub subresource: u32,
@@ -87,6 +88,7 @@ fn dxgi_format(format: PixelFormat) -> Option<DXGI_FORMAT> {
         PixelFormat::P010 => DXGI_FORMAT_P010,
         PixelFormat::Rgba => DXGI_FORMAT_R8G8B8A8_UNORM,
         PixelFormat::Rgba64 => DXGI_FORMAT_R16G16B16A16_UNORM,
+        PixelFormat::Gray => DXGI_FORMAT_R8_UNORM,
         _ => return None,
     })
 }
@@ -287,7 +289,7 @@ unsafe fn check(
 ) -> Result<Res, Error> {
     let (format, width, height, resource, slice, color) = f;
     let want = dxgi_format(format).ok_or_else(|| {
-        Error::Frame(format!("{what}: D3D12/D3D11 frames of {} are not supported; use nv12, p010le, rgba or rgba64le", format.name()))
+        Error::Frame(format!("{what}: D3D12/D3D11 frames of {} are not supported; use nv12, p010le, rgba, rgba64le or gray", format.name()))
     })?;
     let mut owner: Option<ID3D12Device> = None;
     resource.GetDevice(&mut owner).map_err(gpu_err)?;

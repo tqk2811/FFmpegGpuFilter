@@ -967,9 +967,8 @@ planar_tests() {
     raw "$T.ref" -i "$A" -vf "format=nv12" || true
     raw "$T.out" -i "$A" -vf "format=nv12,$2,gpufx=graph='$I2',hwdownload,format=nv12" || true
     close_to "$1: nv12 through two yuv420 effects stays nv12, no RGBA" 1 1 "$T.out" "$T.ref"
-    # A y output is gray on Vulkan; D3D frames have no gray format (vf_gpufx.c
-    # sw_format_ok), so there it falls back to rgba.
-    G=rgba GB=4; [ "${3:-}" = full ] && G=gray GB=1
+    # A y output is gray on Vulkan and D3D (R8_UNORM frames, ffmpeg/patches).
+    G=gray GB=1
     raw "$T.gray" -i "$A" -vf "format=nv12,$2,gpufx=graph=tplanar/luma,hwdownload,format=$G" || true
     bytes_is "$1: output y is $G by default" $((3 * 320 * 180 * GB)) "$T.gray"
     if [ $G = gray ] && grep -qw extractplanes "$CLIPS/filters.txt"; then

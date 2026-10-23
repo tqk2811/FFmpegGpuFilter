@@ -517,7 +517,7 @@ typedef struct GpufxD3D12Device {
 int gpufx_effect_use_d3d12(GpufxEffect *fx, const GpufxD3D12Device *dev);
 
 typedef struct GpufxD3D12Frame {
-    const char *format;   /* nv12, p010le, rgba or rgba64le (FFmpeg's sw_format name) */
+    const char *format;   /* nv12, p010le, rgba, rgba64le or gray (FFmpeg's sw_format name) */
     uint32_t width;
     uint32_t height;
     void *resource;       /* ID3D12Resource (AVD3D12VAFrame.texture) */
@@ -555,7 +555,7 @@ typedef struct GpufxD3D11Device {
 int gpufx_effect_use_d3d11(GpufxEffect *fx, const GpufxD3D11Device *dev);
 
 typedef struct GpufxD3D11Frame {
-    const char *format;   /* nv12, p010le, rgba or rgba64le */
+    const char *format;   /* nv12, p010le, rgba, rgba64le or gray */
     uint32_t width;
     uint32_t height;
     void *texture;        /* ID3D11Texture2D (AVFrame.data[0]) */

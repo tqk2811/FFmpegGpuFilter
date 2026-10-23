@@ -83,7 +83,7 @@ Option `effect` cũ đã bị bỏ: `graph` là cách duy nhất để chỉ đ�
   filter báo lỗi lúc configure. Mặc định: libgpufx chọn (`gpufx_effect_output_default_format`) từ format của input nguồn của output (input CPU: format nó được upload): giữ nguyên format đó
   khi manifest không khai `pixel_layout` cho output (hiệu ứng RGBA thường trên nv12 ra nv12); khai `pixel_layout` (kể cả `rgba`) thì lấy format đó nếu cùng layout, không thì format mặc định của layout (`nv12` cho `yuv420`, `gray` cho `y`, `yuva420p` cho `yuva420`, `rgba` cho `rgba`; xem "Frame Vulkan" trong [Kiến trúc](../README-vi.md)). Frame output giữ matrix và range của input đầu; link output RGB và frame của nó gắn RGB full range. Alpha được giữ mặc định khi output khai `rgba` hoặc `yuva420`/`yuva444` (các gói keying khai vậy). Dùng: `out_format=rgba` giữa các `gpufx` rời để filter ở giữa bỏ qua chuyển
   đổi YUV ↔ RGBA (filter cuối quay về bằng `out_format=nv12`).
-  Giới hạn: với frame D3D chỉ nv12, p010le, rgba, rgba64le; với frame VideoToolbox chỉ nv12, p010le.
+  Giới hạn: với frame D3D chỉ nv12, p010le, rgba, rgba64le, gray; với frame VideoToolbox chỉ nv12, p010le.
 - **passthrough** (`auto`, `off`; mặc định `auto`): filter làm gì khi timeline `enable=` tắt nó.
   `auto` đưa cho mỗi output texture của input nguồn, gắn nhãn lại thành frame của output (buffer
   của input cùng frames context của output link, không copy trên GPU) khi copy trên GPU sẽ giữ

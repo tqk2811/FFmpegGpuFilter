@@ -83,7 +83,7 @@ The old `effect` option is removed: `graph` is the only way to name an effect. O
   filter fails at configuration. Default: chosen by libgpufx (`gpufx_effect_output_default_format`) from the format of the output's source input (for a software input, the format it is uploaded in): that format
   as it is when the manifest omits the output's `pixel_layout` (a plain RGBA effect on nv12 gives nv12); for a declared `pixel_layout` (even `rgba`), that format when it is of that layout, else the layout's default (`nv12` for `yuv420`, `gray` for `y`, `yuva420p` for `yuva420`, `rgba` for `rgba`; see "Vulkan frames" in [Architecture](../README.md)). Output frames keep the first input's matrix and range; an RGB output link and its frames are full-range RGB. Alpha is kept by default when the output declares `rgba` or `yuva420`/`yuva444` (the keying packages do). Use: `out_format=rgba` between separate `gpufx` filters, so the middle
   ones skip the YUV ↔ RGBA conversions (the last one goes back with `out_format=nv12`).
-  Limits: on D3D frames only nv12, p010le, rgba and rgba64le; on VideoToolbox frames nv12 and p010le.
+  Limits: on D3D frames only nv12, p010le, rgba, rgba64le and gray; on VideoToolbox frames nv12 and p010le.
 - **passthrough** (`auto`, `off`; default `auto`): what the filter does while timeline `enable=`
   turns it off. `auto` hands each output its source input's texture relabelled as an output frame
   (the input's buffers with the output link's frames context, no GPU copy) when the GPU copy would
