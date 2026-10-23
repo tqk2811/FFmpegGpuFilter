@@ -1165,12 +1165,13 @@ static int sw_format_ok(enum AVPixelFormat hw_fmt, enum AVPixelFormat fmt)
         return 0;
     if (hw_fmt == AV_PIX_FMT_VIDEOTOOLBOX)
         return fmt == AV_PIX_FMT_NV12 || fmt == AV_PIX_FMT_P010;
-    return fmt == AV_PIX_FMT_NV12 || fmt == AV_PIX_FMT_P010 || fmt == AV_PIX_FMT_RGBA || fmt == AV_PIX_FMT_RGBA64;
+    return fmt == AV_PIX_FMT_NV12 || fmt == AV_PIX_FMT_P010 || fmt == AV_PIX_FMT_RGBA || fmt == AV_PIX_FMT_RGBA64 ||
+           fmt == AV_PIX_FMT_GRAY8;
 }
 
 static const char *sw_format_list(enum AVPixelFormat hw_fmt)
 {
-    return hw_fmt == AV_PIX_FMT_VIDEOTOOLBOX ? "nv12, p010le" : "nv12, p010le, rgba, rgba64le";
+    return hw_fmt == AV_PIX_FMT_VIDEOTOOLBOX ? "nv12, p010le" : "nv12, p010le, rgba, rgba64le, gray";
 }
 
 /* Name of the API of GPU frames of format fmt, in messages. */
