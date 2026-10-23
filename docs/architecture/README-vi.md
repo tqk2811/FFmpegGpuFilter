@@ -865,10 +865,16 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   `v + 1` trên CPU (`SetEventOnCompletion` với event null). Chờ trên GPU bằng immediate context là không đủ: NVENC và
   QSV đọc texture ngoài context đó (`h264_nvenc` từng encode nhầm texture cũ của pool). Filter giữ
   `AVD3D11VADeviceContext.lock` trong lúc gọi.
+- **D3D12 vào, D3D11 ra (`out_api=d3d11`).** Cho encoder D3D11 (NVENC, QSV) sau decoder D3D12:
+  `GpuContext::from_d3d12_with_d3d11` chạy trên `ID3D12Device` của FFmpeg (như `from_d3d12`) và giữ thêm phần D3D11
+  của `from_d3d11` cho một device D3D11 cùng adapter (LUID phải khớp). Input đọc như frame D3D12 (chờ/signal fence),
+  output là texture D3D11 shared NT handle của gpufx, mở trong device D3D12 đó; một lần submit chờ fence của input và
+  fence D3D11 shared, rồi lời gọi chờ trên CPU như trên. Filter lấy device D3D11 từ `-filter_hw_device` và từ chối
+  passthrough (khác API).
 - Rust: `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
   (`gpufx_core::d3d12`, `cfg(windows)`, dựa trên `encode_gpu`). C API (v7, chỉ thêm): `gpufx_d3d12_supported`,
   `gpufx_effect_use_d3d12`, `gpufx_effect_process_d3d12`, `gpufx_effect_use_d3d11`,
-  `gpufx_effect_process_d3d11`; trên hệ khác các hàm này báo lỗi.
+  `gpufx_effect_process_d3d11`, `gpufx_effect_use_d3d12_to_d3d11`, `gpufx_effect_process_d3d12_to_d3d11`; trên hệ khác các hàm này báo lỗi.
 - Build: `scripts/build-prebuilt.sh win64` thêm `--enable-d3d11va --enable-d3d12va` khi `libavutil` build sẵn có
   chúng (có), tải `d3d12.h`, `d3d12sdklayers.h`, `d3d12video.h` của mingw-w64 v12.0.0 khi mingw-w64 đã cài
   (Ubuntu noble: 11) không có `d3d12video.h`.

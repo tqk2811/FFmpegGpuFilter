@@ -13,8 +13,8 @@ Related filters: [gpufx_upload / gpufx_download](gpufx_transfer.md), [gpufx_ai_f
 ## Syntax
 
 ```
-gpufx=graph='<zip|directory>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off]
-gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off]
+gpufx=graph='<zip|directory>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off][:out_api=auto|d3d11]
+gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off][:out_api=auto|d3d11]
 ```
 
 | Form | Example | Meaning |
@@ -39,6 +39,7 @@ Paths in a graph must not contain `[`, `]`, `;` or `|`.
 | `shortest` | bool | `0` | `0`, `1` | `0`: only input 0 decides the end (other inputs hold their last frame, and show a blank frame before their first frame). `1`: the output ends when any input ends |
 | `out_format` | string | none (chosen from the input) | an FFmpeg pixel format name, or one per output pad separated by `\|` | Forces the format of the outputs (the `sw_format` of GPU frames). One name applies to every output (`out_format=rgba`); several give one per output pad in order (`out_format=yuva420p\|nv12`), an empty entry keeps that pad's default (`out_format=\|nv12`). Each must be a format written by libgpufx and storable by the device, else configuration fails. Errors: `unknown pixel format 'x'`, `has 3 entries` (neither 1 nor the number of output pads) |
 | `passthrough` | int (enum) | `auto` | `auto`, `off` | While `enable=` turns the filter off: `auto` relabels the input textures as output frames without a GPU copy when that leaves the pixels unchanged and the next filter is `gpufx`, `gpufx_download` or `hwdownload`; `off` always copies |
+| `out_api` | int (enum) | `auto` | `auto`, `d3d11` | API of the output frames. `auto`: the inputs'. `d3d11`: D3D12 inputs (`-hwaccel d3d12va`), outputs are shared D3D11 textures of `-filter_hw_device` (a `d3d11va` device on the same adapter), so D3D11 encoders (`h264_nvenc`, `h264_qsv` through `hwmap=derive_device=qsv`) take them without `hwdownload`. Passthrough is off in this mode. Errors: no D3D11 `-filter_hw_device`, inputs not D3D12, another adapter |
 | `bypass` | int (enum) | `0` | `0`, `auto` | Input passed on while the filter is disabled by `enable=`: `0` the source input pad of each output, `auto` that pad until the filter has been enabled for one frame, then the last input pad. The chosen pad must have the output's size, else `EINVAL` |
 | `enable` | string (expression) | none | FFmpeg timeline expression | The generic FFmpeg timeline option (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): when it is 0 the filter takes the disabled path described under `passthrough`/`bypass`. Not the same as the inline `enable=` of an effect |
 

@@ -108,6 +108,8 @@ unsafe impl<T> Sync for Com<T> {}
 pub(crate) struct Shared {
     device: Com<ID3D12Device>,
     d3d11: Option<Mutex<D3d11>>,
+    /// Made by `from_d3d12_with_d3d11`: D3D12 inputs, D3D11 outputs (`d3d11` is set).
+    to_d3d11: bool,
     /// Held while fences are staged and submitted; true once a submission failed.
     submit: Mutex<bool>,
 }
@@ -185,7 +187,8 @@ impl GpuContext {
                  is loaded?)",
             ));
         }
-        Arc::get_mut(&mut ctx).expect("new").d3d12 = Some(Shared { device: Com(ours), d3d11: None, submit: Mutex::new(false) });
+        Arc::get_mut(&mut ctx).expect("new").d3d12 =
+            Some(Shared { device: Com(ours), d3d11: None, to_d3d11: false, submit: Mutex::new(false) });
         Ok(ctx)
     }
 
@@ -198,18 +201,64 @@ impl GpuContext {
     /// `device` and `context` must be a valid `ID3D11Device *` and its immediate context.
     pub unsafe fn from_d3d11(device: *mut c_void, context: *mut c_void) -> Result<Arc<Self>, Error> {
         let dev11: ID3D11Device = borrow(device, "device")?;
-        let ctx11: ID3D11DeviceContext = borrow(context, "device_context")?;
-        let dev5: ID3D11Device5 = dev11.cast().map_err(|_| gpu_err("the D3D11 device has no shared fences (ID3D11Device5, D3D11.4)"))?;
-        let ctx4: ID3D11DeviceContext4 =
-            ctx11.cast().map_err(|_| gpu_err("the D3D11 device context has no fences (ID3D11DeviceContext4, D3D11.4)"))?;
-        let luid = dev11.cast::<IDXGIDevice>().and_then(|d| d.GetAdapter()).and_then(|a| a.GetDesc()).map_err(gpu_err)?.AdapterLuid;
-        let mut ctx = open_luid(luid)?;
+        let mut ctx = open_luid(d3d11_luid(&dev11)?)?;
         // FFmpeg never loads d3d12.dll for D3D11 frames: wgpu holds the only load and frees it
         // when its device drops, before the D3D12 objects held elsewhere (graph staging,
         // opened resources) are released, which then crash in D3D12Core.dll. Keep it loaded.
         let mut module = Default::default();
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, w!("d3d12.dll"), &mut module).map_err(gpu_err)?;
         let dev12 = raw_device(&ctx)?;
+        let d3d11 = D3d11::new(&dev12, dev11, context)?;
+        Arc::get_mut(&mut ctx).expect("new").d3d12 =
+            Some(Shared { device: Com(dev12), d3d11: Some(Mutex::new(d3d11)), to_d3d11: false, submit: Mutex::new(false) });
+        Ok(ctx)
+    }
+
+    /// A context on the caller's D3D12 device (as [`GpuContext::from_d3d12`]) that writes
+    /// its outputs into D3D11 frames of a D3D11 device on the same adapter, for
+    /// [`EffectGraph::process_d3d12_to_d3d11`]. Both devices must outlive the context.
+    ///
+    /// # Safety
+    /// `device` must be a valid `ID3D12Device *`; `device11` and `context11` a valid
+    /// `ID3D11Device *` and its immediate context.
+    pub unsafe fn from_d3d12_with_d3d11(device: *mut c_void, device11: *mut c_void, context11: *mut c_void) -> Result<Arc<Self>, Error> {
+        let theirs: ID3D12Device = borrow(device, "device")?;
+        let dev11: ID3D11Device = borrow(device11, "D3D11 device")?;
+        let luid = theirs.GetAdapterLuid();
+        let luid11 = d3d11_luid(&dev11)?;
+        if (luid.LowPart, luid.HighPart) != (luid11.LowPart, luid11.HighPart) {
+            return Err(gpu_err(
+                "the D3D11 device is on another adapter than the D3D12 device; open both on the same GPU \
+                 (e.g. -init_hw_device d3d11va=d11:N with the decoder's adapter N)",
+            ));
+        }
+        let mut ctx = open_luid(luid)?;
+        let ours = raw_device(&ctx)?;
+        if !same_object(&ours, &theirs) {
+            return Err(gpu_err(
+                "wgpu got another ID3D12Device for the adapter than the caller's (another D3D12 runtime, such as an Agility SDK, \
+                 is loaded?)",
+            ));
+        }
+        let d3d11 = D3d11::new(&ours, dev11, context11)?;
+        Arc::get_mut(&mut ctx).expect("new").d3d12 =
+            Some(Shared { device: Com(ours), d3d11: Some(Mutex::new(d3d11)), to_d3d11: true, submit: Mutex::new(false) });
+        Ok(ctx)
+    }
+}
+
+unsafe fn d3d11_luid(dev11: &ID3D11Device) -> Result<LUID, Error> {
+    Ok(dev11.cast::<IDXGIDevice>().and_then(|d| d.GetAdapter()).and_then(|a| a.GetDesc()).map_err(gpu_err)?.AdapterLuid)
+}
+
+impl D3d11 {
+    /// The D3D11 side of a context: the device's D3D11.4 interfaces and one fence made in
+    /// `dev12` and opened in D3D11.
+    unsafe fn new(dev12: &ID3D12Device, dev11: ID3D11Device, context: *mut c_void) -> Result<Self, Error> {
+        let ctx11: ID3D11DeviceContext = borrow(context, "device_context")?;
+        let dev5: ID3D11Device5 = dev11.cast().map_err(|_| gpu_err("the D3D11 device has no shared fences (ID3D11Device5, D3D11.4)"))?;
+        let ctx4: ID3D11DeviceContext4 =
+            ctx11.cast().map_err(|_| gpu_err("the D3D11 device context has no fences (ID3D11DeviceContext4, D3D11.4)"))?;
         let fence12: ID3D12Fence = dev12.CreateFence(0, D3D12_FENCE_FLAG_SHARED).map_err(gpu_err)?;
         let handle = dev12.CreateSharedHandle(&fence12, None, GENERIC_ALL.0, PCWSTR::null()).map_err(gpu_err)?;
         let mut fence11: Option<ID3D11Fence> = None;
@@ -217,11 +266,7 @@ impl GpuContext {
         let _ = CloseHandle(handle);
         opened.map_err(|e| gpu_err(format!("cannot open the shared fence in D3D11: {e}")))?;
         let fence11 = fence11.ok_or_else(|| gpu_err("no shared fence"))?;
-        let d3d11 =
-            D3d11 { context: Com(ctx4), device: Com(dev11), fence12: Com(fence12), fence11: Com(fence11), value: 0, opened: Vec::new() };
-        Arc::get_mut(&mut ctx).expect("new").d3d12 =
-            Some(Shared { device: Com(dev12), d3d11: Some(Mutex::new(d3d11)), submit: Mutex::new(false) });
-        Ok(ctx)
+        Ok(D3d11 { context: Com(ctx4), device: Com(dev11), fence12: Com(fence12), fence11: Com(fence11), value: 0, opened: Vec::new() })
     }
 }
 
@@ -359,6 +404,51 @@ impl EffectGraph {
     pub unsafe fn process_d3d11(&mut self, inputs: &[D3d11Frame], outs: &[D3d11Frame], info: Option<&FrameInfo>) -> Result<(), Error> {
         process_d3d11(self, inputs, outs, info)
     }
+
+    /// Runs the graph on D3D12 input frames into D3D11 output frames (see
+    /// `process_d3d12_to_d3d11` in this module).
+    ///
+    /// # Safety
+    /// As for `process_d3d12_to_d3d11` in this module.
+    pub unsafe fn process_d3d12_to_d3d11(
+        &mut self,
+        inputs: &mut [D3d12Frame],
+        outs: &[D3d11Frame],
+        info: Option<&FrameInfo>,
+    ) -> Result<(), Error> {
+        process_d3d12_to_d3d11(self, inputs, outs, info)
+    }
+}
+
+/// D3D12 frames checked against the device, and their fences (deduplicated, highest
+/// wait value) as (fence, wait, signal = wait + 1).
+unsafe fn d3d12_res(
+    output: bool,
+    list: &[D3d12Frame],
+    dev: &ID3D12Device,
+    res: &mut Vec<Res>,
+    fences: &mut Vec<(ID3D12Fence, u64)>,
+) -> Result<(), Error> {
+    for (n, f) in list.iter().enumerate() {
+        let what = format!("{} {n}", if output { "output" } else { "input" });
+        let r: ID3D12Resource = borrow(f.resource, &format!("{what}: resource"))?;
+        res.push(check((f.format, f.width, f.height, r, f.subresource, f.color), output, &what, dev)?);
+        let fence: ID3D12Fence = borrow(f.fence, &format!("{what}: fence"))?;
+        match fences.iter_mut().find(|(x, _)| x.as_raw() == fence.as_raw()) {
+            Some((_, v)) => *v = (*v).max(f.fence_value),
+            None => fences.push((fence, f.fence_value)),
+        }
+    }
+    Ok(())
+}
+
+/// Stores the values signalled by the submission in the frames.
+fn store_fences<'a>(frames: impl Iterator<Item = &'a mut D3d12Frame>, sync: &[(ID3D12Fence, u64, u64)]) {
+    for f in frames {
+        if let Some((_, _, s)) = sync.iter().find(|(x, _, _)| x.as_raw() == f.fence) {
+            f.fence_value = *s;
+        }
+    }
 }
 
 /// Runs a stage (an effect graph) on D3D12 frames of the device the graph's context shares
@@ -380,6 +470,9 @@ pub(crate) unsafe fn process_d3d12<S: GpuStage + ?Sized>(
 ) -> Result<(), Error> {
     let ctx = stage.context().clone();
     let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D12 frames need a graph opened on a shared D3D12 device".into()))?;
+    if shared.to_d3d11 {
+        return Err(Error::Gpu("this graph writes D3D11 output frames; use process_d3d12_to_d3d11".into()));
+    }
     if shared.d3d11.is_some() {
         return Err(Error::Gpu("this graph runs on a D3D11 device; give it D3D11 frames".into()));
     }
@@ -390,27 +483,114 @@ pub(crate) unsafe fn process_d3d12<S: GpuStage + ?Sized>(
     let mut ins = Vec::new();
     let mut os = Vec::new();
     let mut fences: Vec<(ID3D12Fence, u64)> = Vec::new();
-    for (output, list, res) in [(false, &*inputs, &mut ins), (true, &*outs, &mut os)] {
-        for (n, f) in list.iter().enumerate() {
-            let what = format!("{} {n}", if output { "output" } else { "input" });
-            let r: ID3D12Resource = borrow(f.resource, &format!("{what}: resource"))?;
-            res.push(check((f.format, f.width, f.height, r, f.subresource, f.color), output, &what, dev)?);
-            let fence: ID3D12Fence = borrow(f.fence, &format!("{what}: fence"))?;
-            match fences.iter_mut().find(|(x, _)| x.as_raw() == fence.as_raw()) {
-                Some((_, v)) => *v = (*v).max(f.fence_value),
-                None => fences.push((fence, f.fence_value)),
-            }
-        }
-    }
+    d3d12_res(false, inputs, dev, &mut ins, &mut fences)?;
+    d3d12_res(true, outs, dev, &mut os, &mut fences)?;
     let sync: Vec<(ID3D12Fence, u64, u64)> = fences.into_iter().map(|(f, v)| (f, v, v + 1)).collect();
     let index = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync)?;
     stage.interop().dx.last = Some(index);
-    for f in inputs.iter_mut().chain(outs.iter_mut()) {
-        if let Some((_, _, s)) = sync.iter().find(|(x, _, _)| x.as_raw() == f.fence) {
-            f.fence_value = *s;
-        }
-    }
+    store_fences(inputs.iter_mut().chain(outs.iter_mut()), &sync);
     Ok(())
+}
+
+/// A D3D11 frame as a D3D12 resource: shareable textures opened in place, other inputs
+/// copied on the immediate context into a shared texture of gpufx (pad `n`).
+unsafe fn d3d11_res<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    d11: &mut D3d11,
+    dev: &ID3D12Device,
+    f: &D3d11Frame,
+    n: usize,
+    output: bool,
+) -> Result<Res, Error> {
+    let what = format!("{} {n}", if output { "output" } else { "input" });
+    let tex: ID3D11Texture2D = borrow(f.texture, &format!("{what}: texture"))?;
+    let mut d = D3D11_TEXTURE2D_DESC::default();
+    tex.GetDesc(&mut d);
+    let shareable = d.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0 as u32 != 0;
+    let (resource, slice) = if shareable {
+        (d11.open(dev, &tex)?, f.array_slice)
+    } else if output {
+        return Err(Error::Frame(format!(
+            "{what}: D3D11 output frames must be shareable (D3D11_RESOURCE_MISC_SHARED_NTHANDLE); gpufx makes its own"
+        )));
+    } else {
+        // One copy into a shared texture of gpufx, on the immediate context.
+        let key = (f.width, f.height, d.Format.0);
+        let found = stage.interop().dx.staging.iter().position(|(pad, k, _, _)| *pad == n && *k == key);
+        let i = match found {
+            Some(i) => i,
+            None => {
+                stage.interop().dx.staging.retain(|(pad, _, _, _)| *pad != n);
+                let desc = D3D11_TEXTURE2D_DESC {
+                    Width: f.width,
+                    Height: f.height,
+                    MipLevels: 1,
+                    ArraySize: 1,
+                    Format: d.Format,
+                    SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                    Usage: D3D11_USAGE_DEFAULT,
+                    BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                    CPUAccessFlags: 0,
+                    MiscFlags: (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32,
+                };
+                let mut staging: Option<ID3D11Texture2D> = None;
+                d11.device
+                    .0
+                    .CreateTexture2D(&desc, None, Some(&mut staging))
+                    .map_err(|e| gpu_err(format!("{what}: cannot make a shared D3D11 texture of DXGI_FORMAT {}: {e}", d.Format.0)))?;
+                let staging = staging.ok_or_else(|| gpu_err("no texture"))?;
+                let r = share(dev, &staging)?;
+                stage.interop().dx.staging.push((n, key, Com(staging), Com(r)));
+                stage.interop().dx.staging.len() - 1
+            }
+        };
+        let (_, _, staging, r) = &stage.interop().dx.staging[i];
+        if d.MipLevels != 1 {
+            return Err(Error::Frame(format!("{what}: textures with {} mip levels are not supported", d.MipLevels)));
+        }
+        // Planar boxes must cover whole chroma samples.
+        debug_assert!(
+            f.format.plane_count() == 1 || (f.width.is_multiple_of(2) && f.height.is_multiple_of(2)),
+            "odd {}x{} box for a planar texture",
+            f.width,
+            f.height
+        );
+        let src = f.array_slice;
+        let region = D3D11_BOX { left: 0, top: 0, front: 0, right: f.width, bottom: f.height, back: 1 };
+        d11.context.0.CopySubresourceRegion(&staging.0, 0, 0, 0, 0, &tex, src, Some(&region));
+        (r.0.clone(), 0)
+    };
+    check((f.format, f.width, f.height, resource, slice, f.color), output, &what, dev)
+}
+
+/// One submission ordered after the D3D11 work queued so far and before the D3D11 work
+/// queued next (the shared fence), also waiting and signalling `sync`; returns once it is
+/// done on the GPU.
+#[allow(clippy::too_many_arguments)]
+unsafe fn run_dx12_d3d11<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    ctx: &Arc<GpuContext>,
+    shared: &Shared,
+    d11: &mut D3d11,
+    ins: &[Res],
+    outs: &[Res],
+    info: Option<&FrameInfo>,
+    mut sync: Vec<(ID3D12Fence, u64, u64)>,
+) -> Result<Vec<(ID3D12Fence, u64, u64)>, Error> {
+    let v = d11.value + 1;
+    d11.context.0.Signal(&d11.fence11.0, v).map_err(gpu_err)?;
+    d11.context.0.Flush();
+    d11.value = v;
+    sync.push((d11.fence12.0.clone(), v, v + 1));
+    run_dx12(stage, ctx, shared, ins, outs, info, &sync)?;
+    d11.value = v + 1;
+    // Wait on the CPU (null event): a wait queued on the immediate context is not seen
+    // by readers outside it, e.g. NVENC encoded stale pool textures (h264_nvenc on an RTX 4060).
+    d11.fence12.0.SetEventOnCompletion(v + 1, HANDLE::default()).map_err(gpu_err)?;
+    // Done already; keeps the order explicit for the D3D11 work queued next.
+    d11.context.0.Wait(&d11.fence11.0, v + 1).map_err(gpu_err)?;
+    sync.pop();
+    Ok(sync)
 }
 
 /// Runs the graph on D3D11 frames of the device the graph's context was made for
@@ -430,6 +610,9 @@ pub(crate) unsafe fn process_d3d11<S: GpuStage + ?Sized>(
 ) -> Result<(), Error> {
     let ctx = stage.context().clone();
     let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D11 frames need a graph opened on a D3D11 device".into()))?;
+    if shared.to_d3d11 {
+        return Err(Error::Gpu("this graph reads D3D12 input frames; use process_d3d12_to_d3d11".into()));
+    }
     let mut d11 = shared
         .d3d11
         .as_ref()
@@ -439,84 +622,52 @@ pub(crate) unsafe fn process_d3d11<S: GpuStage + ?Sized>(
     let dev = &shared.device.0;
     let mut ins = Vec::new();
     let mut os = Vec::new();
-    for (output, list, res) in [(false, inputs, &mut ins), (true, outs, &mut os)] {
-        for (n, f) in list.iter().enumerate() {
-            let what = format!("{} {n}", if output { "output" } else { "input" });
-            let tex: ID3D11Texture2D = borrow(f.texture, &format!("{what}: texture"))?;
-            let mut d = D3D11_TEXTURE2D_DESC::default();
-            tex.GetDesc(&mut d);
-            let shareable = d.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0 as u32 != 0;
-            let (resource, slice) = if shareable {
-                (d11.open(dev, &tex)?, f.array_slice)
-            } else if output {
-                return Err(Error::Frame(format!(
-                    "{what}: D3D11 output frames must be shareable (D3D11_RESOURCE_MISC_SHARED_NTHANDLE); gpufx makes its own"
-                )));
-            } else {
-                // One copy into a shared texture of gpufx, on the immediate context.
-                let key = (f.width, f.height, d.Format.0);
-                let found = stage.interop().dx.staging.iter().position(|(pad, k, _, _)| *pad == n && *k == key);
-                let i = match found {
-                    Some(i) => i,
-                    None => {
-                        stage.interop().dx.staging.retain(|(pad, _, _, _)| *pad != n);
-                        let desc = D3D11_TEXTURE2D_DESC {
-                            Width: f.width,
-                            Height: f.height,
-                            MipLevels: 1,
-                            ArraySize: 1,
-                            Format: d.Format,
-                            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                            Usage: D3D11_USAGE_DEFAULT,
-                            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-                            CPUAccessFlags: 0,
-                            MiscFlags: (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32,
-                        };
-                        let mut staging: Option<ID3D11Texture2D> = None;
-                        d11.device.0.CreateTexture2D(&desc, None, Some(&mut staging)).map_err(|e| {
-                            gpu_err(format!("{what}: cannot make a shared D3D11 texture of DXGI_FORMAT {}: {e}", d.Format.0))
-                        })?;
-                        let staging = staging.ok_or_else(|| gpu_err("no texture"))?;
-                        let r = share(dev, &staging)?;
-                        stage.interop().dx.staging.push((n, key, Com(staging), Com(r)));
-                        stage.interop().dx.staging.len() - 1
-                    }
-                };
-                let (_, _, staging, r) = &stage.interop().dx.staging[i];
-                if d.MipLevels != 1 {
-                    return Err(Error::Frame(format!("{what}: textures with {} mip levels are not supported", d.MipLevels)));
-                }
-                // Planar boxes must cover whole chroma samples.
-                debug_assert!(
-                    f.format.plane_count() == 1 || (f.width % 2 == 0 && f.height % 2 == 0),
-                    "odd {}x{} box for a planar texture",
-                    f.width,
-                    f.height
-                );
-                let src = f.array_slice;
-                let region = D3D11_BOX { left: 0, top: 0, front: 0, right: f.width, bottom: f.height, back: 1 };
-                d11.context.0.CopySubresourceRegion(&staging.0, 0, 0, 0, 0, &tex, src, Some(&region));
-                (r.0.clone(), 0)
-            };
-            res.push(check((f.format, f.width, f.height, resource, slice, f.color), output, &what, dev)?);
-        }
+    for (n, f) in inputs.iter().enumerate() {
+        ins.push(d3d11_res(stage, &mut d11, dev, f, n, false)?);
     }
-    // D3D11 work so far, then gpufx, then what D3D11 queues next.
-    let v = d11.value + 1;
-    d11.context.0.Signal(&d11.fence11.0, v).map_err(gpu_err)?;
-    d11.context.0.Flush();
-    d11.value = v;
-    let sync = [(d11.fence12.0.clone(), v, v + 1)];
-    let run = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync);
-    if run.is_ok() {
-        d11.value = v + 1;
-        // Wait on the CPU (null event): a wait queued on the immediate context is not seen
-        // by readers outside it, e.g. NVENC encoded stale pool textures (h264_nvenc on an RTX 4060).
-        d11.fence12.0.SetEventOnCompletion(v + 1, HANDLE::default()).map_err(gpu_err)?;
-        // Done already; keeps the order explicit for the D3D11 work queued next.
-        d11.context.0.Wait(&d11.fence11.0, v + 1).map_err(gpu_err)?;
+    for (n, f) in outs.iter().enumerate() {
+        os.push(d3d11_res(stage, &mut d11, dev, f, n, true)?);
     }
-    run.map(|_| ())
+    run_dx12_d3d11(stage, &ctx, shared, &mut d11, &ins, &os, info, Vec::new()).map(|_| ())
+}
+
+/// Runs the graph on D3D12 input frames of the shared D3D12 device into shareable D3D11
+/// output frames of the D3D11 device on the same adapter, the context being made by
+/// [`GpuContext::from_d3d12_with_d3d11`]. The submission waits for every input's fence at
+/// its value and signals one more (`fence_value` is updated), and is ordered with the
+/// D3D11 immediate context as in `process_d3d11`. Returns once the effects are done on the
+/// GPU, so any reader of the outputs (NVENC, QSV) sees them.
+///
+/// # Safety
+/// As for `process_d3d12` for the inputs and `process_d3d11` for the outputs (the caller
+/// holds the D3D11 immediate context's lock).
+pub(crate) unsafe fn process_d3d12_to_d3d11<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    inputs: &mut [D3d12Frame],
+    outs: &[D3d11Frame],
+    info: Option<&FrameInfo>,
+) -> Result<(), Error> {
+    let ctx = stage.context().clone();
+    let shared = ctx
+        .d3d12
+        .as_ref()
+        .filter(|s| s.to_d3d11)
+        .ok_or_else(|| Error::Gpu("D3D12 to D3D11 frames need a graph opened with from_d3d12_with_d3d11".into()))?;
+    let mut d11 = shared.d3d11.as_ref().ok_or_else(|| gpu_err("no D3D11 device"))?.lock().unwrap_or_else(|p| p.into_inner());
+    // An earlier submission (process_d3d12 style) is waited for by run_dx12_d3d11 already;
+    // nothing is left pending here.
+    let dev = &shared.device.0;
+    let mut ins = Vec::new();
+    let mut fences: Vec<(ID3D12Fence, u64)> = Vec::new();
+    d3d12_res(false, inputs, dev, &mut ins, &mut fences)?;
+    let mut os = Vec::new();
+    for (n, f) in outs.iter().enumerate() {
+        os.push(d3d11_res(stage, &mut d11, dev, f, n, true)?);
+    }
+    let sync: Vec<(ID3D12Fence, u64, u64)> = fences.into_iter().map(|(f, v)| (f, v, v + 1)).collect();
+    let sync = run_dx12_d3d11(stage, &ctx, shared, &mut d11, &ins, &os, info, sync)?;
+    store_fences(inputs.iter_mut(), &sync);
+    Ok(())
 }
 
 /// One submission: barriers to the states needed, copies into gpufx textures, the

@@ -13,8 +13,8 @@ Filter liên quan: [gpufx_upload / gpufx_download](gpufx_transfer-vi.md), [gpufx
 ## Cú pháp
 
 ```
-gpufx=graph='<zip|thư mục>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off]
-gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off]
+gpufx=graph='<zip|thư mục>[=k=v[:k=v...]][|<zip>[=k=v...]...]'[:backend=auto|vulkan|dx12][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off][:out_api=auto|d3d11]
+gpufx=graph='[0]split[a][b]; [a]x.zip[c]; [c][b]y.zip=k=v[out]'[:backend=...][:shortest=0|1][:out_format=<pix_fmt>[|<pix_fmt>...]][:passthrough=auto|off][:out_api=auto|d3d11]
 ```
 
 | Dạng | Ví dụ | Ý nghĩa |
@@ -39,6 +39,7 @@ Trên dòng lệnh, bọc cả giá trị `graph=` trong `'...'` để bảo v�
 | `shortest` | bool | `0` | `0`, `1` | `0`: chỉ input 0 quyết định điểm kết thúc (input khác giữ frame cuối, và hiện frame trống trước frame đầu của nó). `1`: output kết thúc khi một input bất kỳ kết thúc |
 | `out_format` | chuỗi | không có (chọn theo input) | tên một pixel format của FFmpeg, hoặc mỗi output pad một tên, cách nhau bằng `\|` | Ép format của các output (`sw_format` của GPU frame). Một tên thì áp cho mọi output (`out_format=rgba`); nhiều tên thì theo thứ tự output pad (`out_format=yuva420p\|nv12`), mục rỗng giữ mặc định của pad đó (`out_format=\|nv12`). Mỗi format phải là format libgpufx ghi được và device lưu được, nếu không cấu hình lỗi. Lỗi: `unknown pixel format 'x'`, `has 3 entries` (khác 1 và khác số output pad) |
 | `passthrough` | int (enum) | `auto` | `auto`, `off` | Khi `enable=` tắt filter: `auto` gắn nhãn lại texture input thành frame output, không copy GPU, nếu pixel không đổi và filter kế tiếp là `gpufx`, `gpufx_download` hoặc `hwdownload`; `off` luôn copy |
+| `out_api` | int (enum) | `auto` | `auto`, `d3d11` | API của frame output. `auto`: theo input. `d3d11`: input D3D12 (`-hwaccel d3d12va`), output là texture D3D11 shared của `-filter_hw_device` (device `d3d11va` cùng adapter), để encoder D3D11 (`h264_nvenc`, `h264_qsv` qua `hwmap=derive_device=qsv`) nhận thẳng, không cần `hwdownload`. Chế độ này tắt passthrough. Lỗi: thiếu `-filter_hw_device` D3D11, input không phải D3D12, khác adapter |
 | `bypass` | int (enum) | `0` | `0`, `auto` | Input được chuyển tiếp khi filter bị `enable=` tắt: `0` là input pad nguồn của từng output, `auto` là pad đó cho tới khi filter được bật một frame, sau đó là input pad cuối. Pad được chọn phải cùng size với output, nếu không `EINVAL` |
 | `enable` | string (expression) | không có | expression timeline của FFmpeg | Option timeline chung của FFmpeg (`AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL`): bằng 0 thì filter đi đường disabled mô tả ở `passthrough`/`bypass`. Khác với `enable=` inline của một effect |
 

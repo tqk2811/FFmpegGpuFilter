@@ -41,6 +41,10 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
 - **D3D12 and D3D11 frames** (Windows): `AV_PIX_FMT_D3D12` frames (`-init_hw_device d3d12va`) are processed in
   place on FFmpeg's own `ID3D12Device`, synchronised with their fences; `AV_PIX_FMT_D3D11` frames run on the D3D12
   device of the same adapter through shared NT handles (outputs without a copy, other inputs with one GPU copy).
+  `out_api=d3d11` turns D3D12 input frames into D3D11 output frames of `-filter_hw_device`, so a D3D12 decoder feeds
+  D3D11 encoders without `hwdownload`:
+  `ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 -hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -i in.mp4 -vf "gpufx=graph=invert.zip:out_api=d3d11" -c:v h264_nvenc out.mp4`
+  (QSV: append `,hwmap=derive_device=qsv,format=qsv` and use `-c:v h264_qsv`).
   nv12 and p010le. Tested on NVIDIA RTX 4060 Laptop and Intel UHD Graphics (Windows 11); CI only builds them.
 - Optional on-disk shader cache: `GPUFX_SHADER_CACHE=<dir>` (Vulkan pipeline cache; D3D12 DXIL when
   `dxcompiler.dll` is on the DLL search path). `gpufx pack --precompile` puts D3D12 shaders in a package, used only

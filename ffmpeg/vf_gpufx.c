@@ -23,7 +23,9 @@
  * D3D12 frames (hwupload on -init_hw_device d3d12va) are processed on FFmpeg's own
  * ID3D12Device in the same way, synchronised with their fences. D3D11 frames run on the
  * D3D12 device of the same adapter: the output frames gpufx makes are shared textures
- * (no copy), inputs from elsewhere are copied once on the GPU.
+ * (no copy), inputs from elsewhere are copied once on the GPU. With out_api=d3d11, D3D12
+ * inputs are read on the D3D12 device and the outputs are such shared D3D11 textures of
+ * -filter_hw_device (a d3d11va device on the same adapter), for D3D11 encoders.
  * VideoToolbox frames (macOS: hwupload on -init_hw_device videotoolbox, or the decoders)
  * are read and written in place through their IOSurfaces on the system's Metal device;
  * without a fence to hand on, each event returns once the GPU is done.
@@ -83,6 +85,12 @@ enum { VAR_T, VAR_N, VAR_W, VAR_H, VAR_A, VAR_SAR, VAR_DAR, VAR_NB };
 enum {
     PASSTHROUGH_OFF,  /* always the GPU bypass into the output's own frames */
     PASSTHROUGH_AUTO, /* the input's texture relabelled as an output frame when nothing would change (see passthrough_ok) */
+};
+
+/* out_api option: the API of the output frames. */
+enum {
+    OUT_API_AUTO,  /* the API of the inputs */
+    OUT_API_D3D11, /* D3D11 frames of -filter_hw_device from D3D12 inputs (D3D11 encoders: NVENC, QSV) */
 };
 
 typedef struct ParamExpr {
@@ -145,6 +153,10 @@ typedef struct GpufxContext {
     /* GPU frames: every output and GPU input is hw_fmt (Vulkan, D3D12, D3D11 or VideoToolbox). */
     enum AVPixelFormat hw_fmt;
     AVBufferRef *hw_device; /* the device libgpufx runs on, held while it does */
+    int out_api;                   /* OUT_API_* */
+    /* Outputs: out_hw_fmt frames of out_device; hw_fmt / hw_device but with out_api=d3d11. */
+    enum AVPixelFormat out_hw_fmt;
+    AVBufferRef *out_device;
     enum AVPixelFormat *hw_in_fmt; /* sw_format of each input (of its upload frames for software) */
     /* Software inputs, uploaded by the filter itself on the device: */
     AVBufferRef **up_frames; /* frames context of input i, NULL for an input of GPU frames */
@@ -687,6 +699,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_freep(&s->up_rgba);
     /* After the effect: libgpufx runs on this device until it is freed. */
     av_buffer_unref(&s->hw_device);
+    av_buffer_unref(&s->out_device);
 }
 
 /* Reuses *frame when it already is a w x h frame of format fmt. */
@@ -1261,9 +1274,35 @@ static int config_d3d(AVFilterContext *ctx)
         AVD3D12VADeviceContext *hwctx = dev->hwctx;
         GpufxD3D12Device d = { hwctx->device };
 
-        if (gpufx_effect_use_d3d12(s->fx, &d) < 0)
-            return gpufx_error(ctx, "Cannot use the D3D12 device");
-        ret = 0;
+        if (s->out_api == OUT_API_D3D11) {
+#if CONFIG_D3D11VA
+            AVHWDeviceContext *fd = ctx->hw_device_ctx ? (AVHWDeviceContext *)ctx->hw_device_ctx->data : NULL;
+            AVD3D11VADeviceContext *h11;
+            GpufxD3D11Device d11;
+
+            if (!fd || fd->type != AV_HWDEVICE_TYPE_D3D11VA) {
+                av_log(ctx, AV_LOG_ERROR, "out_api=d3d11 writes D3D11 frames of -filter_hw_device, which "
+                       "is %s; add -init_hw_device d3d11va=d11:N -filter_hw_device d11 (N: the adapter "
+                       "the input is decoded on).\n", fd ? av_hwdevice_get_type_name(fd->type) : "not set");
+                return AVERROR(EINVAL);
+            }
+            h11 = fd->hwctx;
+            d11.device         = h11->device;
+            d11.device_context = h11->device_context;
+            if (gpufx_effect_use_d3d12_to_d3d11(s->fx, &d, &d11) < 0)
+                return gpufx_error(ctx, "Cannot use the D3D12 device with D3D11 outputs");
+            if (!(s->out_device = av_buffer_ref(ctx->hw_device_ctx)))
+                return AVERROR(ENOMEM);
+            ret = 0;
+#else
+            av_log(ctx, AV_LOG_ERROR, "out_api=d3d11: this build has no D3D11 frames.\n");
+            return AVERROR(ENOSYS);
+#endif
+        } else {
+            if (gpufx_effect_use_d3d12(s->fx, &d) < 0)
+                return gpufx_error(ctx, "Cannot use the D3D12 device");
+            ret = 0;
+        }
     }
 #endif
 #if CONFIG_D3D11VA
@@ -1289,6 +1328,8 @@ static int config_d3d(AVFilterContext *ctx)
     if (!(s->hw_device = av_buffer_ref(ref)))
         return AVERROR(ENOMEM);
     av_log(ctx, AV_LOG_VERBOSE, "%s frames on %s\n", api_name(s->hw_fmt), gpufx_effect_device(s->fx));
+    if (s->out_hw_fmt != s->hw_fmt)
+        av_log(ctx, AV_LOG_VERBOSE, "Outputs: %s frames of -filter_hw_device\n", api_name(s->out_hw_fmt));
     return 0;
 }
 
@@ -1320,26 +1361,26 @@ static int config_d3d_output(AVFilterLink *outlink, unsigned k)
             listed = !strcmp(gpufx_effect_output_pad_format(s->fx, k, m), name);
         if (j >= 0 && s->out_fmts[k] != AV_PIX_FMT_NONE)
             break; /* out_format: that format or nothing */
-        if (!listed || (j >= 0 && fmt == want) || !sw_format_ok(s->hw_fmt, fmt))
+        if (!listed || (j >= 0 && fmt == want) || !sw_format_ok(s->out_hw_fmt, fmt))
             continue;
         /* Storage first; then frames written by a copy (VideoToolbox: one kind of frames). */
-        for (int uav = 1; uav >= (s->hw_fmt == AV_PIX_FMT_VIDEOTOOLBOX); uav--) {
-            AVBufferRef *ref = av_hwframe_ctx_alloc(s->hw_device);
+        for (int uav = 1; uav >= (s->out_hw_fmt == AV_PIX_FMT_VIDEOTOOLBOX); uav--) {
+            AVBufferRef *ref = av_hwframe_ctx_alloc(s->out_device);
             AVHWFramesContext *fc;
 
             if (!ref)
                 return AVERROR(ENOMEM);
             fc            = (AVHWFramesContext *)ref->data;
-            fc->format    = s->hw_fmt;
+            fc->format    = s->out_hw_fmt;
             fc->sw_format = fmt;
             fc->width     = outlink->w;
             fc->height    = outlink->h;
 #if CONFIG_D3D12VA
-            if (s->hw_fmt == AV_PIX_FMT_D3D12 && uav)
+            if (s->out_hw_fmt == AV_PIX_FMT_D3D12 && uav)
                 ((AVD3D12VAFramesContext *)fc->hwctx)->resource_flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 #endif
 #if CONFIG_D3D11VA
-            if (s->hw_fmt == AV_PIX_FMT_D3D11) {
+            if (s->out_hw_fmt == AV_PIX_FMT_D3D11) {
                 AVD3D11VAFramesContext *h = fc->hwctx;
                 h->BindFlags = D3D11_BIND_SHADER_RESOURCE | (uav ? D3D11_BIND_UNORDERED_ACCESS : 0);
                 h->MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
@@ -1363,13 +1404,13 @@ static int config_d3d_output(AVFilterLink *outlink, unsigned k)
             }
             if (!ref) {
                 av_log(ctx, AV_LOG_VERBOSE, "No %s%s frames of %s for output '%s'.\n",
-                       uav ? "storage " : "", api_name(s->hw_fmt), name, ctx->output_pads[k].name);
+                       uav ? "storage " : "", api_name(s->out_hw_fmt), name, ctx->output_pads[k].name);
                 continue;
             }
             if (!uav)
                 av_log(ctx, AV_LOG_VERBOSE, "Output '%s': the device makes no storage %s frames of %s; "
                        "the result is copied into them on the GPU.\n", ctx->output_pads[k].name,
-                       api_name(s->hw_fmt), name);
+                       api_name(s->out_hw_fmt), name);
             av_buffer_unref(&ff_filter_link(outlink)->hw_frames_ctx);
             ff_filter_link(outlink)->hw_frames_ctx = ref;
             return 0;
@@ -1378,12 +1419,12 @@ static int config_d3d_output(AVFilterLink *outlink, unsigned k)
     if (s->out_fmts[k] != AV_PIX_FMT_NONE) {
         av_log(ctx, AV_LOG_ERROR, "Output '%s': out_format=%s cannot be written into %s frames "
                "(%s).\n", ctx->output_pads[k].name,
-               av_get_pix_fmt_name(s->out_fmts[k]), api_name(s->hw_fmt), sw_format_list(s->hw_fmt));
+               av_get_pix_fmt_name(s->out_fmts[k]), api_name(s->out_hw_fmt), sw_format_list(s->out_hw_fmt));
         return AVERROR(ENOSYS);
     }
     av_log(ctx, AV_LOG_ERROR, "Output '%s': no format the effect outputs can be written into %s "
            "frames on the GPU (%s).\n", ctx->output_pads[k].name,
-           api_name(s->hw_fmt), sw_format_list(s->hw_fmt));
+           api_name(s->out_hw_fmt), sw_format_list(s->out_hw_fmt));
     return AVERROR(ENOSYS);
 }
 
@@ -1474,6 +1515,58 @@ static int process_d3d11(AVFilterContext *ctx, const GpufxFrameInfo *info)
 }
 #endif
 
+#if CONFIG_D3D12VA && CONFIG_D3D11VA
+/*
+ * One event of out_api=d3d11: D3D12 inputs as in process_d3d12() (their new fence values
+ * stored), D3D11 outputs of out_device as in process_d3d11(), under its device lock.
+ */
+static int process_d3d12_to_d3d11(AVFilterContext *ctx, const GpufxFrameInfo *info)
+{
+    GpufxContext *s = ctx->priv;
+    AVD3D11VADeviceContext *hwctx = ((AVHWDeviceContext *)s->out_device->data)->hwctx;
+    const unsigned total = s->nb_inputs + s->nb_outputs;
+    int ret;
+
+    for (unsigned n = 0; n < total; n++) {
+        const AVFrame *f = event_frame(s, n);
+
+        if (n < s->nb_inputs) {
+            AVD3D12VAFrame *d = (AVD3D12VAFrame *)f->data[0];
+            GpufxD3D12Frame *g = &s->d12_in[n];
+
+            if (!(g->format = d3d_color(ctx, f, &g->color, ctx->input_pads[n].name)))
+                return AVERROR(ENOSYS);
+            g->width       = f->width;
+            g->height      = f->height;
+            g->resource    = d->texture;
+            g->subresource = d->subresource_index;
+            g->fence       = d->sync_ctx.fence;
+            g->fence_value = d->sync_ctx.fence_value;
+        } else {
+            GpufxD3D11Frame *g = &s->d11_out[n - s->nb_inputs];
+
+            if (!(g->format = d3d_color(ctx, f, &g->color, ctx->output_pads[n - s->nb_inputs].name)))
+                return AVERROR(ENOSYS);
+            g->width       = f->width;
+            g->height      = f->height;
+            g->texture     = f->data[0];
+            g->array_slice = (uint32_t)(intptr_t)f->data[1];
+        }
+    }
+    hwctx->lock(hwctx->lock_ctx);
+    ret = gpufx_effect_process_d3d12_to_d3d11(s->fx, s->d12_in, s->nb_inputs, s->d11_out, s->nb_outputs, info);
+    hwctx->unlock(hwctx->lock_ctx);
+    if (ret < 0)
+        return gpufx_error(ctx, info ? "Processing failed" : "Conversion failed");
+    for (unsigned n = 0; n < s->nb_inputs; n++) {
+        AVD3D12VAFrame *d = (AVD3D12VAFrame *)event_frame(s, n)->data[0];
+
+        d->sync_ctx.fence_value = FFMAX(d->sync_ctx.fence_value, s->d12_in[n].fence_value);
+    }
+    return 0;
+}
+#endif
+
 #if CONFIG_VIDEOTOOLBOX
 /*
  * One event on VideoToolbox frames (CVPixelBufferRef in data[3]). There is no fence:
@@ -1549,6 +1642,10 @@ static int config_api(AVFilterContext *ctx)
         s->d12_out = av_calloc(s->nb_outputs, sizeof(*s->d12_out));
         if (!s->d12_in || !s->d12_out)
             return AVERROR(ENOMEM);
+#if CONFIG_D3D11VA
+        if (s->out_hw_fmt == AV_PIX_FMT_D3D11 && !(s->d11_out = av_calloc(s->nb_outputs, sizeof(*s->d11_out))))
+            return AVERROR(ENOMEM);
+#endif
         return config_d3d(ctx);
 #endif
 #if CONFIG_D3D11VA
@@ -1577,7 +1674,7 @@ static int config_api_output(AVFilterLink *outlink, unsigned k)
 {
     GpufxContext *s = outlink->src->priv;
 
-    switch (s->hw_fmt) {
+    switch (s->out_hw_fmt) {
 #if CONFIG_VULKAN
     case AV_PIX_FMT_VULKAN: return config_vulkan_output(outlink, k);
 #endif
@@ -1799,7 +1896,12 @@ static int process_hw(AVFilterContext *ctx, const GpufxFrameInfo *info)
     case AV_PIX_FMT_VULKAN: return process_vulkan(ctx, info);
 #endif
 #if CONFIG_D3D12VA
+#if CONFIG_D3D11VA
+    case AV_PIX_FMT_D3D12:  return s->out_hw_fmt == AV_PIX_FMT_D3D11 ? process_d3d12_to_d3d11(ctx, info)
+                                                                  : process_d3d12(ctx, info);
+#else
     case AV_PIX_FMT_D3D12:  return process_d3d12(ctx, info);
+#endif
 #endif
 #if CONFIG_D3D11VA
     case AV_PIX_FMT_D3D11:  return process_d3d11(ctx, info);
@@ -2042,6 +2144,8 @@ static const char *passthrough_ok(AVFilterContext *ctx)
 
     if (s->passthrough == PASSTHROUGH_OFF)
         return "passthrough=off";
+    if (s->out_hw_fmt != s->hw_fmt)
+        return "out_api: the outputs are frames of another API";
     for (unsigned k = 0; k < s->nb_outputs; k++) {
         AVFilterLink *ol = ctx->outputs[k];
         AVBufferRef *out_frames = ff_filter_link(ol)->hw_frames_ctx;
@@ -2381,6 +2485,9 @@ static int query_formats(const AVFilterContext *ctx,
         if (fmt != AV_PIX_FMT_NONE && hw_ok(fmt))
             out_hw = fmt;
     }
+    /* out_api=d3d11: D3D11 frames whatever the device (config_d3d() checks it). */
+    if (s->out_api == OUT_API_D3D11 && hw_ok(AV_PIX_FMT_D3D11))
+        out_hw = AV_PIX_FMT_D3D11;
     for (unsigned k = 0; k < s->nb_outputs; k++) {
         if ((ret = ff_formats_ref(ff_make_format_list(out_alpha), &cfg_out[k]->alpha_modes)) < 0)
             return ret;
@@ -2440,7 +2547,8 @@ static int config_inputs(AVFilterContext *ctx)
 
         while (!(av_pix_fmt_desc_get(ctx->inputs[g]->format)->flags & AV_PIX_FMT_FLAG_HWACCEL))
             g++;
-        if (ff != AV_PIX_FMT_NONE && hw_ok(ff) && ff != s->hw_fmt) {
+        if (ff != AV_PIX_FMT_NONE && hw_ok(ff) && ff != s->hw_fmt &&
+            !(s->out_api == OUT_API_D3D11 && s->hw_fmt == AV_PIX_FMT_D3D12 && ff == AV_PIX_FMT_D3D11)) {
             av_log(ctx, AV_LOG_ERROR, "Input '%s' has %s frames but -filter_hw_device is a %s device; "
                    "gpufx runs on one device. Set -filter_hw_device to the device the input is decoded "
                    "on (its -hwaccel_device / -init_hw_device), or hwdownload the input.\n",
@@ -2472,11 +2580,21 @@ static int config_inputs(AVFilterContext *ctx)
         s->hw_fmt = f;
         device = ctx->hw_device_ctx;
     }
+    s->out_hw_fmt = s->hw_fmt;
+    if (s->out_api == OUT_API_D3D11) {
+        if (s->hw_fmt != AV_PIX_FMT_D3D12 || !nb_hw || !hw_ok(AV_PIX_FMT_D3D11)) {
+            av_log(ctx, AV_LOG_ERROR, "out_api=d3d11 takes D3D12 input frames (-hwaccel d3d12va, "
+                   "hwupload on a d3d12va device) in a build with D3D11 frames; the inputs are %s frames.\n",
+                   nb_hw ? api_name(s->hw_fmt) : "software");
+            return AVERROR(EINVAL);
+        }
+        s->out_hw_fmt = AV_PIX_FMT_D3D11;
+    }
     for (unsigned k = 0; k < s->nb_outputs; k++) {
-        if (ctx->outputs[k]->format != s->hw_fmt) {
+        if (ctx->outputs[k]->format != s->out_hw_fmt) {
             av_log(ctx, AV_LOG_ERROR, "Output '%s' has %s frames but gpufx runs on %s frames here; "
                    "use one GPU API for the inputs, the outputs and -filter_hw_device.\n",
-                   ctx->output_pads[k].name, api_name(ctx->outputs[k]->format), api_name(s->hw_fmt));
+                   ctx->output_pads[k].name, api_name(ctx->outputs[k]->format), api_name(s->out_hw_fmt));
             return AVERROR(EINVAL);
         }
     }
@@ -2492,6 +2610,8 @@ static int config_inputs(AVFilterContext *ctx)
             return ret;
     if ((ret = config_api(ctx)) < 0)
         return ret;
+    if (!s->out_device && !(s->out_device = av_buffer_ref(s->hw_device)))
+        return AVERROR(ENOMEM);
 
     /* Every input is configured by now: check them all against the manifest rules. */
     streams = av_calloc(s->nb_inputs, sizeof(*streams));
@@ -2703,6 +2823,9 @@ static const AVOption gpufx_options[] = {
     { "bypass", "input passed when disabled by enable=: 0, auto (input 0 until enabled once, then the last input)", OFFSET(bypass), AV_OPT_TYPE_INT, { .i64 = BYPASS_FIRST }, BYPASS_FIRST, BYPASS_AUTO, FLAGS, .unit = "bypass" },
         { "0",    "the input each output has the size of (input 0)",                          0, AV_OPT_TYPE_CONST, { .i64 = BYPASS_FIRST }, 0, 0, FLAGS, .unit = "bypass" },
         { "auto", "input 0 before the first enabled frame, the last input after it",          0, AV_OPT_TYPE_CONST, { .i64 = BYPASS_AUTO },  0, 0, FLAGS, .unit = "bypass" },
+    { "out_api", "API of the output frames: auto (the inputs'), d3d11 (D3D12 inputs, D3D11 frames of -filter_hw_device, for h264_nvenc/qsv)", OFFSET(out_api), AV_OPT_TYPE_INT, { .i64 = OUT_API_AUTO }, OUT_API_AUTO, OUT_API_D3D11, FLAGS, .unit = "out_api" },
+        { "auto",  "the API of the inputs",                                                  0, AV_OPT_TYPE_CONST, { .i64 = OUT_API_AUTO },  0, 0, FLAGS, .unit = "out_api" },
+        { "d3d11", "D3D11 frames of -filter_hw_device (a d3d11va device on the inputs' adapter)", 0, AV_OPT_TYPE_CONST, { .i64 = OUT_API_D3D11 }, 0, 0, FLAGS, .unit = "out_api" },
     { NULL }
 };
 
