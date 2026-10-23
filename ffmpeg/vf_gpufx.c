@@ -847,6 +847,33 @@ end:
     return ret;
 }
 
+/*
+ * The format output k is tried in first: out_format when given, else the format libgpufx
+ * picks from the format of the output's source input (that format for an output without a
+ * declared pixel_layout; for a declared one gray for y, yuva420p for yuva420, rgba for rgba,
+ * the input's own format when it is of that layout). libgpufx alone decides.
+ */
+static int output_want(AVFilterContext *ctx, unsigned k, enum AVPixelFormat *want)
+{
+    GpufxContext *s = ctx->priv;
+    const char *name;
+
+    if (s->out_fmts[k] != AV_PIX_FMT_NONE) {
+        *want = s->out_fmts[k];
+        return 0;
+    }
+    name = gpufx_effect_output_default_format(s->fx, k, NULL, av_get_pix_fmt_name(s->hw_in_fmt[s->source[k]]));
+    if (!name) {
+        av_log(ctx, AV_LOG_ERROR, "Output %u: no default format: %s\n", k, gpufx_last_error());
+        return AVERROR(EINVAL);
+    }
+    if ((*want = av_get_pix_fmt(name)) == AV_PIX_FMT_NONE) {
+        av_log(ctx, AV_LOG_ERROR, "Output %u: libgpufx picked '%s', unknown to FFmpeg\n", k, name);
+        return AVERROR(EINVAL);
+    }
+    return 0;
+}
+
 #if CONFIG_VULKAN
 /*
  * Vulkan frames. libgpufx runs on FFmpeg's own VkDevice (the device of the inputs'
@@ -966,33 +993,6 @@ static int config_vulkan(AVFilterContext *ctx)
         return AVERROR(ENOMEM);
     s->vk_queue_family = family;
     av_log(ctx, AV_LOG_VERBOSE, "Vulkan frames on %s\n", gpufx_effect_device(s->fx));
-    return 0;
-}
-
-/*
- * The format output k is tried in first: out_format when given, else the format libgpufx
- * picks from the format of the output's source input (that format for an output without a
- * declared pixel_layout; for a declared one gray for y, yuva420p for yuva420, rgba for rgba,
- * the input's own format when it is of that layout). libgpufx alone decides.
- */
-static int output_want(AVFilterContext *ctx, unsigned k, enum AVPixelFormat *want)
-{
-    GpufxContext *s = ctx->priv;
-    const char *name;
-
-    if (s->out_fmts[k] != AV_PIX_FMT_NONE) {
-        *want = s->out_fmts[k];
-        return 0;
-    }
-    name = gpufx_effect_output_default_format(s->fx, k, NULL, av_get_pix_fmt_name(s->hw_in_fmt[s->source[k]]));
-    if (!name) {
-        av_log(ctx, AV_LOG_ERROR, "Output %u: no default format: %s\n", k, gpufx_last_error());
-        return AVERROR(EINVAL);
-    }
-    if ((*want = av_get_pix_fmt(name)) == AV_PIX_FMT_NONE) {
-        av_log(ctx, AV_LOG_ERROR, "Output %u: libgpufx picked '%s', unknown to FFmpeg\n", k, name);
-        return AVERROR(EINVAL);
-    }
     return 0;
 }
 
