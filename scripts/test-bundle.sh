@@ -1043,6 +1043,73 @@ dx_skip() {
     fi
 }
 dx_hwdevs=$("$FF" -hide_banner -init_hw_device list 2>&1)
+# dx_psnr ENCODED REF: lowest PSNR of a frame of the encoded clip against the reference
+# frames (a stale frame, e.g. an encoder reading before gpufx is done, shows there).
+dx_psnr() {
+    "$FF" -hide_banner -nostdin -v error -i "$1" -i "$2" -an \
+        -lavfi "[0]format=yuv444p16le[a];[1]format=yuv444p16le[b];[a][b]psnr=stats_file=-" -f null - 2> /dev/null |
+        sed -n 's/.* psnr_avg:\([0-9.inf]*\).*/\1/p' | sed 's/^inf$/999/' | sort -n | head -n 1
+}
+# dx_encode NAME REF ARGS...: encode on the GPU (ARGS end with the output clip $CLIPS/enc.mp4),
+# then every frame well above noise against REF. An encoder this GPU lacks is a skip.
+dx_encode() {
+    name=$1 ref=$2; shift 2
+    rm -f "$CLIPS/enc.mp4"
+    # shellcheck disable=SC2086
+    if ! "$FF" -hide_banner -nostdin -v error -y "$@" > "$CLIPS/last.log" 2>&1; then
+        # Only "this GPU has no such encoder": any other error is a failure.
+        if grep -q "Driver does not support requested features\|No usable encoding profile\|no encode device\|Error creating a MFX session" "$CLIPS/last.log"; then
+            echo "  skip  $name ($(head -n1 "$CLIPS/last.log"))"
+        else fail "$name"; cat "$CLIPS/last.log"; fi
+        return 0
+    fi
+    DB=$(dx_psnr "$CLIPS/enc.mp4" "$ref")
+    if [ -n "$DB" ] && below 35 "$DB"; then pass "$name (lowest frame $DB dB)"
+    else fail "$name (lowest frame ${DB:-no} dB, want > 35)"; fi
+}
+# Decode -> gpufx -> encode without hwdownload/hwupload: -hwaccel d3d12va/d3d11va frames into
+# gpufx, its frames straight into the hardware encoders of that API (D3D12 encoders wait for
+# the fences; NVENC and QSV read D3D11 textures outside the immediate context, so gpufx
+# returns them done). NVIDIA's D3D12 encoder fails on B-frames (driver 617.42, also
+# without gpufx): -bf 0.
+dx_pipeline_tests() {
+    DEV="-init_hw_device $DXDEV -filter_hw_device dx"
+    ENC_OUT=$CLIPS/enc.mp4 M2=$CLIPS/pipe.mpg REFN=$CLIPS/encref.nut REF10=$CLIPS/encref10.mkv
+    if command -v cygpath >/dev/null; then
+        ENC_OUT=$(cygpath -m "$ENC_OUT") M2=$(cygpath -m "$M2") REFN=$(cygpath -m "$REFN") REF10=$(cygpath -m "$REF10")
+    fi
+    "$FF" -hide_banner -encoders > "$CLIPS/encoders.txt" 2>&1
+    DEC="-hwaccel $api -hwaccel_device dx -hwaccel_output_format $(echo "$API" | tr A-Z a-z) -extra_hw_frames 8"
+    # shellcheck disable=SC2086
+    if ! "$FF" -v error -y -i "$A" -an -c:v mpeg2video "$M2" > "$CLIPS/last.log" 2>&1 ||
+       ! gpu_ff $DEC -i "$M2" -frames:v 1 -vf hwdownload,format=nv12 -f null - > "$CLIPS/last.log" 2>&1; then
+        echo "  skip  $API: decode/encode pipeline (no mpeg2video $api decoding: $(head -n1 "$CLIPS/last.log"))"
+        return 0
+    fi
+    INV="gpufx=graph=$FX/ffmpeg/invert.zip"
+    gpu_ff -y -i "$M2" -an -vf "format=nv12,hwupload,$INV,hwdownload,format=nv12" -c:v rawvideo "$REFN" 2> "$CLIPS/last.log" ||
+        { fail "$API: pipeline reference frames"; cat "$CLIPS/last.log"; return 0; }
+    if [ "$API" = D3D12 ]; then encs="h264_d3d12va hevc_d3d12va av1_d3d12va"; else encs="h264_nvenc hevc_nvenc h264_qsv"; fi
+    for enc in $encs; do
+        if ! grep -qw $enc "$CLIPS/encoders.txt"; then echo "  skip  $API: $enc (not in this ffmpeg)"; continue; fi
+        # QSV takes D3D11 frames through hwmap.
+        vf=$INV; case $enc in *_qsv) vf="$INV,hwmap=derive_device=qsv,format=qsv" ;; esac
+        # shellcheck disable=SC2086
+        dx_encode "$API: $api decode -> gpufx -> $enc" "$REFN" \
+            -init_hw_device "$DXDEV" -filter_hw_device dx $DEC -i "$M2" -an -vf "$vf" -c:v $enc -bf 0 "$ENC_OUT"
+    done
+    # 10 bits: p010 frames from gpufx into hevc main10.
+    if [ "$API" = D3D12 ]; then enc=hevc_d3d12va; else enc=hevc_nvenc; fi
+    if grep -qw $enc "$CLIPS/encoders.txt"; then
+        V="gpufx=graph='$FX/ffmpeg/vignette.zip=strength=0.7'"
+        # NUT has no tag for raw p010le frames: lossless 10-bit ffv1 instead.
+        gpu_ff -y -i "$A" -an -vf "format=p010le,hwupload,$V,hwdownload,format=p010le,format=yuv420p10le" -c:v ffv1 "$REF10" 2> "$CLIPS/last.log" ||
+            { fail "$API: p010 reference frames"; cat "$CLIPS/last.log"; return 0; }
+        dx_encode "$API: p010 gpufx -> $enc main10" "$REF10" \
+            -init_hw_device "$DXDEV" -filter_hw_device dx -i "$A" -an \
+            -vf "format=p010le,hwupload,$V" -c:v $enc -profile:v main10 -bf 0 "$ENC_OUT"
+    fi
+}
 for api in d3d12va d3d11va; do
     API=$(echo "$api" | sed 's/va$//' | tr a-z A-Z)
     if ! grep -qw hwupload "$CLIPS/filters.txt"; then dx_skip "$API: this bundle has no hwupload"; continue; fi
@@ -1193,6 +1260,7 @@ for api in d3d12va d3d11va; do
             fi
         fi
     fi
+    dx_pipeline_tests
     DEV=$GPU
 done
 echo "  D3D frames tested:${dx_ran:- none}; skipped:${dx_skipped:- none}"

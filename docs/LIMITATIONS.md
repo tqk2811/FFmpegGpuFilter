@@ -46,7 +46,13 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
   FFmpeg's D3D12 upload does not wait for its fence.
 - **Limitation:** texture arrays, frames larger than the link size, outputs without UAV and D3D11 inputs that
   cannot be shared (`hwupload`, decoders) cost an extra GPU copy.
-- **Untested:** D3D decoders (`-hwaccel d3d12va` / `d3d11va`) feeding gpufx.
+- **Tested (RTX 4060 Laptop, Intel UHD):** `-hwaccel d3d12va` decoding -> gpufx -> `h264_d3d12va`/`hevc_d3d12va` (nv12,
+  p010 main10) with no `hwdownload`; the encoders take gpufx frames (with UAV) as they are. Add `-bf 0` on NVIDIA:
+  its D3D12 encoder fails on B-frames (driver 617.42, also without gpufx). `av1_d3d12va` is not supported by the
+  RTX 4060 Laptop driver.
+- **Tested:** `-hwaccel d3d11va` decoding -> gpufx -> `h264_nvenc`/`hevc_nvenc` (RTX 4060) and, through
+  `hwmap=derive_device=qsv,format=qsv`, `h264_qsv` (Intel UHD). NVENC and QSV read the textures outside the
+  immediate context, so gpufx waits on the CPU until its D3D11 outputs are done (no overlap with the next frame).
 
 ## VideoToolbox (macOS)
 
