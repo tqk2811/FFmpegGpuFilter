@@ -51,21 +51,61 @@ frames to be usable by `gpufx`, `gpufx_ai_framerate` and `gpufx_ai_upscale`, ope
 
 Neither filter supports the timeline (`enable`) or runtime commands.
 
-## Examples
+## Use cases & examples
+
+Mixing with the stock filters is allowed: `hwupload` into `gpufx_download`, `gpufx_upload` into `hwdownload`, and
+either of them next to `*_vulkan` filters.
+
+**Replace `hwupload` / `hwdownload` around GPU work (defaults).** Use it when the graph is software frames in,
+Vulkan filters (`gpufx`, `gpufx_ai_*`, `scale_vulkan`...), software frames out, especially on NVIDIA where the stock
+filters make the CPU wait for every copy.
 
 ```sh
-# Upload, two effects on the GPU, download
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
+```
 
-# Deeper pipelines for a slow disk or a busy GPU
+**`depth` (upload).** Raise it when the upload side stalls (frames arrive in bursts, a slow source or a busy GPU);
+each step costs one more staging buffer and one more pool frame. `depth=1` is the least pipelining.
+
+```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload=depth=6,gpufx=graph=sepia.zip,gpufx_download=latency=4,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload=depth=6,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
+```
 
-# Mixed with the stock filters
+**`latency` (download).** Raise it when the GPU is busy and the readback keeps waiting; the output is delayed by
+`latency` frames and flushed at the end. Use `latency=0` for live or sparse input, where a delayed frame is a
+problem.
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download=latency=4,format=nv12" out.mp4
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download=latency=0,format=nv12" out.mp4
+```
+
+**Pixel format (`out_format`).** `gpufx_upload` and `gpufx_download` have no `out_format` option: the Vulkan frames
+keep the input's format as `sw_format`, and `gpufx_download` gives software frames in that same format (follow it
+with `format=<sw_format>`). To change the format between GPU steps use the `out_format` option of `gpufx`, which
+also keeps separate `gpufx` filters in RGBA between them:
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip:out_format=rgba,gpufx=graph=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
+```
+
+**Mixed with the stock filters.** Use it to keep `scale_vulkan` and other `*_vulkan` filters in the same GPU chain,
+or to swap only one side while comparing speed with `hwupload` / `hwdownload`. The win64 bundle has no `scale_vulkan` (its FFmpeg has no `*_vulkan` filters), so the first command was not run there; it needs an FFmpeg built with that filter.
+
+```sh
 ffmpeg -init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 \
   -vf "format=nv12,gpufx_upload,scale_vulkan=1280:720,hwdownload,format=nv12" out.mp4
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,hwupload,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
 ```
+
+**Intel on Windows.** Use `gpufx_upload` instead of `hwupload` (FFmpeg 9's host image copies are broken there, see
+[INTEL_VULKAN.md](../../INTEL_VULKAN.md)); the commands above are unchanged.
 
 ## Limitations
 

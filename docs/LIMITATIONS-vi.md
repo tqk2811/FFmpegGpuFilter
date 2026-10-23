@@ -55,6 +55,11 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 - **Đã test:** decode `-hwaccel d3d11va` -> gpufx -> `h264_nvenc`/`hevc_nvenc` (RTX 4060) và, qua
   `hwmap=derive_device=qsv,format=qsv`, `h264_qsv` (Intel UHD). NVENC và QSV đọc texture ngoài immediate context, nên
   gpufx chờ trên CPU tới khi output D3D11 xong (không chồng lấn với frame sau).
+- **Hạn chế:** `out_api=d3d11` (input D3D12, output D3D11) cần một device D3D11 cùng adapter làm `-filter_hw_device`
+  (`-init_hw_device d3d11va=d11:N -filter_hw_device d11`); thiếu thì filter từ chối.
+- **Đã test:** `out_api=d3d11` với decode `-hwaccel d3d12va` -> gpufx -> `h264_nvenc`/`hevc_nvenc` (cả p010 main10)
+  trên RTX 4060 Laptop (2026-10-24).
+- **Chưa test:** `out_api=d3d11` -> `h264_qsv`: adapter 0 của máy test là NVIDIA nên đường QSV bị bỏ qua.
 
 ## VideoToolbox (macOS)
 

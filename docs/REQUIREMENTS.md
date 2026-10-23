@@ -14,6 +14,7 @@ families come from public vendor/Microsoft tables, not from tests here.
 | Resource binding tier | Tier 2 (Tier 1 adapters are skipped) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:243-251` |
 | Shader model | 5.1 (higher used when present) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:345-385` |
 | D3D11 frames | Windows 10 1703+ (`ID3D11Device5`, D3D11.4 shared fences) | `crates/gpufx-core/src/d3d12.rs:191-218` |
+| `out_api=d3d11` | A D3D11 device of the same adapter as the D3D12 one (`-init_hw_device d3d11va=d11:N -filter_hw_device d11`) | `ffmpeg/vf_gpufx.c` (error message of the filter) |
 | `dxcompiler.dll` | Optional: only the D3D12 DXIL shader cache | [Architecture](architecture/README.md) (shader cache, D3D12) |
 
 Example GPUs meeting FL 11_0 + tier 2 (from public D3D12 tier tables, *not verified* on hardware except the

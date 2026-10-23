@@ -55,3 +55,19 @@ Một lần chạy compute shader bên trong effect, khai báo trong `passes` c�
 ## Pad
 
 "Cổng" vào hoặc ra của một filter FFmpeg, nơi filtergraph nối luồng video: `[0]gpufx=...[c][m]` nối luồng `[0]` vào input pad và lấy hai output pad `[c]`, `[m]`. Mỗi pad đàm phán format riêng với filter nối với nó. Với `gpufx`, mỗi phần tử `inputs` của manifest là một input pad, mỗi phần tử `output` là một output pad (phần tử `repeat` nở thành N pad); với `graph=` thì mỗi `[N]` là một input pad và mỗi label không ai đọc là một output pad.
+
+## hwaccel
+
+Tuỳ chọn `-hwaccel` của ffmpeg: decode bằng phần cứng (`-hwaccel vulkan`, `d3d12va`, `d3d11va`). Kèm `-hwaccel_device` (device đã mở bằng `-init_hw_device`) và `-hwaccel_output_format` (giữ frame trên GPU thay vì tải về RAM), frame đã decode đi thẳng vào filter GPU như gpufx mà không qua `hwdownload`.
+
+## Multiplane
+
+Image Vulkan có nhiều plane (nv12: Y và UV) nằm trong cùng một `VkImage`, khác với kiểu mỗi plane một `VkImage` (`disable_multiplane=1`). Frame của decoder Vulkan và encoder Vulkan là multiplane; gpufx đọc/ghi qua một lần copy GPU mỗi plane.
+
+## Shared texture
+
+Texture D3D chia sẻ giữa hai device hoặc hai API qua shared NT handle. gpufx dùng nó để chạy frame D3D11 trên device D3D12 cùng adapter và để ghi frame output D3D11 khi dùng `out_api=d3d11`.
+
+## Fence
+
+Đối tượng đồng bộ GPU mang một giá trị tăng dần: bên ghi signal giá trị, bên đọc chờ tới giá trị đó. D3D12 và D3D11.4 có fence; Vulkan có tương đương là timeline semaphore. FFmpeg gắn fence vào frame D3D12 để encoder biết khi nào ghi xong.

@@ -43,20 +43,57 @@ gpufx_ai_upscale=model=<path>[:scale=<n>][:tile=<px>][:precision=auto|f32]
 
 No timeline support and no runtime commands.
 
-## Examples
+## Use cases & examples
+
+**Model (`model`).** Pick by content: `realesr-animevideov3.zip` for anime and cartoons (scales 2, 3, 4),
+`realesr-general-x4v3.zip` for live action and other general content (scale 4 only). Other `super_resolution`
+gpufx-nn packages work too; the filter does not start without `model`.
 
 ```sh
 # Anime 1080p -> 4K on Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12" out.mp4
 
-# Live action x4 on D3D12 (Windows)
+# Live action x4 on D3D12 (Windows); the general model only has scale 4
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
   -vf "format=nv12,hwupload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-general-x4v3.zip:scale=4,hwdownload,format=nv12" out.mp4
+```
 
-# Smaller tiles and f32, for a GPU with little memory or to check f16 output
+**`scale`.** Use it for the output size: 2 for 1080p to 4K, 4 for small sources. Ask for a scale the package does not
+have and the filter stops with an error listing the scales it has. A size change mid-stream needs
+`-reinit_filter 0` and the output frames follow the new size.
+
+**`tile` and `precision`.** Use `tile` on a GPU with little memory (or to bound memory use on 4K input): smaller tiles
+use less memory, the result does not depend on the tiling. Leave `0` otherwise. Use `precision=f32` to check
+the f16 output of `auto` or when f16 shows artefacts; it is slower.
+
+```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2:tile=256:precision=f32,gpufx_download,format=nv12" out.mp4
+```
+
+**Vulkan, D3D12, D3D11.** The filter takes the GPU frames of the device it runs on. Vulkan was the fastest in the
+measurements (see Limitations); it needs `disable_multiplane=1`, and `gpufx_upload` on Intel Windows. D3D12 and D3D11
+use `hwupload` / `hwdownload`, and D3D12 needs DXC for the shaders. The D3D11 form of the D3D12 command above is the
+same with a `d3d11va` device (`-init_hw_device d3d11va=dx -filter_hw_device dx`); the test bundle exercises the
+filter on D3D11, and this exact command line is not in it, but it ran on an RTX 4060 Laptop.
+
+**Chain with `gpufx` (stay on the GPU).** Upscale first, then effects at the new size, with one upload and one
+download for the whole chain:
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
+```
+
+**Encode on the GPU without a download.** The output is GPU frames, so a GPU encoder that accepts that frame type
+could take them directly (no `gpufx_download` / `hwdownload`). The test bundle does not cover this for this filter,
+so check the Vulkan case on your setup: the Vulkan output is storage images with multiplane disabled, and whether a given Vulkan
+encoder takes them is unverified. With a D3D12 device and a D3D12 encoder the form is below (run on an RTX 4060 Laptop; `-bf 0` because NVIDIA's D3D12 encoder fails on B-frames):
+
+```sh
+ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
+  -vf "format=nv12,hwupload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2" -c:v h264_d3d12va -bf 0 out.mp4
 ```
 
 The models are not in git: the release asset `gpufx-packages.zip` ships them in `gpufx_ai_upscale/` (with their licenses; the ffmpeg bundles do not), or fetch and
