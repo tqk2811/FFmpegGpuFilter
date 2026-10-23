@@ -49,21 +49,52 @@ Bước nhảy hơn 10000 output frame (nhảy timestamp, hoặc stream kết th
 
 Không hỗ trợ timeline, không có command lúc chạy.
 
-## Ví dụ
+## Use case và ví dụ
+
+**Mặc định (chỉ `model`).** Dùng để nhân đôi rate (12 lên 24, 30 lên 60); `fps` mặc định gấp đôi rate input. Rate
+output là cố định, nên input VFR được lấy mẫu lại theo lưới.
 
 ```sh
-# 12 fps -> 24 fps trên Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+```
 
-# Rate đích tuỳ ý, D3D12 (Windows)
+**`fps`.** Dùng khi cần rate đích cụ thể như rate broadcast, hoặc khi không biết rate input (lúc đó bắt buộc đặt
+`fps`). Rate nào cũng được, không chỉ bội số; đưa số hoặc phân số.
+
+```sh
+# 24000/1001 trên Vulkan (như trong bundle test)
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=24000/1001,hwdownload,format=nv12" out.mp4
+
+# 60000/1001 trên D3D12 (Windows)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
   -vf "format=nv12,hwupload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+```
 
+**`scene` (cắt cảnh).** Dùng để một cú cắt giữa hai shot không bị trộn: cặp frame có SSIM ở 32x32 thấp hơn `scene`
+thì được lặp lại, không nội suy. Trên anime, mặc định `0.2` vẫn trộn một số cú cắt giữa các shot có bố cục giống nhau;
+giá trị cao hơn như `0.4` bắt được nhiều hơn nhưng lặp frame ở một số cú zoom và flash rất nhanh. `scene=0` tắt phát
+hiện (mọi cặp đều được nội suy).
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0.4,gpufx_download,format=nv12" out.mp4
+```
+
+**`max_gap`.** Dùng với input VFR: cặp frame cách nhau hơn `max_gap` lần thời lượng frame input (khoảng trống thật,
+như đoạn dừng) thì được lặp lại, không nội suy. Tăng lên để nội suy qua khoảng trống lớn hơn.
+
+```sh
 # Không phát hiện cắt cảnh, nội suy qua khoảng trống tới 4 lần thời lượng frame
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
 ```
+
+**Vulkan hay D3D12.** Nên dùng Vulkan: nhanh hơn D3D12 và D3D11 khoảng 1,7 lần trong số đo (xem Giới hạn). D3D12 cần
+DXC cho shader của model, và `GPUFX_SHADER_CACHE` giữ lại shader đã compile. Trên Vulkan dùng `disable_multiplane=1`
+và `gpufx_upload` (bắt buộc trên Intel Windows). Tăng `extra_hw_frames` khi upload nếu filter cảnh báo có thể cần thêm
+frame.
 
 Model không nằm trong git: file release `gpufx-packages.zip` có sẵn trong `gpufx_ai_framerate/` (bundle ffmpeg không kèm), hoặc tải và convert bằng
 `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (ghi ra `build/packages/<filter>/`).

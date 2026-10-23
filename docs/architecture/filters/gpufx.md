@@ -259,3 +259,188 @@ ffmpeg $VK -i in.mp4 -vf "gpufx=graph=gaussian-blur.zip,gpufx=graph='gradient-ma
 # same result in one filter: one GPU submission
 ffmpeg $VK -i in.mp4 -vf "gpufx=graph='gaussian-blur.zip|gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
 ```
+
+## Use cases and examples
+
+One short use case and at least one command per feature. The sample packages are in `packages/gpufx/` (`ffmpeg/`,
+`standalone/`, `capcut/`, `tqk2811/`); the commands name a package as `vignette.zip` like the examples above, so
+replace it by the real path of the `.zip` or directory. Commands marked "taken from `scripts/test-bundle.sh`" have the
+same options as a test of that script; the others combine documented options and were run on Windows (RTX 4060 Laptop,
+Vulkan, D3D12, D3D11) with an H.264 `yuv420p` input. The software-input commands start with `format=nv12`: without it
+the output keeps the input's `yuv420p` and `hwdownload,format=nv12` fails with `Invalid output format nv12 for hwframe
+download`.
+
+```sh
+VK="-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk"
+DX12="-init_hw_device d3d12va=dx:0 -filter_hw_device dx"
+DEC12="-hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -extra_hw_frames 8"
+```
+
+### Single package and chain
+
+Use it to apply one look (vignette, blur, color grade). Put several effects in one `gpufx` with `|` so the frame stays on
+the GPU in a single submit (see the chain example above, `gaussian-blur.zip|gradient-map.zip=intensity=0.6`).
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph='vignette.zip=strength=0.7',hwdownload,format=nv12" out.mp4
+```
+
+### Multi-pad graph (`split`, several inputs and outputs)
+
+Use it when one clip feeds several branches (for example a blurred copy mixed with a graded copy), when an effect needs
+several inputs, or when an effect has more than one output. Labels connect the effects; `split` copies a label for free.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=0.5[out]',hwdownload,format=nv12" out.mp4
+```
+
+Several outputs: every output pad of the graph is one output of the filter, so each is connected on its own in
+`-filter_complex`. `luma-matte.zip` has two outputs (`color`, rgba, and `matte`, in the input's format), so
+`[0]luma-matte.zip[c][m]` gives two output pads; the rules are in [Pads and graph rules](#pads-and-graph-rules).
+
+```sh
+ffmpeg $VK -i in.mp4 -filter_complex "format=nv12,gpufx=graph='[0]luma-matte.zip[c][m]'[c][m]; [c]hwdownload,format=rgba,format=yuv420p[o1]; [m]hwdownload,format=nv12[o2]" \
+  -map "[o1]" color.mp4 -map "[o2]" key.mp4
+```
+
+### Parameters and time expressions
+
+Use them to animate an effect (fade in a vignette, move a wipe) without external keyframe tools. A value is a literal
+or an expression in `t`, `n`, `w`, `h`, `a`, `sar`, `dar`; a comma inside an expression is written `\,` on the command line.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "gpufx=graph='vignette.zip=strength=clip(t/2\,0\,1)&color=#200040',hwdownload,format=yuv420p" out.mp4
+```
+
+### Changing values while the stream runs (`params` with `sendcmd`)
+
+Use it to drive an effect from a script or a control channel: set a value at a given time, or switch one effect of a
+graph on or off. The target is the filter instance name (`gpufx@g`) and the argument is `params <name>=<value>`
+(same options as the sendcmd tests of `scripts/test-bundle.sh`).
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx@g=graph=vignette.zip=strength=0.6,sendcmd=c='1.0 gpufx@g params strength=0.1',hwdownload,format=nv12" out.mp4
+```
+
+The longer example with node labels (`gb.strength`, `ba.enable=0`) is under [Runtime command `params`](#runtime-command-params).
+
+### Timeline `enable=`
+
+Use it to apply the whole filter only during a time window (a flash, a transition at the 2nd second). `passthrough`
+and `bypass` decide what is shown outside the window.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph=sepia.zip:enable='between(t\,1\,3)',hwdownload,format=nv12" out.mp4
+# a transition that keeps showing the clip it ended on after its window
+ffmpeg $VK -i a.mp4 -i b.mp4 -filter_complex "[0]format=nv12[x];[1]format=nv12[y];[x][y]gpufx=graph=xfade.zip:enable='between(t\,2\,3)':bypass=auto,hwdownload,format=nv12" out.mp4
+```
+
+To switch only one effect inside a chain or graph, use the inline `enable=` on that effect
+(`graph='a.zip|b.zip=enable=lt(t\,2)'`, see [Behaviour](#behaviour)).
+
+### Software input (automatic upload)
+
+Use it for a quick command: `gpufx` uploads CPU frames itself, so no `hwupload` is needed. It needs a device, from
+`-init_hw_device` plus `-filter_hw_device`; without one the filter stops and says which options to add. The output is
+always GPU frames, so `hwdownload,format=<fmt>` (or `gpufx_download`) comes before CPU filters and encoders.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
+```
+
+### `out_format`
+
+Use it to keep a chain of separate `gpufx` filters in RGBA (skipping the YUV conversions between them), or to force
+the format of the output frames. The example is the one of [README.md](../../../README.md): RGBA between the filters,
+nv12 again at the last one. One name applies to every output; `|` gives one name per output pad.
+
+```sh
+ffmpeg $VK -i a.mp4 -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip:out_format=rgba,gpufx=graph=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
+```
+
+### `backend`
+
+Testing only. Leave it at `auto`, which follows the device of the frames; see the option table for the accepted names.
+
+### Vulkan frames
+
+Use it to keep decode, effects and encode on the GPU on Vulkan devices. On Intel GPUs under Windows use `gpufx_upload`
+instead of `hwupload` (see [INTEL_VULKAN.md](../../INTEL_VULKAN.md)). The commands follow the Vulkan encode tests of
+`scripts/test-bundle.sh` (`h264_vulkan`, `hevc_vulkan`; the test leaves out `av1_vulkan`, whose frames were off on the
+tested NVIDIA driver even without gpufx). Open the device without `disable_multiplane=1` when the output goes to a
+Vulkan encoder, so the gpufx outputs are multiplane images the encoders accept.
+
+```sh
+# CPU decode, upload, effect, Vulkan encode
+ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -i in.mp4 -an \
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip" -c:v h264_vulkan out.mp4
+# Vulkan decode -> gpufx -> Vulkan encode
+ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -hwaccel vulkan -hwaccel_device vk \
+  -hwaccel_output_format vulkan -i in.mp4 -an -vf "gpufx=graph=vignette.zip" -c:v h264_vulkan out.mp4
+# 10 bit
+ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -i in.mp4 -an \
+  -vf "format=p010le,hwupload,gpufx=graph='vignette.zip=strength=0.7'" -c:v hevc_vulkan -profile:v main10 out.mp4
+```
+
+### D3D12 frames (Windows)
+
+Use it to decode, apply effects and encode with D3D12 hardware (`h264_d3d12va`, `hevc_d3d12va`, `av1_d3d12va`) without
+touching RAM. Options as in `dx_pipeline_tests` of `scripts/test-bundle.sh`. The test adds `-bf 0` because NVIDIA's
+D3D12 encoder failed on B-frames in the tested driver (also without gpufx).
+
+```sh
+ffmpeg $DX12 $DEC12 -i in.mp4 -an -vf "gpufx=graph=vignette.zip" -c:v h264_d3d12va -bf 0 out.mp4
+```
+
+### D3D11 frames (Windows)
+
+Use it for D3D11 hardware encoders: NVENC and QSV. Same pipeline with a `d3d11va` device and decoder (the test uses
+`h264_nvenc`, `hevc_nvenc`, `h264_qsv`). gpufx returns finished frames, because NVENC and QSV read the textures outside
+FFmpeg's immediate context. QSV takes the D3D11 frames through `hwmap`; the `d3d11va` device must be on the Intel
+adapter (on a machine with an NVIDIA and an Intel GPU, `d3d11va=dx:1` here; on the NVIDIA adapter `hwmap` fails with
+`Error creating a MFX session`).
+
+```sh
+DX11="-init_hw_device d3d11va=dx:0 -filter_hw_device dx"
+DEC11="-hwaccel d3d11va -hwaccel_device dx -hwaccel_output_format d3d11 -extra_hw_frames 8"
+ffmpeg $DX11 $DEC11 -i in.mp4 -an -vf "gpufx=graph=vignette.zip" -c:v h264_nvenc -bf 0 out.mp4
+ffmpeg $DX11 $DEC11 -i in.mp4 -an -vf "gpufx=graph=vignette.zip,hwmap=derive_device=qsv,format=qsv" -c:v h264_qsv -bf 0 out.mp4
+```
+
+### `out_api=d3d11` (D3D12 decode, NVENC or QSV encode)
+
+Use it only when the decoder gives D3D12 frames (`-hwaccel d3d12va`) but the encoder takes D3D11 frames only: NVENC
+and QSV. D3D12 encoders (`*_d3d12va`) keep the D3D12 frames and do not need it; with D3D11 inputs it is not needed
+either. It needs a `d3d11va` device on the same adapter as the D3D12 device, given as `-filter_hw_device`; without it
+the filter fails with `out_api=d3d11 writes D3D11 frames of -filter_hw_device`. Options as in `dx_out_d3d11_tests` of
+`scripts/test-bundle.sh` (the adapter index `:0` must be the same on both devices). The NVENC command was run; the QSV one is untested (QSV needs the Intel adapter, and a D3D12 decode there hung in a trial).
+
+```sh
+ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 \
+  $DEC12 -i in.mp4 -an -vf "gpufx=graph=vignette.zip:out_api=d3d11" -c:v h264_nvenc -bf 0 out.mp4
+# QSV
+ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 \
+  $DEC12 -i in.mp4 -an -vf "gpufx=graph=vignette.zip:out_api=d3d11,hwmap=derive_device=qsv,format=qsv" -c:v h264_qsv -bf 0 out.mp4
+```
+
+### VideoToolbox (macOS)
+
+Use it on a Mac: `gpufx` works on VideoToolbox frames (nv12, p010le) through Metal. This path has never run on a Mac;
+the command is the one of [README.md](../../../README.md).
+
+```sh
+ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i in.mp4 -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
+```
+
+### Still image to video
+
+Use it to turn a picture into a clip with an animated effect. Upload once, then repeat the GPU frame with `loop` (it
+only clones a reference to the GPU frame, so there is one upload) and rebuild the timestamps with `setpts`. Measured on
+Vulkan with rgba; D3D11 and D3D12 frames need nv12 instead, because FFmpeg does not map RGBA to DXGI formats (the image
+loses its alpha). Not in `scripts/test-bundle.sh`; `-t` is needed because `loop=-1` never ends.
+
+```sh
+ffmpeg $VK -i photo.png -t 5 -vf "format=rgba,hwupload,loop=loop=-1:size=1,setpts=N/30/TB,gpufx=graph='vignette.zip=strength=clip(t/2\,0\,1)',hwdownload,format=rgba,format=yuv420p" -r 30 out.mp4
+```
+
+`-loop 1` of the image demuxer also works but decodes and uploads every frame again.

@@ -38,8 +38,12 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
   ```
 - **Frame D3D12 và D3D11** (Windows): frame `AV_PIX_FMT_D3D12` (`-init_hw_device d3d12va`) được xử lý tại chỗ trên
   chính `ID3D12Device` của FFmpeg, đồng bộ bằng fence của frame; frame `AV_PIX_FMT_D3D11` chạy trên device D3D12 cùng
-  adapter qua shared NT handle (output không copy, input khác tốn một lần copy GPU). nv12 và p010le.
-  Đã chạy trên NVIDIA RTX 4060 Laptop và Intel UHD Graphics (Windows 11); CI chỉ build.
+  adapter qua shared NT handle (output không copy, input khác tốn một lần copy GPU).
+  `out_api=d3d11` đổi frame input D3D12 thành frame output D3D11 của `-filter_hw_device`, nên decoder D3D12 nối được
+  vào encoder D3D11 mà không cần `hwdownload`:
+  `ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 -hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -i in.mp4 -vf "gpufx=graph=invert.zip:out_api=d3d11" -c:v h264_nvenc out.mp4`
+  (QSV: thêm `,hwmap=derive_device=qsv,format=qsv` và dùng `-c:v h264_qsv`).
+  nv12 và p010le. Đã chạy trên NVIDIA RTX 4060 Laptop và Intel UHD Graphics (Windows 11); CI chỉ build.
 - Cache shader trên đĩa (tuỳ chọn): `GPUFX_SHADER_CACHE=<thư mục>` (pipeline cache của Vulkan; DXIL của D3D12 khi
   tìm thấy `dxcompiler.dll` trên đường tìm DLL). `gpufx pack --precompile` gói sẵn shader D3D12 vào gói, chỉ dùng khi
   `GPUFX_TRUST_PRECOMPILED=1` (xem [kiến trúc](docs/architecture/README-vi.md)).
@@ -119,6 +123,40 @@ filter chạy trên frame VideoToolbox (nv12, p010le) qua Metal, ví dụ
 đường này chưa chạy trên máy Mac nào (xem bên dưới).
 
 Tài liệu: [kiến trúc](docs/architecture/README-vi.md) · [định dạng gói và cách viết shader](docs/EFFECT_FORMAT-vi.md) · [đo tốc độ](docs/BENCHMARK-vi.md) · [English](README.md)
+
+## Tổng quan tính năng
+
+Ví dụ ngắn; option, giới hạn và thêm lệnh nằm ở tài liệu filter được link. `invert.zip`, `vignette.zip` và các tên
+effect khác là package trong `packages/gpufx` (xem [Build](#build)).
+
+| Tính năng | Dùng khi | Ví dụ | Chi tiết |
+|---|---|---|---|
+| Effect `gpufx` | muốn effect shader hoặc transition trên video, tham số đổi theo thời gian | `-vf "format=nv12,gpufx=graph=vignette.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| Graph `gpufx` | nhiều effect, rẽ nhánh hoặc nhiều input/output trong một lần submit GPU | `-vf "format=nv12,gpufx=graph=vignette.zip\|sepia.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| `gpufx_upload` / `gpufx_download` | copy CPU-GPU nhanh hơn trên Vulkan (Intel trên Windows bắt buộc dùng thay `hwupload`/`hwdownload`) | `-vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download,format=nv12"` | [gpufx_transfer](docs/architecture/filters/gpufx_transfer-vi.md) |
+| `gpufx_ai_upscale` | phóng video x2/x3/x4 bằng Real-ESRGAN (encode offline) | `-vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12"` | [gpufx_ai_upscale](docs/architecture/filters/gpufx_ai_upscale-vi.md) |
+| `gpufx_ai_framerate` | tăng frame rate bằng nội suy RIFE (12 fps lên 24 fps, tỉ lệ bất kỳ) | `-vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12"` | [gpufx_ai_framerate](docs/architecture/filters/gpufx_ai_framerate-vi.md) |
+| API frame GPU | filter chạy trên API mà frame đang dùng: Vulkan, D3D12, D3D11 (Windows), VideoToolbox (macOS, chưa test) | `-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk` (D3D12: `-init_hw_device d3d12va=dx -filter_hw_device dx`) | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| Pipeline toàn GPU, Vulkan | decoder Vulkan tới encoder Vulkan, không `hwdownload` | `-init_hw_device vulkan=vk:0 -filter_hw_device vk -hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_vulkan out.mp4` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| Pipeline toàn GPU, D3D12 | decoder D3D12 tới encoder D3D12 (`h264_d3d12va`, `hevc_d3d12va`) | `-init_hw_device d3d12va=dx:0 -filter_hw_device dx -hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -extra_hw_frames 8 -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_d3d12va -bf 0 out.mp4` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| Pipeline toàn GPU, D3D11 | decoder D3D11 tới NVENC hoặc QSV | `-init_hw_device d3d11va=dx:0 -filter_hw_device dx -hwaccel d3d11va -hwaccel_device dx -hwaccel_output_format d3d11 -extra_hw_frames 8 -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_nvenc -bf 0 out.mp4` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| `out_api=d3d11` | decoder D3D12 tới NVENC hoặc QSV (encoder D3D11) | xem bảng bên dưới | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+| Ảnh tĩnh thành video | biến một ảnh thành video, chỉ upload một lần | `-i pic.png -vf "format=rgba,hwupload,loop=loop=-1:size=1,setpts=N/25/TB,gpufx=graph=invert.zip:out_format=rgba,hwdownload,format=rgba" -t 5 -pix_fmt yuv420p out.mp4` (sau `-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk`) | [gpufx](docs/architecture/filters/gpufx-vi.md) |
+
+Trên D3D11/D3D12 ảnh tĩnh phải là nv12 (FFmpeg không map rgba cho frame D3D). `-bf 0` ở encoder là vì encoder D3D12
+của NVIDIA lỗi khi có B-frame (driver 617.42, không có gpufx cũng lỗi); lệnh NVENC/QSV trong test cũng dùng nó. Chọn
+pipeline nào cho encoder nào:
+
+| Encoder | Decode và device | Cần | Đã test |
+|---|---|---|---|
+| `h264_d3d12va`, `hevc_d3d12va`, `av1_d3d12va` | `-hwaccel d3d12va` trên device `d3d12va`: giữ nguyên D3D12 | không cần gì thêm | RTX 4060 Laptop, Intel UHD (h264, hevc kể cả p010 main10); driver RTX 4060 không hỗ trợ `av1_d3d12va` |
+| `h264_nvenc`, `hevc_nvenc` | `-hwaccel d3d11va` trên device `d3d11va`, hoặc decode D3D12 kèm `out_api=d3d11` | với `out_api=d3d11`: device D3D11 thứ hai cùng adapter, `-init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11`, và `gpufx=graph=...:out_api=d3d11` | RTX 4060 Laptop (cả hai cách, hevc main10 cũng chạy) |
+| `h264_qsv` | như NVENC, rồi `hwmap=derive_device=qsv,format=qsv` sau `gpufx` | device QSV derive từ device D3D11 | Intel UHD với decode `d3d11va`; `out_api=d3d11` + QSV bị treo trên Intel UHD (lỗi đã biết, đang điều tra) |
+| `h264_vulkan`, `hevc_vulkan` | `-hwaccel vulkan`, hoặc nguồn bất kỳ qua `gpufx_upload`/`hwupload`, trên device Vulkan mở **không** có `disable_multiplane=1` | encoder Vulkan chỉ nhận frame multiplane | RTX 4060 Laptop; `av1_vulkan` lệch ~20 dB ở đó kể cả khi không có gpufx |
+
+Lệnh `out_api=d3d11` đầy đủ (NVENC; với QSV thêm `,hwmap=derive_device=qsv,format=qsv` vào `-vf` và dùng `h264_qsv`):
+`ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 -hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -extra_hw_frames 8 -i in.mp4 -vf "gpufx=graph=invert.zip:out_api=d3d11" -c:v h264_nvenc -bf 0 out.mp4`.
+Thiếu `-filter_hw_device` D3D11 thì filter từ chối kèm thông báo nói rõ. Xem [hạn chế](docs/LIMITATIONS-vi.md).
 
 ## Nội suy khung hình (`gpufx_ai_framerate`)
 

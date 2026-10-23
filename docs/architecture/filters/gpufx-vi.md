@@ -256,3 +256,186 @@ ffmpeg $VK -i in.mp4 -vf "gpufx=graph=gaussian-blur.zip,gpufx=graph='gradient-ma
 # cùng kết quả trong một filter: một lần submit GPU
 ffmpeg $VK -i in.mp4 -vf "gpufx=graph='gaussian-blur.zip|gradient-map.zip=intensity=0.6',hwdownload,format=yuv420p" out.mp4
 ```
+
+## Use case và ví dụ
+
+Mỗi tính năng có một use case ngắn và ít nhất một lệnh. Package mẫu nằm trong `packages/gpufx/` (`ffmpeg/`,
+`standalone/`, `capcut/`, `tqk2811/`); lệnh ghi tên package là `vignette.zip` như các ví dụ ở trên, nên hãy thay bằng
+đường dẫn thật của `.zip` hoặc thư mục. Lệnh ghi "theo `scripts/test-bundle.sh`" dùng cùng option với một bài test của
+script đó; các lệnh còn lại ghép các option đã mô tả và đã được chạy trên Windows (RTX 4060 Laptop, Vulkan, D3D12, D3D11)
+với input H.264 `yuv420p`. Các lệnh input software bắt đầu bằng `format=nv12`: thiếu nó thì output giữ `yuv420p` của
+input và `hwdownload,format=nv12` lỗi `Invalid output format nv12 for hwframe download`.
+
+```sh
+VK="-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk"
+DX12="-init_hw_device d3d12va=dx:0 -filter_hw_device dx"
+DEC12="-hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -extra_hw_frames 8"
+```
+
+### Một package và chain
+
+Dùng khi muốn áp một look (vignette, blur, chỉnh màu). Đặt nhiều effect trong một `gpufx` bằng `|` để frame nằm trên GPU
+trong một lần submit (xem ví dụ chain ở trên, `gaussian-blur.zip|gradient-map.zip=intensity=0.6`).
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph='vignette.zip=strength=0.7',hwdownload,format=nv12" out.mp4
+```
+
+### Graph nhiều pad (`split`, nhiều input và output)
+
+Dùng khi một clip đi vào nhiều nhánh (vd bản mờ trộn với bản đã chỉnh màu), khi effect cần nhiều input, hoặc khi effect có
+hơn một output. Nhãn nối các effect với nhau; `split` copy nhãn miễn phí.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph='[0]split[a][b]; [a]gaussian-blur.zip=radius=8[ba]; [b]grayscale.zip|vignette.zip=strength=0.6[gb]; [ba][gb]crossfade.zip=progress=0.5[out]',hwdownload,format=nv12" out.mp4
+```
+
+Nhiều output: mỗi output pad của graph là một output của filter, nên mỗi pad được nối riêng trong `-filter_complex`.
+`luma-matte.zip` có hai output (`color`, rgba, và `matte`, theo format của input), nên `[0]luma-matte.zip[c][m]` cho
+hai output pad; quy tắc ở [Pad và quy tắc graph](#pad-và-quy-tắc-graph).
+
+```sh
+ffmpeg $VK -i in.mp4 -filter_complex "format=nv12,gpufx=graph='[0]luma-matte.zip[c][m]'[c][m]; [c]hwdownload,format=rgba,format=yuv420p[o1]; [m]hwdownload,format=nv12[o2]" \
+  -map "[o1]" color.mp4 -map "[o2]" key.mp4
+```
+
+### Tham số và biểu thức theo thời gian
+
+Dùng để làm effect chuyển động (vignette hiện dần, wipe di chuyển) mà không cần công cụ keyframe ngoài. Giá trị là
+literal hoặc biểu thức theo `t`, `n`, `w`, `h`, `a`, `sar`, `dar`; dấu phẩy trong biểu thức viết `\,` trên command line.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "gpufx=graph='vignette.zip=strength=clip(t/2\,0\,1)&color=#200040',hwdownload,format=yuv420p" out.mp4
+```
+
+### Đổi giá trị khi stream đang chạy (`params` với `sendcmd`)
+
+Dùng để điều khiển effect từ script hoặc kênh điều khiển: đặt giá trị tại một thời điểm, hoặc bật/tắt một effect của
+graph. Đích là tên instance của filter (`gpufx@g`) và tham số là `params <tên>=<giá trị>` (cùng option với các bài test
+sendcmd trong `scripts/test-bundle.sh`).
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx@g=graph=vignette.zip=strength=0.6,sendcmd=c='1.0 gpufx@g params strength=0.1',hwdownload,format=nv12" out.mp4
+```
+
+Ví dụ dài hơn với nhãn node (`gb.strength`, `ba.enable=0`) nằm ở [Lệnh runtime `params`](#lệnh-runtime-params).
+
+### Timeline `enable=`
+
+Dùng để áp cả filter chỉ trong một khoảng thời gian (một flash, một transition ở giây thứ 2). `passthrough` và `bypass`
+quyết định hiện gì bên ngoài khoảng đó.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph=sepia.zip:enable='between(t\,1\,3)',hwdownload,format=nv12" out.mp4
+# transition vẫn hiện clip nó kết thúc sau khoảng của nó
+ffmpeg $VK -i a.mp4 -i b.mp4 -filter_complex "[0]format=nv12[x];[1]format=nv12[y];[x][y]gpufx=graph=xfade.zip:enable='between(t\,2\,3)':bypass=auto,hwdownload,format=nv12" out.mp4
+```
+
+Muốn chỉ bật/tắt một effect trong chain hoặc graph, dùng `enable=` inline trên effect đó
+(`graph='a.zip|b.zip=enable=lt(t\,2)'`, xem [Hành vi](#hành-vi)).
+
+### Input phần mềm (tự upload)
+
+Dùng cho lệnh nhanh: `gpufx` tự upload frame CPU, không cần `hwupload`. Cần một device, từ `-init_hw_device` cùng
+`-filter_hw_device`; không có thì filter dừng và nói option nào cần thêm. Output luôn là GPU frame, nên
+`hwdownload,format=<fmt>` (hoặc `gpufx_download`) đứng trước filter CPU và encoder.
+
+```sh
+ffmpeg $VK -i in.mp4 -vf "format=nv12,gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
+```
+
+### `out_format`
+
+Dùng để giữ chuỗi các filter `gpufx` riêng ở RGBA (bỏ các bước đổi YUV giữa chúng), hoặc ép format của output frame. Ví dụ
+là ví dụ của [README.md](../../../README.md): RGBA giữa các filter, filter cuối về lại nv12. Một tên áp cho mọi output; `|`
+cho mỗi output pad một tên.
+
+```sh
+ffmpeg $VK -i a.mp4 -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip:out_format=rgba,gpufx=graph=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
+```
+
+### `backend`
+
+Chỉ để test. Để `auto`, nó theo device của frame; tên được nhận xem ở bảng option.
+
+### Vulkan frame
+
+Dùng để giữ decode, effect và encode trên GPU với device Vulkan. GPU Intel trên Windows dùng `gpufx_upload` thay
+`hwupload` (xem [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md)). Các lệnh theo các bài test encode Vulkan của
+`scripts/test-bundle.sh` (`h264_vulkan`, `hevc_vulkan`; test bỏ `av1_vulkan` vì frame của nó lệch trên driver NVIDIA đã
+thử, kể cả không có gpufx). Khi output đi vào encoder Vulkan, mở device không có `disable_multiplane=1`, để output của
+gpufx là ảnh multiplane mà encoder nhận.
+
+```sh
+# decode CPU, upload, effect, encode Vulkan
+ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -i in.mp4 -an \
+  -vf "format=nv12,hwupload,gpufx=graph=vignette.zip" -c:v h264_vulkan out.mp4
+# decode Vulkan -> gpufx -> encode Vulkan
+ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -hwaccel vulkan -hwaccel_device vk \
+  -hwaccel_output_format vulkan -i in.mp4 -an -vf "gpufx=graph=vignette.zip" -c:v h264_vulkan out.mp4
+# 10 bit
+ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -i in.mp4 -an \
+  -vf "format=p010le,hwupload,gpufx=graph='vignette.zip=strength=0.7'" -c:v hevc_vulkan -profile:v main10 out.mp4
+```
+
+### D3D12 frame (Windows)
+
+Dùng để decode, áp effect và encode bằng phần cứng D3D12 (`h264_d3d12va`, `hevc_d3d12va`, `av1_d3d12va`) mà không chạm
+RAM. Option như `dx_pipeline_tests` trong `scripts/test-bundle.sh`. Test thêm `-bf 0` vì encoder D3D12 của NVIDIA lỗi với
+B-frame ở driver đã thử (kể cả không có gpufx).
+
+```sh
+ffmpeg $DX12 $DEC12 -i in.mp4 -an -vf "gpufx=graph=vignette.zip" -c:v h264_d3d12va -bf 0 out.mp4
+```
+
+### D3D11 frame (Windows)
+
+Dùng cho encoder phần cứng D3D11: NVENC và QSV. Cùng pipeline với device và decoder `d3d11va` (test dùng `h264_nvenc`,
+`hevc_nvenc`, `h264_qsv`). gpufx trả frame đã xong, vì NVENC và QSV đọc texture ngoài immediate context của FFmpeg. QSV
+nhận frame D3D11 qua `hwmap`; device `d3d11va` phải nằm trên adapter Intel (máy có cả GPU NVIDIA và Intel thì ở đây là
+`d3d11va=dx:1`; trên adapter NVIDIA `hwmap` lỗi `Error creating a MFX session`).
+
+```sh
+DX11="-init_hw_device d3d11va=dx:0 -filter_hw_device dx"
+DEC11="-hwaccel d3d11va -hwaccel_device dx -hwaccel_output_format d3d11 -extra_hw_frames 8"
+ffmpeg $DX11 $DEC11 -i in.mp4 -an -vf "gpufx=graph=vignette.zip" -c:v h264_nvenc -bf 0 out.mp4
+ffmpeg $DX11 $DEC11 -i in.mp4 -an -vf "gpufx=graph=vignette.zip,hwmap=derive_device=qsv,format=qsv" -c:v h264_qsv -bf 0 out.mp4
+```
+
+### `out_api=d3d11` (decode D3D12, encode NVENC hoặc QSV)
+
+Chỉ dùng khi decoder cho frame D3D12 (`-hwaccel d3d12va`) nhưng encoder chỉ nhận frame D3D11: NVENC và QSV. Encoder D3D12
+(`*_d3d12va`) giữ frame D3D12 nên không cần nó; input D3D11 cũng không cần. Cần một device `d3d11va` cùng adapter với
+device D3D12, đưa vào làm `-filter_hw_device`; thiếu nó thì filter lỗi `out_api=d3d11 writes D3D11 frames of
+-filter_hw_device`. Option như `dx_out_d3d11_tests` trong `scripts/test-bundle.sh` (chỉ số adapter `:0` phải giống nhau ở
+hai device). Lệnh NVENC đã chạy; lệnh QSV chưa kiểm (QSV cần adapter Intel, và decode D3D12 ở đó bị treo khi thử).
+
+```sh
+ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 \
+  $DEC12 -i in.mp4 -an -vf "gpufx=graph=vignette.zip:out_api=d3d11" -c:v h264_nvenc -bf 0 out.mp4
+# QSV
+ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 \
+  $DEC12 -i in.mp4 -an -vf "gpufx=graph=vignette.zip:out_api=d3d11,hwmap=derive_device=qsv,format=qsv" -c:v h264_qsv -bf 0 out.mp4
+```
+
+### VideoToolbox (macOS)
+
+Dùng trên Mac: `gpufx` chạy trên frame VideoToolbox (nv12, p010le) qua Metal. Đường này chưa từng chạy trên Mac; lệnh là
+lệnh của [README.md](../../../README.md).
+
+```sh
+ffmpeg -init_hw_device videotoolbox=vt -filter_hw_device vt -i in.mp4 -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12" out.mp4
+```
+
+### Ảnh tĩnh thành video
+
+Dùng để biến một ảnh thành clip có effect chuyển động. Upload một lần, rồi lặp GPU frame bằng `loop` (nó chỉ clone
+reference của GPU frame, nên chỉ upload một lần) và dựng lại timestamp bằng `setpts`. Đã đo trên Vulkan với rgba; frame
+D3D11 và D3D12 cần nv12, vì FFmpeg không map RGBA sang format DXGI (ảnh mất alpha). Không có trong
+`scripts/test-bundle.sh`; cần `-t` vì `loop=-1` không bao giờ kết thúc.
+
+```sh
+ffmpeg $VK -i photo.png -t 5 -vf "format=rgba,hwupload,loop=loop=-1:size=1,setpts=N/30/TB,gpufx=graph='vignette.zip=strength=clip(t/2\,0\,1)',hwdownload,format=rgba,format=yuv420p" -r 30 out.mp4
+```
+
+`-loop 1` của demuxer ảnh cũng chạy nhưng decode và upload lại mọi frame.

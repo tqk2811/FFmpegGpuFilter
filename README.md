@@ -125,6 +125,40 @@ this path has not run on a Mac yet (see below).
 
 Docs: [architecture](docs/architecture/README.md) · [package format and how to write shaders](docs/EFFECT_FORMAT.md) · [benchmark](docs/BENCHMARK.md)
 
+## Features at a glance
+
+Short examples; options, limits and more commands are in the linked filter reference. `invert.zip`, `vignette.zip`
+and the other effect names are packages from `packages/gpufx` (see [Build](#build)).
+
+| Feature | Use it when | Example | Detail |
+|---|---|---|---|
+| `gpufx` effects | you want shader effects or transitions on video, parameters animated over time | `-vf "format=nv12,gpufx=graph=vignette.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx.md) |
+| `gpufx` graph | several effects, branches or several inputs/outputs in one GPU submission | `-vf "format=nv12,gpufx=graph=vignette.zip\|sepia.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx.md) |
+| `gpufx_upload` / `gpufx_download` | faster CPU-GPU copies on Vulkan (needed on Intel Windows instead of `hwupload`/`hwdownload`) | `-vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download,format=nv12"` | [gpufx_transfer](docs/architecture/filters/gpufx_transfer.md) |
+| `gpufx_ai_upscale` | upscale video x2/x3/x4 with Real-ESRGAN (offline encodes) | `-vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12"` | [gpufx_ai_upscale](docs/architecture/filters/gpufx_ai_upscale.md) |
+| `gpufx_ai_framerate` | raise the frame rate with RIFE interpolation (12 fps to 24 fps, any rate) | `-vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12"` | [gpufx_ai_framerate](docs/architecture/filters/gpufx_ai_framerate.md) |
+| GPU frame APIs | the filter runs on whichever API the frames come from: Vulkan, D3D12, D3D11 (Windows), VideoToolbox (macOS, untested) | `-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk` (D3D12: `-init_hw_device d3d12va=dx -filter_hw_device dx`) | [gpufx](docs/architecture/filters/gpufx.md) |
+| Full-GPU pipeline, Vulkan | Vulkan decoder to Vulkan encoder with no `hwdownload` | `-init_hw_device vulkan=vk:0 -filter_hw_device vk -hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_vulkan out.mp4` | [gpufx](docs/architecture/filters/gpufx.md) |
+| Full-GPU pipeline, D3D12 | D3D12 decoder to a D3D12 encoder (`h264_d3d12va`, `hevc_d3d12va`) | `-init_hw_device d3d12va=dx:0 -filter_hw_device dx -hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -extra_hw_frames 8 -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_d3d12va -bf 0 out.mp4` | [gpufx](docs/architecture/filters/gpufx.md) |
+| Full-GPU pipeline, D3D11 | D3D11 decoder to NVENC or QSV | `-init_hw_device d3d11va=dx:0 -filter_hw_device dx -hwaccel d3d11va -hwaccel_device dx -hwaccel_output_format d3d11 -extra_hw_frames 8 -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_nvenc -bf 0 out.mp4` | [gpufx](docs/architecture/filters/gpufx.md) |
+| `out_api=d3d11` | D3D12 decoder to NVENC or QSV (D3D11 encoders) | see the table below | [gpufx](docs/architecture/filters/gpufx.md) |
+| Still image to video | turn one picture into a video, uploaded once | `-i pic.png -vf "format=rgba,hwupload,loop=loop=-1:size=1,setpts=N/25/TB,gpufx=graph=invert.zip:out_format=rgba,hwdownload,format=rgba" -t 5 -pix_fmt yuv420p out.mp4` (after `-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk`) | [gpufx](docs/architecture/filters/gpufx.md) |
+
+On D3D11/D3D12 a still picture must be nv12 (FFmpeg has no rgba mapping for D3D frames). `-bf 0` on the encoders
+is for NVIDIA's D3D12 encoder, which fails on B-frames (driver 617.42, also without gpufx); NVENC/QSV commands in
+the tests use it too. Which pipeline for which encoder:
+
+| Encoder | Decode and device | Needs | Tested |
+|---|---|---|---|
+| `h264_d3d12va`, `hevc_d3d12va`, `av1_d3d12va` | `-hwaccel d3d12va` on a `d3d12va` device: keep D3D12 | nothing extra | RTX 4060 Laptop, Intel UHD (h264, hevc incl. p010 main10); `av1_d3d12va` is not supported by the RTX 4060 driver |
+| `h264_nvenc`, `hevc_nvenc` | `-hwaccel d3d11va` on a `d3d11va` device, or D3D12 decode with `out_api=d3d11` | for `out_api=d3d11`: a second D3D11 device on the same adapter, `-init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11`, and `gpufx=graph=...:out_api=d3d11` | RTX 4060 Laptop (both ways, hevc main10 too) |
+| `h264_qsv` | same as NVENC, then `hwmap=derive_device=qsv,format=qsv` after `gpufx` | the QSV device derived from the D3D11 device | Intel UHD with `d3d11va` decode; `out_api=d3d11` + QSV hangs on Intel UHD (known issue, under investigation) |
+| `h264_vulkan`, `hevc_vulkan` | `-hwaccel vulkan`, or any source with `gpufx_upload`/`hwupload`, on a Vulkan device opened **without** `disable_multiplane=1` | the Vulkan encoders take only multiplane frames | RTX 4060 Laptop; `av1_vulkan` is ~20 dB off there even without gpufx |
+
+The full `out_api=d3d11` command (NVENC; for QSV append `,hwmap=derive_device=qsv,format=qsv` to `-vf` and use `h264_qsv`):
+`ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 -hwaccel d3d12va -hwaccel_device dx -hwaccel_output_format d3d12 -extra_hw_frames 8 -i in.mp4 -vf "gpufx=graph=invert.zip:out_api=d3d11" -c:v h264_nvenc -bf 0 out.mp4`.
+Without a D3D11 `-filter_hw_device` the filter refuses with a message that says so. See [limitations](docs/LIMITATIONS.md).
+
 ## Frame interpolation (`gpufx_ai_framerate`)
 
 `gpufx_ai_framerate` raises the frame rate with a neural frame interpolation model (RIFE v4.6, converted to a

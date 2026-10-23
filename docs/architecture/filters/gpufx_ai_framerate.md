@@ -51,21 +51,52 @@ is skipped.
 
 No timeline support and no runtime commands.
 
-## Examples
+## Use cases & examples
+
+**Default (`model` only).** Use it to double the rate (12 to 24, 30 to 60); `fps` defaults to twice the input's. The
+output rate is constant, so variable frame rate input is resampled to the grid.
 
 ```sh
-# 12 fps -> 24 fps on Vulkan
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12" out.mp4
+```
 
-# Any target rate, D3D12 (Windows)
+**`fps`.** Use it for a specific target such as a broadcast rate, or when the input rate is unknown (then `fps` is
+required). Any rate works, not only multiples; give a number or a fraction.
+
+```sh
+# 24000/1001 on Vulkan (as in the test bundle)
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=24000/1001,hwdownload,format=nv12" out.mp4
+
+# 60000/1001 on D3D12 (Windows)
 ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
   -vf "format=nv12,hwupload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:fps=60000/1001,hwdownload,format=nv12" out.mp4
+```
 
+**`scene` (scene change).** Use it so a cut between shots is not blended: a pair whose SSIM at 32x32 is below `scene`
+is repeated, not interpolated. On anime the default `0.2` still blends some cuts between shots of similar layout;
+a higher value such as `0.4` caught more of them but repeats a frame on some very fast zooms and flashes. `scene=0`
+turns detection off (every pair is interpolated).
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0.4,gpufx_download,format=nv12" out.mp4
+```
+
+**`max_gap`.** Use it with variable frame rate input: pairs further apart than `max_gap` input frame durations (a
+real gap, such as a pause) are repeated, not interpolated. Raise it to interpolate across larger gaps.
+
+```sh
 # No cut detection, interpolate across gaps up to 4 frame durations
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
 ```
+
+**Vulkan or D3D12.** Prefer Vulkan: about 1.7x faster than D3D12 and D3D11 in the measurements (see Limitations). D3D12
+needs DXC for the model shaders, and `GPUFX_SHADER_CACHE` keeps the compiled ones. On Vulkan use `disable_multiplane=1`
+and `gpufx_upload` (needed on Intel Windows). Raise `extra_hw_frames` when uploading if the filter warns that more
+frames may be needed.
 
 The model is not in git: the release asset `gpufx-packages.zip` ships it in `gpufx_ai_framerate/` (not the ffmpeg bundles), or fetch and convert it with
 `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` (written to `build/packages/<filter>/`).

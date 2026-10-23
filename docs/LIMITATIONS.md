@@ -56,6 +56,11 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 - **Tested:** `-hwaccel d3d11va` decoding -> gpufx -> `h264_nvenc`/`hevc_nvenc` (RTX 4060) and, through
   `hwmap=derive_device=qsv,format=qsv`, `h264_qsv` (Intel UHD). NVENC and QSV read the textures outside the
   immediate context, so gpufx waits on the CPU until its D3D11 outputs are done (no overlap with the next frame).
+- **Limitation:** `out_api=d3d11` (D3D12 input frames, D3D11 output frames) needs a D3D11 device of the same adapter
+  as `-filter_hw_device` (`-init_hw_device d3d11va=d11:N -filter_hw_device d11`); without it the filter refuses.
+- **Tested:** `out_api=d3d11` with `-hwaccel d3d12va` decoding -> gpufx -> `h264_nvenc`/`hevc_nvenc` (also p010 main10)
+  on an RTX 4060 Laptop (2026-10-24).
+- **Untested:** `out_api=d3d11` -> `h264_qsv`: adapter 0 of the test machine is NVIDIA, so the QSV path was skipped.
 
 ## VideoToolbox (macOS)
 

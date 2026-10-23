@@ -51,21 +51,60 @@ Cả hai cần Vulkan device đưa vào filter graph: `-init_hw_device vulkan=vk
 
 Cả hai filter không hỗ trợ timeline (`enable`) và command lúc chạy.
 
-## Ví dụ
+## Use case và ví dụ
+
+Dùng chung được với filter có sẵn của FFmpeg: `hwupload` rồi `gpufx_download`, `gpufx_upload` rồi `hwdownload`, và
+cả hai đặt cạnh các filter `*_vulkan`.
+
+**Thay `hwupload` / `hwdownload` quanh phần việc trên GPU (mặc định).** Dùng khi graph là software frame vào, các
+filter Vulkan (`gpufx`, `gpufx_ai_*`, `scale_vulkan`...), rồi software frame ra, nhất là trên NVIDIA nơi filter có
+sẵn làm CPU chờ từng lần copy.
 
 ```sh
-# Upload, hai hiệu ứng trên GPU, download
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
   -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
+```
 
-# Pipeline sâu hơn cho ổ đĩa chậm hoặc GPU bận
+**`depth` (upload).** Tăng khi phía upload bị nghẽn (frame tới theo từng đợt, nguồn chậm hoặc GPU bận); mỗi bước tốn
+thêm một staging buffer và một frame trong pool. `depth=1` là pipeline ít nhất.
+
+```sh
 ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
-  -vf "format=nv12,gpufx_upload=depth=6,gpufx=graph=sepia.zip,gpufx_download=latency=4,format=nv12" out.mp4
+  -vf "format=nv12,gpufx_upload=depth=6,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
+```
 
-# Dùng chung với filter có sẵn của FFmpeg
+**`latency` (download).** Tăng khi GPU bận và readback cứ phải chờ; output trễ `latency` frame và được xả hết ở cuối
+stream. Dùng `latency=0` cho input live hoặc thưa, nơi frame ra trễ là vấn đề.
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download=latency=4,format=nv12" out.mp4
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download=latency=0,format=nv12" out.mp4
+```
+
+**Pixel format (`out_format`).** `gpufx_upload` và `gpufx_download` không có option `out_format`: Vulkan frame giữ
+format của input làm `sw_format`, và `gpufx_download` trả software frame đúng format đó (đặt `format=<sw_format>`
+sau nó). Muốn đổi format giữa các bước trên GPU thì dùng option `out_format` của `gpufx`, option này cũng giữ RGBA
+giữa các filter `gpufx` riêng lẻ:
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx=graph=vignette.zip:out_format=rgba,gpufx=graph=sepia.zip:out_format=nv12,gpufx_download,format=nv12" out.mp4
+```
+
+**Dùng chung với filter có sẵn.** Dùng để giữ `scale_vulkan` và các filter `*_vulkan` khác trong cùng chuỗi GPU, hoặc
+chỉ thay một phía khi so tốc độ với `hwupload` / `hwdownload`. Bundle win64 không có `scale_vulkan` (FFmpeg của nó không có filter `*_vulkan`), nên lệnh đầu chưa chạy ở đó; cần FFmpeg build kèm filter đó.
+
+```sh
 ffmpeg -init_hw_device vulkan=vk -filter_hw_device vk -i a.mp4 \
   -vf "format=nv12,gpufx_upload,scale_vulkan=1280:720,hwdownload,format=nv12" out.mp4
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i a.mp4 \
+  -vf "format=nv12,hwupload,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
 ```
+
+**Intel trên Windows.** Dùng `gpufx_upload` thay cho `hwupload` (host image copy của FFmpeg 9 hỏng ở đó, xem
+[INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md)); các lệnh ở trên không đổi.
 
 ## Giới hạn
 
