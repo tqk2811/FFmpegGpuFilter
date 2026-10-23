@@ -413,7 +413,7 @@ Use it only when the decoder gives D3D12 frames (`-hwaccel d3d12va`) but the enc
 and QSV. D3D12 encoders (`*_d3d12va`) keep the D3D12 frames and do not need it; with D3D11 inputs it is not needed
 either. It needs a `d3d11va` device on the same adapter as the D3D12 device, given as `-filter_hw_device`; without it
 the filter fails with `out_api=d3d11 writes D3D11 frames of -filter_hw_device`. Options as in `dx_out_d3d11_tests` of
-`scripts/test-bundle.sh` (the adapter index `:0` must be the same on both devices). The NVENC command was run; the QSV one is untested (QSV needs the Intel adapter, and a D3D12 decode there hung in a trial).
+`scripts/test-bundle.sh` (the adapter index `:0` must be the same on both devices). The NVENC command was run; the QSV one ran on the Intel UHD adapter (`dx:1`/`d11:1`) with `-threads 1` before `-i`: without it FFmpeg's multi-threaded H.264 `d3d12va` decoder hangs on that Intel driver, also without gpufx (MPEG-2 decodes fine).
 
 ```sh
 ffmpeg -init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11 \

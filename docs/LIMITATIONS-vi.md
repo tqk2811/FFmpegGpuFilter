@@ -59,7 +59,7 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   (`-init_hw_device d3d11va=d11:N -filter_hw_device d11`); thiếu thì filter từ chối.
 - **Đã test:** `out_api=d3d11` với decode `-hwaccel d3d12va` -> gpufx -> `h264_nvenc`/`hevc_nvenc` (cả p010 main10)
   trên RTX 4060 Laptop (2026-10-24).
-- **Chưa test:** `out_api=d3d11` -> `h264_qsv`: adapter 0 của máy test là NVIDIA nên đường QSV bị bỏ qua.
+- `out_api=d3d11` -> `h264_qsv` đã chạy tay trên Intel UHD (bộ test chạy adapter 0 là NVIDIA nên bỏ qua). Decoder H.264 `d3d12va` của FFmpeg treo trên driver Intel đó khi decode đa luồng, có hay không có gpufx: thêm `-threads 1` trước `-i`, hoặc decode bằng `d3d11va`.
 
 ## VideoToolbox (macOS)
 

@@ -152,7 +152,7 @@ the tests use it too. Which pipeline for which encoder:
 |---|---|---|---|
 | `h264_d3d12va`, `hevc_d3d12va`, `av1_d3d12va` | `-hwaccel d3d12va` on a `d3d12va` device: keep D3D12 | nothing extra | RTX 4060 Laptop, Intel UHD (h264, hevc incl. p010 main10); `av1_d3d12va` is not supported by the RTX 4060 driver |
 | `h264_nvenc`, `hevc_nvenc` | `-hwaccel d3d11va` on a `d3d11va` device, or D3D12 decode with `out_api=d3d11` | for `out_api=d3d11`: a second D3D11 device on the same adapter, `-init_hw_device d3d12va=dx:0 -init_hw_device d3d11va=d11:0 -filter_hw_device d11`, and `gpufx=graph=...:out_api=d3d11` | RTX 4060 Laptop (both ways, hevc main10 too) |
-| `h264_qsv` | same as NVENC, then `hwmap=derive_device=qsv,format=qsv` after `gpufx` | the QSV device derived from the D3D11 device | Intel UHD with `d3d11va` decode; `out_api=d3d11` + QSV hangs on Intel UHD (known issue, under investigation) |
+| `h264_qsv` | same as NVENC, then `hwmap=derive_device=qsv,format=qsv` after `gpufx` | the QSV device derived from the D3D11 device | Intel UHD with `d3d11va` decode; `out_api=d3d11` + QSV on Intel UHD with `-threads 1` (FFmpeg's threaded H.264 `d3d12va` decode hangs there, see [limitations](docs/LIMITATIONS.md)) |
 | `h264_vulkan`, `hevc_vulkan` | `-hwaccel vulkan`, or any source with `gpufx_upload`/`hwupload`, on a Vulkan device opened **without** `disable_multiplane=1` | the Vulkan encoders take only multiplane frames | RTX 4060 Laptop; `av1_vulkan` is ~20 dB off there even without gpufx |
 
 The full `out_api=d3d11` command (NVENC; for QSV append `,hwmap=derive_device=qsv,format=qsv` to `-vf` and use `h264_qsv`):
