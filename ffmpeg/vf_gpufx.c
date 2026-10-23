@@ -1038,7 +1038,12 @@ static int config_vulkan_output(AVFilterLink *outlink, unsigned k)
         fc->height    = outlink->h;
         vk            = fc->hwctx;
         vk->flags     = AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE;
-        /* Storage usage (libgpufx writes the planes) comes by default where the format has it. */
+        /* Storage (libgpufx writes the planes), sampled, transfers: FFmpeg's default for a format
+         * with storage, but set: FFmpeg 9 derives the default of formats whose planes have the
+         * format of its fallback (yuva420p, yuva444p...) from an uninitialized variable
+         * (vkfmt_from_pixfmt2, feats_secondary), 0 on lavapipe. Init fails without storage. */
+        vk->usage     = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         if (gpufx_hwframe_ctx_init(ref) < 0 || !(vk->usage & VK_IMAGE_USAGE_STORAGE_BIT)) {
             av_log(ctx, AV_LOG_VERBOSE, "No storage Vulkan frames of %s for output '%s'.\n",
                    name, ctx->output_pads[k].name);
@@ -1590,7 +1595,7 @@ static int upload_ok(enum AVPixelFormat hw_fmt, enum AVPixelFormat fmt)
 
 /* A frames context of sw_format fmt for uploads on the device, or NULL. */
 static AVBufferRef *upload_frames_ctx(AVFilterContext *ctx, AVBufferRef *device, enum AVPixelFormat fmt,
-                                      int w, int h)
+                                      int w, int h, int sampled)
 {
     GpufxContext *s = ctx->priv;
     AVBufferRef *ref;
@@ -1605,8 +1610,14 @@ static AVBufferRef *upload_frames_ctx(AVFilterContext *ctx, AVBufferRef *device,
     fc->height    = h;
 #if CONFIG_VULKAN
     /* One image per plane, which gpufx reads, whatever the device was opened with. */
-    if (s->hw_fmt == AV_PIX_FMT_VULKAN)
-        ((AVVulkanFramesContext *)fc->hwctx)->flags = AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE;
+    if (s->hw_fmt == AV_PIX_FMT_VULKAN) {
+        AVVulkanFramesContext *vk = fc->hwctx;
+
+        vk->flags = AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE;
+        if (sampled)
+            vk->usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    }
 #endif
 #if CONFIG_D3D11VA
     /* Readable and shareable like the filter's own D3D11 frames, so gpufx needs no copy. */
@@ -1621,11 +1632,12 @@ static AVBufferRef *upload_frames_ctx(AVFilterContext *ctx, AVBufferRef *device,
         return NULL;
     }
 #if CONFIG_VULKAN
-    /* FFmpeg makes some formats without the usage flags gpufx needs to read them. */
+    /* FFmpeg's default usage (storage too where the format has it, see config_vulkan_output)
+     * is garbage for some formats (yuva420p...): then ask for what reading needs. */
     if (s->hw_fmt == AV_PIX_FMT_VULKAN &&
         !(((AVVulkanFramesContext *)fc->hwctx)->usage & VK_IMAGE_USAGE_SAMPLED_BIT)) {
         av_buffer_unref(&ref);
-        return NULL;
+        return sampled ? NULL : upload_frames_ctx(ctx, device, fmt, w, h, 1);
     }
 #endif
     return ref;
@@ -1649,7 +1661,7 @@ static int config_upload(AVFilterContext *ctx, unsigned i, AVBufferRef *device)
         cand[1] = deep ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
     for (int j = 0; j < 3 && !s->up_frames[i]; j++)
         if (cand[j] != AV_PIX_FMT_NONE)
-            s->up_frames[i] = upload_frames_ctx(ctx, device, cand[j], link->w, link->h);
+            s->up_frames[i] = upload_frames_ctx(ctx, device, cand[j], link->w, link->h, 0);
     if (!s->up_frames[i]) {
         av_log(ctx, AV_LOG_ERROR, "Input '%s': cannot make %s frames to upload %s into.\n",
                ctx->input_pads[i].name, api_name(s->hw_fmt), desc->name);
@@ -1713,7 +1725,7 @@ static int upload_input(AVFilterContext *ctx, unsigned i, const AVFrame *in)
             fmt = rgba_for(in->format);
             if (!s->up_rgba[i]) {
                 if (!(s->up_rgba[i] = upload_frames_ctx(ctx, ((AVHWFramesContext *)ref->data)->device_ref,
-                                                        fmt, in->width, in->height))) {
+                                                        fmt, in->width, in->height, 0))) {
                     av_log(ctx, AV_LOG_ERROR, "Input '%s': cannot make %s frames of %s.\n",
                            ctx->input_pads[i].name, api_name(s->hw_fmt), av_get_pix_fmt_name(fmt));
                     return AVERROR(ENOSYS);
