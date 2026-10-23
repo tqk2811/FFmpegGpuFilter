@@ -1162,6 +1162,47 @@ dx_pipeline_tests() {
         dx_encode "$API: $api decode -> gpufx -> $enc" "$REFN" \
             -init_hw_device "$DXDEV" -filter_hw_device dx $DEC -i "$M2" -an -vf "$vf" -c:v $enc -bf 0 "$ENC_OUT"
     done
+    dx_pipeline_tests_10bit
+    if [ "$API" = D3D12 ]; then dx_out_d3d11_tests; fi
+}
+# D3D12 decode -> gpufx out_api=d3d11 -> D3D11 encoders (NVENC, QSV), no hwdownload; the D3D11
+# device is opened on the D3D12 device's adapter. Called by dx_pipeline_tests (its variables).
+dx_out_d3d11_tests() {
+    if ! echo "$dx_hwdevs" | grep -qx d3d11va; then
+        echo "  skip  D3D12: out_api=d3d11 (this ffmpeg has no d3d11va hwdevice)"; return 0
+    fi
+    D11="-init_hw_device d3d11va=d11:${DXDEV##*:} -filter_hw_device d11"
+    INV11="$INV:out_api=d3d11"
+    # Without a D3D11 -filter_hw_device: a clear error (ffmpeg makes the only device, D3D12, the filter's).
+    # shellcheck disable=SC2086
+    if "$FF" -hide_banner -nostdin -v error -init_hw_device "$DXDEV" $DEC -i "$M2" -frames:v 1 -an -vf "$INV11" -f null - \
+        > "$CLIPS/last.log" 2>&1; then
+        fail "D3D12: out_api=d3d11 without a D3D11 -filter_hw_device is refused"
+    elif grep -q "out_api=d3d11 writes D3D11 frames of -filter_hw_device" "$CLIPS/last.log"; then
+        pass "D3D12: out_api=d3d11 without a D3D11 -filter_hw_device is refused"
+    else fail "D3D12: out_api=d3d11 without a D3D11 -filter_hw_device is refused (other error)"; cat "$CLIPS/last.log"; fi
+    for enc in h264_nvenc h264_qsv; do
+        if ! grep -qw $enc "$CLIPS/encoders.txt"; then echo "  skip  D3D12: out_api=d3d11 -> $enc (not in this ffmpeg)"; continue; fi
+        vf=$INV11; case $enc in *_qsv) vf="$INV11,hwmap=derive_device=qsv,format=qsv" ;; esac
+        # shellcheck disable=SC2086
+        dx_encode "D3D12: d3d12va decode -> gpufx out_api=d3d11 -> $enc" "$REFN" \
+            -init_hw_device "$DXDEV" $D11 $DEC -i "$M2" -an -vf "$vf" -c:v $enc -bf 0 "$ENC_OUT"
+    done
+    # 10 bits: nv12 decoder frames into p010 D3D11 frames, hevc_nvenc main10.
+    if grep -qw hevc_nvenc "$CLIPS/encoders.txt"; then
+        REF10B=$CLIPS/encref10b.mkv
+        command -v cygpath >/dev/null && REF10B=$(cygpath -m "$REF10B")
+        gpu_ff -y -i "$M2" -an -vf "format=nv12,hwupload,$INV:out_format=p010le,hwdownload,format=p010le,format=yuv420p10le" \
+            -c:v ffv1 "$REF10B" 2> "$CLIPS/last.log" ||
+            { fail "D3D12: out_api=d3d11 p010 reference frames"; cat "$CLIPS/last.log"; return 0; }
+        # shellcheck disable=SC2086
+        dx_encode "D3D12: d3d12va decode -> gpufx out_api=d3d11 p010 -> hevc_nvenc main10" "$REF10B" \
+            -init_hw_device "$DXDEV" $D11 $DEC -i "$M2" -an -vf "$INV11:out_format=p010le" \
+            -c:v hevc_nvenc -profile:v main10 -bf 0 "$ENC_OUT"
+    else echo "  skip  D3D12: out_api=d3d11 -> hevc_nvenc (not in this ffmpeg)"; fi
+}
+# 10 bits on the pipeline's own API (dx_pipeline_tests' variables).
+dx_pipeline_tests_10bit() {
     # 10 bits: p010 frames from gpufx into hevc main10.
     if [ "$API" = D3D12 ]; then enc=hevc_d3d12va; else enc=hevc_nvenc; fi
     if grep -qw $enc "$CLIPS/encoders.txt"; then

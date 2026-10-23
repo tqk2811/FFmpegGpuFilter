@@ -569,6 +569,24 @@ int gpufx_effect_process_d3d11(GpufxEffect *fx, const GpufxD3D11Frame *inputs, u
                                const GpufxFrameInfo *info);
 
 /*
+ * D3D12 inputs, D3D11 outputs: the effect runs on the D3D12 device dev (as
+ * gpufx_effect_use_d3d12()) and writes D3D11 textures of dev11, a D3D11 device on the same
+ * adapter (fails otherwise), so D3D12 decoders feed D3D11 encoders (NVENC, QSV) without a
+ * download. Needs D3D11.4 as gpufx_effect_use_d3d11().
+ */
+int gpufx_effect_use_d3d12_to_d3d11(GpufxEffect *fx, const GpufxD3D12Device *dev,
+                                    const GpufxD3D11Device *dev11);
+
+/*
+ * Inputs as gpufx_effect_process_d3d12() (their fence_value is updated), outputs as
+ * gpufx_effect_process_d3d11() (shareable textures; the caller holds dev11's immediate
+ * context lock). Returns once the effects are done on the GPU.
+ */
+int gpufx_effect_process_d3d12_to_d3d11(GpufxEffect *fx, GpufxD3D12Frame *inputs, uint32_t nb_inputs,
+                                        const GpufxD3D11Frame *outs, uint32_t nb_outputs,
+                                        const GpufxFrameInfo *info);
+
+/*
  * VideoToolbox frames (macOS; elsewhere the functions fail). A frame is
  * FFmpeg's AV_PIX_FMT_VIDEOTOOLBOX frame: a CVPixelBufferRef (AVFrame.data[3]) backed by
  * an IOSurface, in nv12 (420v/420f) or p010le (x420/xf20). The effect runs on the system's

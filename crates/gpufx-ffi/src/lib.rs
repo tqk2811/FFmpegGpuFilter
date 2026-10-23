@@ -1162,7 +1162,15 @@ mod dx {
 
     /// Shared D3D12/D3D11 contexts, by caller device, while an effect uses them.
     pub fn shared(key: usize, make: impl FnOnce() -> Result<Arc<GpuContext>, gpufx_core::Error>) -> Result<Arc<GpuContext>, String> {
-        type Cache = Mutex<Vec<(usize, Weak<GpuContext>)>>;
+        shared_pair((key, 0), make)
+    }
+
+    /// As `shared`, by a pair of caller devices (D3D12 device, D3D11 device).
+    fn shared_pair(
+        key: (usize, usize),
+        make: impl FnOnce() -> Result<Arc<GpuContext>, gpufx_core::Error>,
+    ) -> Result<Arc<GpuContext>, String> {
+        type Cache = Mutex<Vec<((usize, usize), Weak<GpuContext>)>>;
         static CACHE: Cache = Mutex::new(Vec::new());
         let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
         cache.retain(|(_, w)| w.strong_count() > 0);
@@ -1182,6 +1190,12 @@ mod dx {
     pub unsafe fn use_d3d11(fx: &mut GpufxEffect, dev: &GpufxD3D11Device) -> Result<(), String> {
         let ctx = shared(dev.device as usize, || GpuContext::from_d3d11(dev.device, dev.device_context))?;
         move_to(fx, &ctx, vk::shared_device(&ctx, "D3D11"))
+    }
+
+    pub unsafe fn use_d3d12_to_d3d11(fx: &mut GpufxEffect, dev: &GpufxD3D12Device, dev11: &GpufxD3D11Device) -> Result<(), String> {
+        let key = (dev.device as usize, dev11.device as usize);
+        let ctx = shared_pair(key, || GpuContext::from_d3d12_with_d3d11(dev.device, dev11.device, dev11.device_context))?;
+        move_to(fx, &ctx, vk::shared_device(&ctx, "D3D12 to D3D11"))
     }
 
     pub unsafe fn list<'a, T>(p: *mut T, n: u32, what: &str) -> Result<&'a mut [T], String> {
@@ -1266,6 +1280,24 @@ mod dx {
         let os = d3d11_frames(list(outs as *mut GpufxD3D11Frame, nb_outputs, "outs")?, "out")?;
         fx.graph.process_d3d11(&ins, &os, info.as_ref()).map_err(|e| e.to_string())
     }
+
+    pub unsafe fn process_d3d12_to_d3d11(
+        fx: &mut GpufxEffect,
+        inputs: *mut GpufxD3D12Frame,
+        nb_inputs: u32,
+        outs: *const GpufxD3D11Frame,
+        nb_outputs: u32,
+        info: Option<FrameInfo>,
+    ) -> Result<(), String> {
+        let ri = list(inputs, nb_inputs, "inputs")?;
+        let mut ins = d3d12_frames(ri, "input")?;
+        let os = d3d11_frames(list(outs as *mut GpufxD3D11Frame, nb_outputs, "outs")?, "out")?;
+        fx.graph.process_d3d12_to_d3d11(&mut ins, &os, info.as_ref()).map_err(|e| e.to_string())?;
+        for (f, r) in ins.iter().zip(ri.iter_mut()) {
+            r.fence_value = f.fence_value;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(not(windows))]
@@ -1276,6 +1308,19 @@ mod dx {
         Err(MSG.into())
     }
     pub unsafe fn use_d3d11(_: &mut GpufxEffect, _: &GpufxD3D11Device) -> Result<(), String> {
+        Err(MSG.into())
+    }
+    pub unsafe fn use_d3d12_to_d3d11(_: &mut GpufxEffect, _: &GpufxD3D12Device, _: &GpufxD3D11Device) -> Result<(), String> {
+        Err(MSG.into())
+    }
+    pub unsafe fn process_d3d12_to_d3d11(
+        _: &mut GpufxEffect,
+        _: *mut GpufxD3D12Frame,
+        _: u32,
+        _: *const GpufxD3D11Frame,
+        _: u32,
+        _: Option<FrameInfo>,
+    ) -> Result<(), String> {
         Err(MSG.into())
     }
     pub unsafe fn process_d3d12(
@@ -1353,6 +1398,36 @@ pub unsafe extern "C" fn gpufx_effect_process_d3d11(
         let fx = fx.as_mut().ok_or("effect is NULL")?;
         on_host_device(fx, "gpufx_effect_use_d3d11")?;
         dx::process_d3d11(fx, inputs, nb_inputs, outs, nb_outputs, info.as_ref().map(frame_info))?;
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_effect_use_d3d12_to_d3d11(
+    fx: *mut GpufxEffect,
+    dev: *const GpufxD3D12Device,
+    dev11: *const GpufxD3D11Device,
+) -> c_int {
+    guard(-1, || {
+        let fx = fx.as_mut().ok_or("effect is NULL")?;
+        dx::use_d3d12_to_d3d11(fx, dev.as_ref().ok_or("device is NULL")?, dev11.as_ref().ok_or("D3D11 device is NULL")?)?;
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_effect_process_d3d12_to_d3d11(
+    fx: *mut GpufxEffect,
+    inputs: *mut GpufxD3D12Frame,
+    nb_inputs: u32,
+    outs: *const GpufxD3D11Frame,
+    nb_outputs: u32,
+    info: *const GpufxFrameInfo,
+) -> c_int {
+    guard(-1, || {
+        let fx = fx.as_mut().ok_or("effect is NULL")?;
+        on_host_device(fx, "gpufx_effect_use_d3d12_to_d3d11")?;
+        dx::process_d3d12_to_d3d11(fx, inputs, nb_inputs, outs, nb_outputs, info.as_ref().map(frame_info))?;
         Ok(0)
     })
 }

@@ -873,10 +873,16 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   (`SetEventOnCompletion` with a null event). A GPU wait queued on the immediate context is not enough:
   NVENC and QSV read the textures outside it (`h264_nvenc` encoded stale pool textures). The filter holds
   `AVD3D11VADeviceContext.lock` during the call.
+- **D3D12 in, D3D11 out (`out_api=d3d11`).** For D3D11 encoders (NVENC, QSV) behind a D3D12 decoder:
+  `GpuContext::from_d3d12_with_d3d11` runs on FFmpeg's `ID3D12Device` (as `from_d3d12`) and also holds the D3D11
+  side of `from_d3d11` for a D3D11 device on the same adapter (LUIDs must match). Inputs are read as D3D12 frames
+  (fence wait/signal), outputs are gpufx's shared NT handle D3D11 textures opened in that D3D12 device; one
+  submission waits the inputs' fences and the shared D3D11 fence, and the call waits on the CPU as above.
+  The filter takes the D3D11 device from `-filter_hw_device` and refuses passthrough (another API).
 - Rust: `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
   (`gpufx_core::d3d12`, `cfg(windows)`, built on `encode_gpu`). C API (v7, additive): `gpufx_d3d12_supported`,
   `gpufx_effect_use_d3d12`, `gpufx_effect_process_d3d12`, `gpufx_effect_use_d3d11`,
-  `gpufx_effect_process_d3d11`; on other systems they fail with a message.
+  `gpufx_effect_process_d3d11`, `gpufx_effect_use_d3d12_to_d3d11`, `gpufx_effect_process_d3d12_to_d3d11`; on other systems they fail with a message.
 - Build: `scripts/build-prebuilt.sh win64` adds `--enable-d3d11va --enable-d3d12va` when the prebuilt
   `libavutil` has them (it does), fetching `d3d12.h`, `d3d12sdklayers.h`, `d3d12video.h` of mingw-w64 v12.0.0
   when the installed mingw-w64 (Ubuntu noble: 11) has no `d3d12video.h`.
