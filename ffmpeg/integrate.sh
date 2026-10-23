@@ -23,8 +23,10 @@ cp "$HERE/vf_gpufx_ai_upscale.c" libavfilter/vf_gpufx_ai_upscale.c
 
 # Patches to FFmpeg itself (patches/*.patch, made with diff -u from the tree root):
 # D3D11/D3D12 frames of every DXGI format that has a software pixel format (rgba, bgra,
-# gray, float...), not only the YUV ones FFmpeg uses for decoding. Skipped when already
-# applied; a patch that no longer applies (FFmpeg changed there) stops the build.
+# gray, float...), not only the YUV ones FFmpeg uses for decoding.
+# Vulkan: the usage of yuva420p and similar frames contexts, else read from an
+# uninitialized variable. Skipped when already applied; a patch that no longer applies
+# (FFmpeg changed there) stops the build.
 for p in "$HERE"/patches/*.patch; do
     [ -f "$p" ] || continue
     if patch -p1 -R -s -f --dry-run < "$p" >/dev/null 2>&1; then
