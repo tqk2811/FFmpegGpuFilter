@@ -844,8 +844,9 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   resources for D3D11, while the frames here are made by FFmpeg's D3D11 device; keyed mutexes would also work
   but need `SHARED_KEYEDMUTEX` textures and CPU-side acquire/release. Order: a D3D12 fence shared with the
   D3D11 device (`ID3D11Device5::OpenSharedFence`, D3D11.4): the immediate context signals `v` and is
-  flushed, the D3D12 submission waits `v` and signals `v + 1`, the immediate context waits `v + 1`, so
-  FFmpeg's later D3D11 work (`hwdownload`, encoders) waits on the GPU, no CPU wait. The filter holds
+  flushed, the D3D12 submission waits `v` and signals `v + 1`, and the call waits on the CPU for `v + 1`
+  (`SetEventOnCompletion` with a null event). A GPU wait queued on the immediate context is not enough:
+  NVENC and QSV read the textures outside it (`h264_nvenc` encoded stale pool textures). The filter holds
   `AVD3D11VADeviceContext.lock` during the call.
 - Rust: `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
   (`gpufx_core::d3d12`, `cfg(windows)`, built on `encode_gpu`). C API (v7, additive): `gpufx_d3d12_supported`,

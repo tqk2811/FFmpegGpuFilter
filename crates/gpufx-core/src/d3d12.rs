@@ -416,8 +416,8 @@ pub(crate) unsafe fn process_d3d12<S: GpuStage + ?Sized>(
 /// Runs the graph on D3D11 frames of the device the graph's context was made for
 /// ([`GpuContext::from_d3d11`]). Shareable textures (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`)
 /// are used in place; other inputs are copied once into a shared texture of gpufx,
-/// and outputs must be shareable. The D3D11 work queued after the call (on the
-/// immediate context) waits for the effects on the GPU.
+/// and outputs must be shareable. Returns once the effects are done on the GPU, so
+/// any reader of the outputs (immediate context, NVENC, QSV) sees them.
 ///
 /// # Safety
 /// The textures must be valid textures of that device; the caller holds the lock of
@@ -510,6 +510,10 @@ pub(crate) unsafe fn process_d3d11<S: GpuStage + ?Sized>(
     let run = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync);
     if run.is_ok() {
         d11.value = v + 1;
+        // Wait on the CPU (null event): a wait queued on the immediate context is not seen
+        // by readers outside it, e.g. NVENC encoded stale pool textures (h264_nvenc on an RTX 4060).
+        d11.fence12.0.SetEventOnCompletion(v + 1, HANDLE::default()).map_err(gpu_err)?;
+        // Done already; keeps the order explicit for the D3D11 work queued next.
         d11.context.0.Wait(&d11.fence11.0, v + 1).map_err(gpu_err)?;
     }
     run.map(|_| ())

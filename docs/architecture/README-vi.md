@@ -837,8 +837,9 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   input (VRAM: một frame cho mỗi pad input). Không dùng D3D11On12: nó bọc resource D3D12 cho D3D11, còn ở đây
   frame do device D3D11 của FFmpeg tạo; keyed mutex cũng được nhưng cần texture `SHARED_KEYEDMUTEX` và
   acquire/release phía CPU. Thứ tự: một fence D3D12 share với device D3D11 (`ID3D11Device5::OpenSharedFence`,
-  D3D11.4): immediate context signal `v` rồi flush, lần submit D3D12 chờ `v` và signal `v + 1`, immediate context
-  chờ `v + 1`, nên việc D3D11 sau đó của FFmpeg (`hwdownload`, encoder) chờ trên GPU, không chờ CPU. Filter giữ
+  D3D11.4): immediate context signal `v` rồi flush, lần submit D3D12 chờ `v` và signal `v + 1`, rồi lời gọi chờ
+  `v + 1` trên CPU (`SetEventOnCompletion` với event null). Chờ trên GPU bằng immediate context là không đủ: NVENC và
+  QSV đọc texture ngoài context đó (`h264_nvenc` từng encode nhầm texture cũ của pool). Filter giữ
   `AVD3D11VADeviceContext.lock` trong lúc gọi.
 - Rust: `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
   (`gpufx_core::d3d12`, `cfg(windows)`, dựa trên `encode_gpu`). C API (v7, chỉ thêm): `gpufx_d3d12_supported`,

@@ -359,7 +359,7 @@ Ghi 2026-10-20. Test `precompiled_shaders_are_used_only_when_trusted` (`crates/g
 
 ### B-D3D12 / B-D3D11: các giới hạn còn lại
 - **Vấn đề**:
-  - CI không kiểm được: runner hosted (chỉ có WARP) không tạo được device d3d12va (-22) / d3d11va (887a0004 DXGI_ERROR_UNSUPPORTED) ngay trong FFmpeg, nên test báo skip kể cả với `REQUIRE_D3D=1`. Mới chạy trên một GPU thật (NVIDIA RTX 4060 Laptop, 2026-10-14, đạt hết); chưa thử AMD/Intel, chưa thử decoder (`-hwaccel d3d12va`/`d3d11va`).
+  - CI không kiểm được: runner hosted (chỉ có WARP) không tạo được device d3d12va (-22) / d3d11va (887a0004 DXGI_ERROR_UNSUPPORTED) ngay trong FFmpeg, nên test báo skip kể cả với `REQUIRE_D3D=1`. Mới chạy trên một GPU thật (NVIDIA RTX 4060 Laptop, 2026-10-14, đạt hết); chưa thử AMD. Decode `-hwaccel d3d12va` -> gpufx -> encoder D3D12 đã chạy trên RTX 4060 + Intel UHD (2026-10-24, test `dx_pipeline_tests`); `-hwaccel d3d11va` -> gpufx -> nvenc/qsv cũng đã chạy.
   - D3D11: wgpu giữ lần nạp `d3d12.dll` duy nhất (FFmpeg không nạp nó cho d3d11va), nên `from_d3d11` ghim DLL tới hết process. Gỡ được khi wgpu nhả object D3D12 đúng thứ tự.
   - Dựa vào việc D3D12 trả cùng một device cho cùng adapter trong một process; với Agility SDK hoặc runtime D3D12 khác thì bị từ chối (có thông báo). wgpu-hal có `device_from_raw` cho DX12 thì nên chuyển sang.
   - D3D12: mỗi lần gọi chờ CPU lần submit trước, vì upload D3D12 của FFmpeg ghi vào frame mà không chờ fence của nó (an toàn nhưng mất pipelining một frame).

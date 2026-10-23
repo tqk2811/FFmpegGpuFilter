@@ -45,7 +45,13 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   FFmpeg không chờ fence.
 - **Hạn chế:** texture array, frame lớn hơn kích thước link, output không có UAV, và input D3D11 không share được
   (`hwupload`, decoder) phải chép thêm trên GPU.
-- **Chưa test:** decoder D3D (`-hwaccel d3d12va` / `d3d11va`) nối vào gpufx.
+- **Đã test (RTX 4060 Laptop, Intel UHD):** decode `-hwaccel d3d12va` -> gpufx -> `h264_d3d12va`/`hevc_d3d12va` (nv12,
+  p010 main10) không cần `hwdownload`; encoder nhận nguyên frame của gpufx (có UAV). Trên NVIDIA thêm `-bf 0`:
+  encoder D3D12 của nó lỗi khi có B-frame (driver 617.42, không có gpufx cũng lỗi). `av1_d3d12va` không được driver
+  RTX 4060 Laptop hỗ trợ.
+- **Đã test:** decode `-hwaccel d3d11va` -> gpufx -> `h264_nvenc`/`hevc_nvenc` (RTX 4060) và, qua
+  `hwmap=derive_device=qsv,format=qsv`, `h264_qsv` (Intel UHD). NVENC và QSV đọc texture ngoài immediate context, nên
+  gpufx chờ trên CPU tới khi output D3D11 xong (không chồng lấn với frame sau).
 
 ## VideoToolbox (macOS)
 
