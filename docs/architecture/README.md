@@ -679,10 +679,20 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   barriers: on the compute-only family that NVIDIA lists first the device is lost; libgpufx refuses such a family). The filter holds FFmpeg's `lock_queue` around
   each call, so FFmpeg's own submissions (hwupload, other Vulkan filters) never race with wgpu's.
 - **Frames.** One `VkImage` per plane, in FFmpeg's per-plane formats (`R8`, `R8G8`, `R8G8B8A8`, `R16`,
-  `R16G16`, `R16G16B16A16` `_UNORM`): inputs need `disable_multiplane=1` on the device (or frames made that
-  way); the output frames contexts gpufx makes use `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` and need
-  `STORAGE` usage. A multiplane image is refused at configuration with a message saying so, and so are input frames without
-  `SAMPLED` usage. FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without any usage by default (the
+  `R16G16`, `R16G16B16A16` `_UNORM`), read and written in place; the output frames contexts gpufx makes use
+  `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` and need `STORAGE` usage. Input frames without `SAMPLED` usage are
+  refused at configuration with a message saying so.
+- **Multiplane inputs** (one image of `G8_B8R8_2PLANE_420`, `G10X6_B10X6R10X6_2PLANE_420_3PACK16`,
+  `G8_B8_R8_3PLANE_*`, `G16_B16_R16_3PLANE_*`: Vulkan decoders, `hwupload` without `disable_multiplane=1`)
+  cannot be wrapped plane by plane by wgpu. libgpufx copies each plane with a raw `vkCmdCopyImage`
+  (`srcSubresource` aspect `PLANE_n`, the plane formats are size-compatible with `R8`/`R8G8`/`R16`/`R16G16`, so
+  the bits are copied as they are) into single-plane images of its own, made through wgpu-hal and wrapped like
+  the imports (taken as initialized, state `STORAGE_READ_WRITE`), kept per input pad, format and size.
+  The copies are recorded in the raw command buffer of the layout barriers, before wgpu's: the scratch images
+  go from `UNDEFINED` to `GENERAL` (overwritten whole), the source to `GENERAL`, then a barrier after the copies
+  makes the transfer writes visible (wgpu's own barrier from `STORAGE_READ_WRITE` only covers shader writes).
+  Same submission, same semaphore wait and signal. The frame needs `TRANSFER_SRC` usage (decoders and
+  `hwupload` set it). Outputs stay one image per plane. FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without any usage by default (the
   ones `hwupload` makes work), so outputs fall back to another format, e.g. `rgba`. The output
   sw_format is the source input's when libgpufx can write it and FFmpeg can make storage images of it, else
   `rgba`. `out_format` replaces that choice
@@ -737,8 +747,8 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   `libavutil` has Vulkan and the Khronos Vulkan-Headers are found (cloned, tag `v1.4.321`; FFmpeg wants a
   header newer than Ubuntu noble's), and keeps `hwupload`, `hwdownload`, `hwmap`. Otherwise gpufx is built
   without Vulkan frames and the tests skip them.
-- **Decoders:** the Vulkan decoders (`-hwaccel vulkan`) output multiplane images, so their frames are refused
-  for now (`hwdownload,hwupload` or a GPU copy into per-plane images is needed; backlog).
+- **Decoders:** the Vulkan decoders (`-hwaccel vulkan`) output multiplane images: read through the plane copy
+  above (one GPU copy per frame; reading them in place is backlog).
 - **Submissions** of one shared device are serialised by a mutex in libgpufx held from staging the semaphores
   to `queue.submit` (besides FFmpeg's `lock_queue`), inside a wgpu error scope; a submission wgpu refuses has
   its semaphores taken back and makes later Vulkan frames on that device fail cleanly.

@@ -18,9 +18,11 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 
 ## Vulkan
 
-- **Limitation:** only frames with one VkImage per plane (`-init_hw_device vulkan=...,disable_multiplane=1`);
-  multiplane frames and frames of the Vulkan decoders (`-hwaccel vulkan`) are refused, use `hwdownload,hwupload`
-  or `gpufx_upload`.
+- **Limitation:** frames with one VkImage per plane (`-init_hw_device vulkan=...,disable_multiplane=1`) are
+  read in place; a multiplane input (Vulkan decoders, `-hwaccel vulkan`, or `hwupload` without
+  `disable_multiplane=1`) costs one GPU copy of each plane per frame (nv12, p010, yuv420p/422p/444p and their
+  10-bit forms; it needs `TRANSFER_SRC` usage). Outputs are always one image per plane, so a Vulkan encoder
+  that wants multiplane frames needs `hwdownload,hwupload` or a copy after gpufx.
 - **Limitation:** FFmpeg 9.0 makes `yuva420p`/`yuva444p` frames contexts without usage flags, so Vulkan outputs
   cannot be those formats (inputs through `hwupload` work).
 - **Limitation:** a queue family with both graphics and compute is required; a compute-only family is not used.

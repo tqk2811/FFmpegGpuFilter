@@ -229,9 +229,11 @@ static int config_vulkan(AVFilterContext *ctx, AVHWFramesContext *fc)
                "image copies (hwupload?). " GPUFX_VK_HOST_COPY_HINT "\n", av_get_pix_fmt_name(fc->sw_format));
         return AVERROR(ENOSYS);
     }
-    if (av_pix_fmt_count_planes(fc->sw_format) > 1 && vkfc->format[1] == VK_FORMAT_UNDEFINED) {
-        av_log(ctx, AV_LOG_ERROR, "Multiplane Vulkan images are not supported; use gpufx_upload, or "
-               "open the device with disable_multiplane=1.\n");
+    /* A multiplane image (Vulkan decoders) is read by copying its planes. */
+    if (av_pix_fmt_count_planes(fc->sw_format) > 1 && vkfc->format[1] == VK_FORMAT_UNDEFINED &&
+        !(vkfc->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+        av_log(ctx, AV_LOG_ERROR, "Multiplane Vulkan images without transfer source usage cannot be "
+               "copied; use gpufx_upload, or open the device with disable_multiplane=1.\n");
         return AVERROR(ENOSYS);
     }
     if (!(vkfc->usage & VK_IMAGE_USAGE_SAMPLED_BIT)) {

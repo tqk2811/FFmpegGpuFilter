@@ -18,9 +18,11 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 
 ## Vulkan
 
-- **Hạn chế:** chỉ nhận frame một VkImage mỗi plane (`-init_hw_device vulkan=...,disable_multiplane=1`); frame
-  multiplane và frame của decoder Vulkan (`-hwaccel vulkan`) bị từ chối, dùng `hwdownload,hwupload` hoặc
-  `gpufx_upload`.
+- **Hạn chế:** frame một VkImage mỗi plane (`-init_hw_device vulkan=...,disable_multiplane=1`) được đọc tại
+  chỗ; input multiplane (decoder Vulkan `-hwaccel vulkan`, hoặc `hwupload` không có `disable_multiplane=1`)
+  tốn một lần copy trên GPU cho mỗi plane mỗi frame (nv12, p010, yuv420p/422p/444p và bản 10-bit; cần usage
+  `TRANSFER_SRC`). Output luôn là mỗi plane một image, nên encoder Vulkan cần frame multiplane thì phải
+  `hwdownload,hwupload` hoặc copy sau gpufx.
 - **Hạn chế:** FFmpeg 9.0 tạo frames context `yuva420p`/`yuva444p` không có usage, nên output Vulkan không ra được
   hai dạng này (input qua `hwupload` vẫn được).
 - **Hạn chế:** cần queue family có cả graphics lẫn compute; không chạy trên family chỉ có compute.

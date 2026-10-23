@@ -683,9 +683,19 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   chỉ có compute mà NVIDIA liệt kê trước thì device bị lost; libgpufx từ chối họ như vậy). Filter giữ `lock_queue` của FFmpeg quanh mỗi lần gọi, nên
   lệnh submit của FFmpeg (hwupload, filter Vulkan khác) không tranh với wgpu.
 - **Frame.** Mỗi plane một `VkImage`, theo format từng plane của FFmpeg (`R8`, `R8G8`, `R8G8B8A8`, `R16`,
-  `R16G16`, `R16G16B16A16` `_UNORM`): input cần device có `disable_multiplane=1` (hoặc frame tạo theo cách đó);
-  frames context output do gpufx tạo dùng `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` và cần usage `STORAGE`.
-  Image multiplane bị từ chối lúc configure kèm thông báo, frame input không có usage `SAMPLED` cũng vậy. FFmpeg 9.0 mặc định tạo
+  `R16G16`, `R16G16B16A16` `_UNORM`), đọc và ghi tại chỗ; frames context output do gpufx tạo dùng
+  `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` và cần usage `STORAGE`. Frame input không có usage `SAMPLED` bị từ chối
+  lúc configure kèm thông báo.
+- **Input multiplane** (một image `G8_B8R8_2PLANE_420`, `G10X6_B10X6R10X6_2PLANE_420_3PACK16`,
+  `G8_B8_R8_3PLANE_*`, `G16_B16_R16_3PLANE_*`: decoder Vulkan, `hwupload` không có `disable_multiplane=1`)
+  không wrap từng plane bằng wgpu được. libgpufx copy từng plane bằng `vkCmdCopyImage` thô (aspect
+  `srcSubresource` là `PLANE_n`, format plane tương thích kích thước với `R8`/`R8G8`/`R16`/`R16G16` nên bit được
+  chép nguyên) sang image một plane của mình, tạo qua wgpu-hal và wrap như các image import (coi là đã khởi tạo,
+  state `STORAGE_READ_WRITE`), giữ theo pad input, format và kích thước. Lệnh copy ghi vào command buffer thô
+  của các barrier layout, trước phần của wgpu: image scratch đi từ `UNDEFINED` sang `GENERAL` (bị ghi đè toàn
+  bộ), image nguồn sang `GENERAL`, rồi một barrier sau copy làm lệnh ghi transfer hiện ra (barrier của wgpu từ
+  `STORAGE_READ_WRITE` chỉ phủ lệnh ghi của shader). Cùng một lần submit, chờ và signal semaphore như cũ. Frame
+  cần usage `TRANSFER_SRC` (decoder và `hwupload` đều có). Output vẫn mỗi plane một image. FFmpeg 9.0 mặc định tạo
   frames context `yuva420p`/`yuva444p` không có usage nào (của `hwupload` thì dùng được), nên output chuyển sang
   format khác, ví dụ `rgba`. sw_format của output là của input nguồn nếu libgpufx ghi được
   và FFmpeg tạo được storage image cho nó, không thì `rgba`.
@@ -737,8 +747,8 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   Vulkan và tìm được Vulkan-Headers của Khronos (clone tag `v1.4.321`; FFmpeg cần header mới hơn bản của Ubuntu
   noble), và giữ `hwupload`, `hwdownload`, `hwmap`. Không thì gpufx được build không có frame Vulkan và test bỏ
   qua phần đó.
-- **Decoder:** decoder Vulkan (`-hwaccel vulkan`) xuất image multiplane nên frame của nó hiện bị từ chối (cần
-  `hwdownload,hwupload` hoặc copy trên GPU sang image từng plane; xem Backlog).
+- **Decoder:** decoder Vulkan (`-hwaccel vulkan`) xuất image multiplane: đọc qua bước copy plane ở trên (một
+  lần copy trên GPU mỗi frame; đọc tại chỗ nằm trong Backlog).
 - **Submit** trên một device dùng chung được tuần tự hoá bằng mutex trong libgpufx, giữ từ lúc đặt semaphore
   tới `queue.submit` (ngoài `lock_queue` của FFmpeg), trong một error scope của wgpu; submit bị wgpu từ chối
   được lấy lại semaphore và làm các frame Vulkan sau trên device đó báo lỗi rõ ràng.
