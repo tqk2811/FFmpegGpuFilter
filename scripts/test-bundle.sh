@@ -885,14 +885,33 @@ if grep -qw gpufx_upload "$CLIPS/filters.txt"; then
 else
     echo "  skip  this bundle has no gpufx_upload"
 fi
-# Without disable_multiplane an nv12 frame may be one multiplane image: refused clearly
-# (or, where the driver has no multiplane nv12, processed).
-if "$FF" -hide_banner -nostdin -v error -init_hw_device "vulkan=vk:$VK_ADAPTER$VKX" -filter_hw_device vk -i "$A" -frames:v 2 -an \
-    -vf "format=nv12,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=nv12" -f null - > "$CLIPS/last.log" 2>&1 ||
-    grep -q "multiplane images are not supported\|gpufx_upload instead of hwupload" "$CLIPS/last.log"; then
-    pass "multiplane nv12 is processed or refused clearly"
+# Without disable_multiplane an nv12/p010 frame is one multiplane image (where the driver has
+# the format): gpufx copies its planes on the GPU, same pixels as one image per plane.
+MPDEV="-init_hw_device vulkan=vk:$VK_ADAPTER$VKX -filter_hw_device vk"
+for f in nv12 p010le; do
+    # shellcheck disable=SC2086
+    MPF=$("$FF" -hide_banner -nostdin -v error $MPDEV -i "$A" -frames:v 3 -an \
+        -vf "format=$f,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=$f" -f framemd5 - 2> "$CLIPS/last.log" |
+        grep -v '^#' | awk -F, '{print $NF}')
+    if [ -z "$MPF" ] && grep -q "gpufx_upload instead of hwupload" "$CLIPS/last.log"; then
+        echo "  skip  multiplane $f (hwupload refused on this driver)"; continue
+    fi
+    same "multiplane $f equals one image per plane" "$MPF" "$(vk_md5 $f "gpufx=graph=$FX/ffmpeg/invert.zip")"
+done
+# Vulkan decoder frames (multiplane) straight into gpufx: same pixels as the decoded frames
+# uploaded one image per plane. The clip is made by h264_vulkan when the GPU has it.
+VKH=$CLIPS/vk.mp4
+if command -v cygpath >/dev/null; then VKH=$(cygpath -m "$VKH"); fi
+# shellcheck disable=SC2086
+if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an -vf "format=nv12,hwupload" -c:v h264_vulkan "$VKH" > "$CLIPS/last.log" 2>&1; then
+    # shellcheck disable=SC2086
+    same "-hwaccel vulkan frames into gpufx equal the decoded frames uploaded" \
+        "$("$FF" -hide_banner -nostdin -v error $MPDEV -hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan -i "$VKH" \
+            -vf "gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=nv12" -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')" \
+        "$(gpu_ff -i "$VKH" -vf "format=nv12,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=nv12" -f framemd5 - \
+            2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
 else
-    fail "multiplane nv12 is processed or refused clearly"; cat "$CLIPS/last.log"
+    echo "  skip  -hwaccel vulkan into gpufx (no h264_vulkan encoding: $(head -n1 "$CLIPS/last.log"))"
 fi
 # gpufx uploads software frames as one image per plane whatever the device was opened with.
 VKN=own-upload

@@ -938,12 +938,13 @@ static int config_vulkan(AVFilterContext *ctx)
                    ctx->input_pads[i].name, av_get_pix_fmt_name(fc->sw_format));
             return AVERROR(ENOSYS);
         }
-        /* One image per plane: a multiplane image (Vulkan decoders) is not read. */
+        /* A multiplane image (Vulkan decoders) is read by copying its planes. */
         if (av_pix_fmt_count_planes(fc->sw_format) > 1 &&
-            ((AVVulkanFramesContext *)fc->hwctx)->format[1] == VK_FORMAT_UNDEFINED) {
-            av_log(ctx, AV_LOG_ERROR, "Input '%s': multiplane images are not supported; gpufx needs "
-                   "one Vulkan image per plane (create the device with disable_multiplane=1; "
-                   "decoded frames need hwdownload,hwupload or a copy).\n", ctx->input_pads[i].name);
+            ((AVVulkanFramesContext *)fc->hwctx)->format[1] == VK_FORMAT_UNDEFINED &&
+            !(((AVVulkanFramesContext *)fc->hwctx)->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+            av_log(ctx, AV_LOG_ERROR, "Input '%s': multiplane images without transfer source usage "
+                   "cannot be copied (create the device with disable_multiplane=1).\n",
+                   ctx->input_pads[i].name);
             return AVERROR(ENOSYS);
         }
         /* FFmpeg makes some formats (yuva420p...) without usage flags: not readable. */
@@ -1848,10 +1849,11 @@ static int check_frame(AVFilterContext *ctx, unsigned i, const AVFrame *in)
         const AVVulkanFramesContext *vk = fc->hwctx;
         int ret;
 
-        if ((av_pix_fmt_count_planes(fc->sw_format) > 1 && vk->format[1] == VK_FORMAT_UNDEFINED) ||
+        if ((av_pix_fmt_count_planes(fc->sw_format) > 1 && vk->format[1] == VK_FORMAT_UNDEFINED &&
+             !(vk->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) ||
             !(vk->usage & VK_IMAGE_USAGE_SAMPLED_BIT) || gpufx_vk_host_copy_broken(fc)) {
             av_log(ctx, AV_LOG_ERROR, "Input '%s': a frame of another Vulkan frames context whose "
-                   "images gpufx cannot read (multiplane, not sampled or host image copies; "
+                   "images gpufx cannot read (multiplane without transfers, not sampled or host image copies; "
                    "image usage 0x%x).\n", ctx->input_pads[i].name, vk->usage);
             return AVERROR(ENOSYS);
         }
