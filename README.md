@@ -30,7 +30,14 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
 - **Vulkan frames without copies**: `hwupload` frames (`AV_PIX_FMT_VULKAN`, one image per plane) are processed
   in place on FFmpeg's own Vulkan device, synchronised with its timeline semaphores; frames never go back
   to RAM between filters. Frames of the Vulkan decoders (`-hwaccel vulkan`) are multiplane images: gpufx reads
-  them through one GPU copy of each plane.
+  them through one GPU copy of each plane. On a device opened without `disable_multiplane=1` gpufx's nv12/p010/yuv
+  outputs are multiplane images too (one GPU copy of each plane), which the Vulkan encoders take, so decode,
+  effects and encode stay on the GPU:
+
+  ```bash
+  ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -hwaccel vulkan -hwaccel_device vk \
+    -hwaccel_output_format vulkan -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_vulkan out.mp4
+  ```
 - **D3D12 and D3D11 frames** (Windows): `AV_PIX_FMT_D3D12` frames (`-init_hw_device d3d12va`) are processed in
   place on FFmpeg's own `ID3D12Device`, synchronised with their fences; `AV_PIX_FMT_D3D11` frames run on the D3D12
   device of the same adapter through shared NT handles (outputs without a copy, other inputs with one GPU copy).

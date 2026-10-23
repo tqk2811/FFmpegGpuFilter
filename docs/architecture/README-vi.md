@@ -683,7 +683,7 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   chỉ có compute mà NVIDIA liệt kê trước thì device bị lost; libgpufx từ chối họ như vậy). Filter giữ `lock_queue` của FFmpeg quanh mỗi lần gọi, nên
   lệnh submit của FFmpeg (hwupload, filter Vulkan khác) không tranh với wgpu.
 - **Frame.** Mỗi plane một `VkImage`, theo format từng plane của FFmpeg (`R8`, `R8G8`, `R8G8B8A8`, `R16`,
-  `R16G16`, `R16G16B16A16` `_UNORM`), đọc và ghi tại chỗ; frames context output do gpufx tạo dùng
+  `R16G16`, `R16G16B16A16` `_UNORM`), đọc và ghi tại chỗ; frames context output mỗi plane một image do gpufx tạo dùng
   `AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE` và cần usage `STORAGE`. Frame input không có usage `SAMPLED` bị từ chối
   lúc configure kèm thông báo.
 - **Input multiplane** (một image `G8_B8R8_2PLANE_420`, `G10X6_B10X6R10X6_2PLANE_420_3PACK16`,
@@ -695,7 +695,21 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   của các barrier layout, trước phần của wgpu: image scratch đi từ `UNDEFINED` sang `GENERAL` (bị ghi đè toàn
   bộ), image nguồn sang `GENERAL`, rồi một barrier sau copy làm lệnh ghi transfer hiện ra (barrier của wgpu từ
   `STORAGE_READ_WRITE` chỉ phủ lệnh ghi của shader). Cùng một lần submit, chờ và signal semaphore như cũ. Frame
-  cần usage `TRANSFER_SRC` (decoder và `hwupload` đều có). Output vẫn mỗi plane một image. FFmpeg 9.0 mặc định tạo
+  cần usage `TRANSFER_SRC` (decoder và `hwupload` đều có).
+- **Output multiplane.** Encoder Vulkan (`h264_vulkan`, `hevc_vulkan`, `av1_vulkan`) chỉ nhận image multiplane
+  (`vulkan_encode.c` tạo view `VIDEO_ENCODE_SRC` bằng `format[0]` của frames context). Nên frames context output
+  trước hết được tạo như FFmpeg tạo cho hwupload: không cờ, không `create_pnext`, usage
+  `SAMPLED | TRANSFER_SRC | TRANSFER_DST` (FFmpeg tự thêm những gì format hỗ trợ, gồm `VIDEO_ENCODE_SRC` và cờ
+  profile-independent). Giữ lại khi FFmpeg tạo image multiplane của một format trong bảng trên (device mở không có
+  `disable_multiplane=1`), không thì gpufx quay về storage image mỗi plane một image (`gpufx_vk_multiplane_frames`
+  trong `ffmpeg/vf_gpufx_vk.h`; `gpufx_ai_upscale` và `gpufx_ai_framerate` cũng dùng). Không thêm option: option
+  của device đã nói user muốn loại nào, như với hwupload. libgpufx ghi output đó vào storage image một plane của
+  mình (tạo như image scratch của input, `STORAGE | COPY_SRC`, giữ theo pad output), rồi một command buffer thô
+  sau phần của wgpu copy từng image vào `dstSubresource` aspect `PLANE_n`: barrier từ state `STORAGE_READ_WRITE`
+  của wgpu (lệnh ghi shader) sang lệnh đọc transfer, các lệnh copy, rồi barrier làm lệnh ghi transfer hiện ra và
+  giữ lệnh ghi shader của frame sau vào image scratch nằm sau lệnh đọc. Image của frame đi từ `UNDEFINED` sang
+  `GENERAL` trước khi chạy, cùng lần submit và signal semaphore như output khác, để lại ở `GENERAL`.
+  FFmpeg 9.0 mặc định tạo
   frames context `yuva420p`/`yuva444p` không có usage nào (của `hwupload` thì dùng được), nên output chuyển sang
   format khác, ví dụ `rgba`. sw_format của output là của input nguồn nếu libgpufx ghi được
   và FFmpeg tạo được storage image cho nó, không thì `rgba`.

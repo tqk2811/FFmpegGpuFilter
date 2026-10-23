@@ -28,7 +28,14 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
 - **Frame Vulkan không copy**: frame của `hwupload` (`AV_PIX_FMT_VULKAN`, mỗi plane một image) được xử lý tại chỗ
   trên chính device Vulkan của FFmpeg, đồng bộ bằng timeline semaphore của nó; giữa các filter frame không quay
   về RAM. Frame của decoder Vulkan (`-hwaccel vulkan`) là image multiplane: gpufx đọc qua
-  một lần copy trên GPU cho mỗi plane.
+  một lần copy trên GPU cho mỗi plane. Trên device mở không có `disable_multiplane=1`, output nv12/p010/yuv của gpufx
+  cũng là image multiplane (một lần copy GPU mỗi plane), loại mà encoder Vulkan nhận, nên decode, hiệu ứng và encode
+  đều nằm trên GPU:
+
+  ```bash
+  ffmpeg -init_hw_device vulkan=vk:0 -filter_hw_device vk -hwaccel vulkan -hwaccel_device vk \
+    -hwaccel_output_format vulkan -i in.mp4 -vf "gpufx=graph=invert.zip" -c:v h264_vulkan out.mp4
+  ```
 - **Frame D3D12 và D3D11** (Windows): frame `AV_PIX_FMT_D3D12` (`-init_hw_device d3d12va`) được xử lý tại chỗ trên
   chính `ID3D12Device` của FFmpeg, đồng bộ bằng fence của frame; frame `AV_PIX_FMT_D3D11` chạy trên device D3D12 cùng
   adapter qua shared NT handle (output không copy, input khác tốn một lần copy GPU). nv12 và p010le.

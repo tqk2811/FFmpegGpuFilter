@@ -150,6 +150,30 @@ same() {
     if [ -n "$2" ] && [ "$2" = "$3" ]; then pass "$1"
     else fail "$1"; echo "    hw: $2"; echo "    sw: $3"; show_vk_log; echo "    --- last.log:"; cat "$CLIPS/last.log"; fi
 }
+# dx_psnr ENCODED REF: lowest PSNR of a frame of the encoded clip against the reference
+# frames (a stale frame, e.g. an encoder reading before gpufx is done, shows there).
+dx_psnr() {
+    "$FF" -hide_banner -nostdin -v error -i "$1" -i "$2" -an \
+        -lavfi "[0]format=yuv444p16le[a];[1]format=yuv444p16le[b];[a][b]psnr=stats_file=-" -f null - 2> /dev/null |
+        sed -n 's/.* psnr_avg:\([0-9.inf]*\).*/\1/p' | sed 's/^inf$/999/' | sort -n | head -n 1
+}
+# dx_encode NAME REF ARGS...: encode on the GPU (ARGS end with the output clip $CLIPS/enc.mp4),
+# then every frame well above noise against REF. An encoder this GPU lacks is a skip.
+dx_encode() {
+    name=$1 ref=$2; shift 2
+    rm -f "$CLIPS/enc.mp4"
+    # shellcheck disable=SC2086
+    if ! "$FF" -hide_banner -nostdin -v error -y "$@" > "$CLIPS/last.log" 2>&1; then
+        # Only "this GPU has no such encoder": any other error is a failure.
+        if grep -q "Driver does not support requested features\|No usable encoding profile\|no encode device\|Error creating a MFX session\|Device does not support the VK_KHR_video_encode\|Device does not support encoding\|Encoding of .* is not supported by this device" "$CLIPS/last.log"; then
+            echo "  skip  $name ($(head -n1 "$CLIPS/last.log"))"
+        else fail "$name"; cat "$CLIPS/last.log"; fi
+        return 0
+    fi
+    DB=$(dx_psnr "$CLIPS/enc.mp4" "$ref")
+    if [ -n "$DB" ] && below 35 "$DB"; then pass "$name (lowest frame $DB dB)"
+    else fail "$name (lowest frame ${DB:-no} dB, want > 35)"; fi
+}
 # pt_md5 FORMAT FILTERS: framemd5 of 3 frames of A in FORMAT through FILTERS (which upload
 # them first), downloaded again; the verbose log goes to $CLIPS/pt.log.
 pt_md5() {
@@ -913,6 +937,51 @@ if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an -vf "format=nv12,h
 else
     echo "  skip  -hwaccel vulkan into gpufx (no h264_vulkan encoding: $(head -n1 "$CLIPS/last.log"))"
 fi
+# Full Vulkan pipeline without hwdownload: on a multiplane device gpufx's output frames are
+# multiplane images (its own plane images copied in), which the Vulkan encoders take. Every
+# encoded frame against the same frames through hwdownload (a stale frame shows there).
+ENC_OUT=$CLIPS/enc.mp4 VREF=$CLIPS/vkref.nut VREF10=$CLIPS/vkref10.mkv VREFH=$CLIPS/vkrefh.nut
+if command -v cygpath >/dev/null; then
+    ENC_OUT=$(cygpath -m "$ENC_OUT") VREF=$(cygpath -m "$VREF") VREF10=$(cygpath -m "$VREF10") VREFH=$(cygpath -m "$VREFH")
+fi
+"$FF" -hide_banner -encoders > "$CLIPS/encoders.txt" 2>&1
+INV="gpufx=graph=$FX/ffmpeg/invert.zip"
+# shellcheck disable=SC2086
+if ! "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an -vf "format=nv12,$UP,$INV,hwdownload,format=nv12" \
+    -c:v rawvideo "$VREF" > "$CLIPS/last.log" 2>&1; then
+    fail "Vulkan: pipeline reference frames"; cat "$CLIPS/last.log"
+else
+    # Not av1_vulkan: on the RTX 4060 (driver 617.42) its frames are ~20 dB off without gpufx too.
+    for enc in h264_vulkan hevc_vulkan; do
+        if ! grep -qw $enc "$CLIPS/encoders.txt"; then echo "  skip  Vulkan: $enc (not in this ffmpeg)"; continue; fi
+        # shellcheck disable=SC2086
+        dx_encode "Vulkan: $UP -> gpufx -> $enc" "$VREF" $MPDEV -i "$A" -an -vf "format=nv12,$UP,$INV" -c:v $enc "$ENC_OUT"
+    done
+    if grep -qw hevc_vulkan "$CLIPS/encoders.txt"; then
+        V="gpufx=graph='$FX/ffmpeg/vignette.zip=strength=0.7'"
+        # shellcheck disable=SC2086
+        if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an \
+            -vf "format=p010le,$UP,$V,hwdownload,format=p010le,format=yuv420p10le" -c:v ffv1 "$VREF10" > "$CLIPS/last.log" 2>&1; then
+            # shellcheck disable=SC2086
+            dx_encode "Vulkan: p010 gpufx -> hevc_vulkan main10" "$VREF10" $MPDEV -i "$A" -an \
+                -vf "format=p010le,$UP,$V" -c:v hevc_vulkan -profile:v main10 "$ENC_OUT"
+        else
+            fail "Vulkan: p010 reference frames"; cat "$CLIPS/last.log"
+        fi
+    fi
+    # Vulkan decoder frames -> gpufx -> Vulkan encoder (the clip made above).
+    if [ -s "$VKH" ] && grep -qw h264_vulkan "$CLIPS/encoders.txt"; then
+        # shellcheck disable=SC2086
+        if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$VKH" -an -vf "format=nv12,$UP,$INV,hwdownload,format=nv12" \
+            -c:v rawvideo "$VREFH" > "$CLIPS/last.log" 2>&1; then
+            # shellcheck disable=SC2086
+            dx_encode "Vulkan: -hwaccel vulkan -> gpufx -> h264_vulkan" "$VREFH" $MPDEV -hwaccel vulkan -hwaccel_device vk \
+                -hwaccel_output_format vulkan -i "$VKH" -an -vf "$INV" -c:v h264_vulkan "$ENC_OUT"
+        else
+            fail "Vulkan: decoded reference frames"; cat "$CLIPS/last.log"
+        fi
+    fi
+fi
 # gpufx uploads software frames as one image per plane whatever the device was opened with.
 VKN=own-upload
 if "$FF" -hide_banner -nostdin -v error -init_hw_device "vulkan=vk:$VK_ADAPTER$VKX" -filter_hw_device vk -i "$A" -frames:v 2 -an \
@@ -1062,30 +1131,6 @@ dx_skip() {
     fi
 }
 dx_hwdevs=$("$FF" -hide_banner -init_hw_device list 2>&1)
-# dx_psnr ENCODED REF: lowest PSNR of a frame of the encoded clip against the reference
-# frames (a stale frame, e.g. an encoder reading before gpufx is done, shows there).
-dx_psnr() {
-    "$FF" -hide_banner -nostdin -v error -i "$1" -i "$2" -an \
-        -lavfi "[0]format=yuv444p16le[a];[1]format=yuv444p16le[b];[a][b]psnr=stats_file=-" -f null - 2> /dev/null |
-        sed -n 's/.* psnr_avg:\([0-9.inf]*\).*/\1/p' | sed 's/^inf$/999/' | sort -n | head -n 1
-}
-# dx_encode NAME REF ARGS...: encode on the GPU (ARGS end with the output clip $CLIPS/enc.mp4),
-# then every frame well above noise against REF. An encoder this GPU lacks is a skip.
-dx_encode() {
-    name=$1 ref=$2; shift 2
-    rm -f "$CLIPS/enc.mp4"
-    # shellcheck disable=SC2086
-    if ! "$FF" -hide_banner -nostdin -v error -y "$@" > "$CLIPS/last.log" 2>&1; then
-        # Only "this GPU has no such encoder": any other error is a failure.
-        if grep -q "Driver does not support requested features\|No usable encoding profile\|no encode device\|Error creating a MFX session" "$CLIPS/last.log"; then
-            echo "  skip  $name ($(head -n1 "$CLIPS/last.log"))"
-        else fail "$name"; cat "$CLIPS/last.log"; fi
-        return 0
-    fi
-    DB=$(dx_psnr "$CLIPS/enc.mp4" "$ref")
-    if [ -n "$DB" ] && below 35 "$DB"; then pass "$name (lowest frame $DB dB)"
-    else fail "$name (lowest frame ${DB:-no} dB, want > 35)"; fi
-}
 # Decode -> gpufx -> encode without hwdownload/hwupload: -hwaccel d3d12va/d3d11va frames into
 # gpufx, its frames straight into the hardware encoders of that API (D3D12 encoders wait for
 # the fences; NVENC and QSV read D3D11 textures outside the immediate context, so gpufx

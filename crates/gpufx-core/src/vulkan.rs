@@ -8,10 +8,11 @@
 //! So wgpu sees the physical device through a `vkGetInstanceProcAddr` that reports only
 //! the extensions enabled on the device, and features masked by the enabled ones.
 //!
-//! An input in one multiplane image (Vulkan decoders, `hwupload` on a device without
-//! `disable_multiplane=1`) cannot be wrapped plane by plane by wgpu: each plane is copied
-//! with a raw `vkCmdCopyImage` (`VK_IMAGE_ASPECT_PLANE_n_BIT`) into a single-plane image
-//! of gpufx, kept per input pad for the next frames, in the same submission.
+//! A frame in one multiplane image (Vulkan decoders, `hwupload` and gpufx's own outputs on
+//! a device without `disable_multiplane=1`, which Vulkan encoders need) cannot be wrapped
+//! plane by plane by wgpu: each plane goes through a single-plane image of gpufx, kept per
+//! pad for the next frames, with a raw `vkCmdCopyImage` (`VK_IMAGE_ASPECT_PLANE_n_BIT`) in
+//! the same submission; from an input before the effects run, into an output after.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem::size_of;
@@ -51,7 +52,7 @@ pub struct VulkanDevice {
     pub queue_flags: u32,
 }
 
-/// One `VkImage` of a frame, one per plane; or, for an input, one multiplane image
+/// One `VkImage` of a frame, one per plane; or one multiplane image
 /// ([`multiplane_vk_format`]) holding every plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VulkanPlane {
@@ -594,14 +595,14 @@ struct ImportKey {
 #[derive(Default)]
 pub(crate) struct ImportCache {
     pads: Vec<Lru<ImportKey, wgpu::Texture>>,
-    /// Per input pad: the images its multiplane inputs are copied into.
+    /// Per input then output pad: the images planes of its multiplane frames go through.
     scratch: Vec<Option<Scratch>>,
     /// Wrappers made, for tests.
     made: usize,
 }
 
-/// Single-plane images of gpufx the multiplane inputs of one pad are copied into, for one
-/// format and size. wgpu's state of each is GENERAL (STORAGE_READ_WRITE) between calls,
+/// Single-plane images of gpufx the planes of the multiplane frames of one pad are copied
+/// from (input) or into (output), for one format and size. wgpu's state of each is GENERAL (STORAGE_READ_WRITE) between calls,
 /// as for the wrappers.
 struct Scratch {
     format: PixelFormat,
@@ -609,9 +610,16 @@ struct Scratch {
     planes: Vec<(wgpu::Texture, vk::Image)>,
 }
 
-/// Makes the scratch images of input pad `pad` for `f` the first time, and again when the
-/// format or size changes.
-unsafe fn scratch_planes<S: GpuStage + ?Sized>(stage: &mut S, device: &wgpu::Device, pad: usize, f: &VulkanFrame) -> Result<(), Error> {
+/// Makes the scratch images of pad `pad` (inputs then outputs) for `f` the first time, and
+/// again when the format or size changes: copy destinations wgpu samples for an input,
+/// storage images wgpu writes and copy sources for an output.
+unsafe fn scratch_planes<S: GpuStage + ?Sized>(
+    stage: &mut S,
+    device: &wgpu::Device,
+    pad: usize,
+    f: &VulkanFrame,
+    output: bool,
+) -> Result<(), Error> {
     use hal::Device as _;
     let cache = &mut stage.interop().vk.scratch;
     if cache.len() <= pad {
@@ -621,6 +629,14 @@ unsafe fn scratch_planes<S: GpuStage + ?Sized>(stage: &mut S, device: &wgpu::Dev
         return Ok(());
     }
     cache[pad] = None;
+    let (hal_usage, usage) = if output {
+        (
+            wgpu::TextureUses::COPY_SRC | wgpu::TextureUses::STORAGE_WRITE_ONLY | wgpu::TextureUses::STORAGE_READ_WRITE,
+            wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
+        )
+    } else {
+        (wgpu::TextureUses::COPY_DST | wgpu::TextureUses::RESOURCE, wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING)
+    };
     let mut planes = Vec::new();
     for p in 0..f.format.plane_count() {
         let format = f.format.plane_texture_format(p);
@@ -636,15 +652,15 @@ unsafe fn scratch_planes<S: GpuStage + ?Sized>(stage: &mut S, device: &wgpu::Dev
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUses::COPY_DST | wgpu::TextureUses::RESOURCE,
+                    usage: hal_usage,
                     memory_flags: hal::MemoryFlags::empty(),
                     view_formats: Vec::new(),
                 })
-                .map_err(|e| Error::Gpu(format!("cannot make a {w}x{h} {format:?} image for a multiplane input: {e}")))?
+                .map_err(|e| Error::Gpu(format!("cannot make a {w}x{h} {format:?} image for a multiplane frame: {e}")))?
         };
         let image = tex.raw_handle();
-        // Taken as initialized (no clear), in GENERAL: true from the first copy on, whose
-        // raw barrier starts from UNDEFINED.
+        // Taken as initialized (no clear), in GENERAL: true from the first use on, whose raw
+        // barrier starts from UNDEFINED (an input's copy, an output's effects).
         let t = device.create_texture_from_hal::<Vulkan>(
             tex,
             &wgpu::TextureDescriptor {
@@ -654,7 +670,7 @@ unsafe fn scratch_planes<S: GpuStage + ?Sized>(stage: &mut S, device: &wgpu::Dev
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage,
                 view_formats: &[],
             },
             wgpu::TextureUses::STORAGE_READ_WRITE,
@@ -684,29 +700,42 @@ fn general_barrier(image: vk::Image, old: vk::ImageLayout) -> vk::ImageMemoryBar
         })
 }
 
-/// A plane of a multiplane input to copy: source image, plane, scratch image, plane size.
-type PlaneCopy = (vk::Image, usize, vk::Image, (u32, u32));
+/// A plane of a multiplane frame to copy: the multiplane image, the plane, the scratch
+/// image, the plane size, and whether the scratch image is copied into the plane (output)
+/// rather than from it (input).
+type PlaneCopy = (vk::Image, usize, vk::Image, (u32, u32), bool);
 
-/// Records the copies of the planes of multiplane inputs into images of gpufx, all in
-/// GENERAL, then makes them visible to what follows: wgpu moves the scratch images from
-/// STORAGE_READ_WRITE next, a state whose barrier does not cover transfer writes.
+/// Records the copies between the planes of multiplane frames and images of gpufx, all in
+/// GENERAL, then makes them visible to what follows (wgpu moves the scratch images of
+/// inputs from STORAGE_READ_WRITE next, a state whose barrier does not cover transfer
+/// writes) and keeps later writes of the sources after them (wgpu writes the scratch images
+/// of outputs again on the next frame, from another submission).
 ///
 /// # Safety
-/// `cmd` is recording, after barriers that moved every image to GENERAL.
+/// `cmd` is recording, after barriers that moved every image to GENERAL and made the
+/// writes of the sources visible.
 unsafe fn copy_planes(raw: &ash::Device, cmd: vk::CommandBuffer, copies: &[PlaneCopy]) {
     const PLANES: [vk::ImageAspectFlags; 3] = [vk::ImageAspectFlags::PLANE_0, vk::ImageAspectFlags::PLANE_1, vk::ImageAspectFlags::PLANE_2];
     let layer = |aspect_mask| vk::ImageSubresourceLayers { aspect_mask, mip_level: 0, base_array_layer: 0, layer_count: 1 };
-    for &(src, p, dst, (w, h)) in copies {
-        let region = vk::ImageCopy::default()
-            .src_subresource(layer(PLANES[p]))
-            .dst_subresource(layer(vk::ImageAspectFlags::COLOR))
-            .extent(vk::Extent3D { width: w, height: h, depth: 1 });
+    let mut after = Vec::new();
+    for &(frame, p, scratch, (w, h), into_frame) in copies {
+        let (src, src_aspect, dst, dst_aspect) = if into_frame {
+            (scratch, vk::ImageAspectFlags::COLOR, frame, PLANES[p])
+        } else {
+            (frame, PLANES[p], scratch, vk::ImageAspectFlags::COLOR)
+        };
+        let region = vk::ImageCopy::default().src_subresource(layer(src_aspect)).dst_subresource(layer(dst_aspect)).extent(vk::Extent3D {
+            width: w,
+            height: h,
+            depth: 1,
+        });
         raw.cmd_copy_image(cmd, src, vk::ImageLayout::GENERAL, dst, vk::ImageLayout::GENERAL, &[region]);
+        for (image, access) in [(dst, vk::AccessFlags::TRANSFER_WRITE), (src, vk::AccessFlags::TRANSFER_READ)] {
+            if !after.iter().any(|b: &vk::ImageMemoryBarrier| b.image == image) {
+                after.push(general_barrier(image, vk::ImageLayout::GENERAL).src_access_mask(access));
+            }
+        }
     }
-    let after: Vec<_> = copies
-        .iter()
-        .map(|&(_, _, dst, _)| general_barrier(dst, vk::ImageLayout::GENERAL).src_access_mask(vk::AccessFlags::TRANSFER_WRITE))
-        .collect();
     raw.cmd_pipeline_barrier(
         cmd,
         vk::PipelineStageFlags::TRANSFER,
@@ -735,8 +764,9 @@ impl EffectGraph {
     ///
     /// # Safety
     /// The images must be valid images of that device as described (one per plane, with
-    /// `SAMPLED` usage for inputs and `STORAGE` for outputs; or an input in one multiplane
-    /// image with `TRANSFER_SRC` usage, whose planes are copied), and the caller must hold
+    /// `SAMPLED` usage for inputs and `STORAGE` for outputs; or one multiplane image
+    /// ([`multiplane_vk_format`]) with `TRANSFER_SRC` usage for an input, `TRANSFER_DST`
+    /// for an output, whose planes are copied), and the caller must hold
     /// the frames (FFmpeg's `lock_frame`) and the queue while this runs.
     /// Wrappers of the images (views, bind groups) are kept for the next frames until the
     /// graph is dropped: every image must stay valid until then, and a destroyed image must
@@ -786,17 +816,19 @@ pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
     while stage.interop().vk.pads.len() < pads {
         stage.interop().vk.pads.push(Lru::new(crate::lru::FRAMES * 4));
     }
-    // Multiplane inputs: the images their planes are copied into, made before any wrapping.
-    let mut multi = vec![false; inputs.len()];
-    for (n, f) in inputs.iter().enumerate() {
+    // Multiplane frames: the images their planes go through, made before any wrapping.
+    let mut multi = vec![false; pads];
+    for (pad, (f, output)) in inputs.iter().map(|f| (f, false)).chain(outs.iter().map(|f| (f, true))).enumerate() {
         if let ([plane], Some(mp)) = (&f.planes[..], multiplane_vk_format(f.format)) {
             if plane.format == mp.as_raw() {
-                scratch_planes(stage, device, n, f)?;
-                multi[n] = true;
+                scratch_planes(stage, device, pad, f, output)?;
+                multi[pad] = true;
             }
         }
     }
+    // Copies before the effects (inputs) and after them (outputs).
     let mut copies: Vec<PlaneCopy> = Vec::new();
+    let mut copies_out: Vec<PlaneCopy> = Vec::new();
     let (ins, outs_w, raw_device) = {
         let hal_device = device.as_hal::<Vulkan>().ok_or_else(|| Error::Gpu("the device is not a Vulkan device".into()))?;
         let raw_device = hal_device.raw_device().clone();
@@ -807,7 +839,8 @@ pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
             for (n, f) in list.iter().enumerate() {
                 let what = format!("{} {n}", if output { "output" } else { "input" });
                 let count = f.format.plane_count();
-                if !output && multi[n] {
+                let pad = if output { inputs.len() + n } else { n };
+                if multi[pad] {
                     let plane = &f.planes[0];
                     if plane.queue_family != vk::QUEUE_FAMILY_IGNORED && plane.queue_family != family {
                         return Err(Error::Frame(format!(
@@ -818,13 +851,20 @@ pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
                     let image = vk::Image::from_raw(plane.image);
                     let layout = vk::ImageLayout::from_raw(plane.layout);
                     if layout != vk::ImageLayout::GENERAL && !barriers.iter().any(|b| b.image == image) {
-                        barriers.push(general_barrier(image, layout));
+                        // Outputs are written whole: their old content may go.
+                        barriers.push(general_barrier(image, if output { vk::ImageLayout::UNDEFINED } else { layout }));
                     }
-                    let scratch = stage.interop().vk.scratch[n].as_ref().expect("made above");
+                    let scratch = stage.interop().vk.scratch[pad].as_ref().expect("made above");
                     for (p, (t, dst)) in scratch.planes.iter().enumerate() {
-                        // Written whole by the copy: the old content may go.
-                        barriers.push(general_barrier(*dst, vk::ImageLayout::UNDEFINED));
-                        copies.push((image, p, *dst, f.format.plane_texture_size(p, f.width, f.height)));
+                        let size = f.format.plane_texture_size(p, f.width, f.height);
+                        if output {
+                            // Written whole by the effects, then copied into the plane.
+                            copies_out.push((image, p, *dst, size, true));
+                        } else {
+                            // Written whole by the copy: the old content may go.
+                            barriers.push(general_barrier(*dst, vk::ImageLayout::UNDEFINED));
+                            copies.push((image, p, *dst, size, false));
+                        }
                         // The key of a texture taken as it is goes unused.
                         let key = ImportKey { image: dst.as_raw(), semaphore: 0, format: t.format(), size: (0, 0), output };
                         planes.push((output, n, key, Ok(t.clone())));
@@ -833,8 +873,8 @@ pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
                 }
                 if f.planes.len() != count {
                     return Err(Error::Frame(format!(
-                        "{what}: a {} frame needs one Vulkan image per plane ({count}), got {}; multiplane images are not \
-                             supported (FFmpeg: create the device with disable_multiplane=1)",
+                        "{what}: a {} frame needs one Vulkan image per plane ({count}), got {}; multiplane images are \
+                             supported for nv12, p010 and yuv420p/422p/444p (8 and 10 bits) only",
                         f.format.name(),
                         f.planes.len()
                     )));
@@ -863,7 +903,6 @@ pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
                         barriers.push(general_barrier(image, if output { vk::ImageLayout::UNDEFINED } else { layout }));
                     }
                     let key = ImportKey { image: plane.image, semaphore: plane.semaphore, format, size: (w, h), output };
-                    let pad = if output { inputs.len() + n } else { n };
                     if let Some(t) = stage.interop().vk.pads[pad].get(&key) {
                         planes.push((output, n, key, Ok(t.clone())));
                         continue;
@@ -962,6 +1001,26 @@ pub(crate) unsafe fn process_vulkan<S: GpuStage + ?Sized>(
         }),
     );
     buffers.push(enc.finish());
+    if !copies_out.is_empty() {
+        // After wgpu's barrier into STORAGE_READ_WRITE above, which covers no transfer reads.
+        let scratch: Vec<_> = copies_out.iter().map(|&(_, _, s, _, _)| general_barrier(s, vk::ImageLayout::GENERAL)).collect();
+        let mut post = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("gpufx vulkan plane output") });
+        post.as_hal_mut::<Vulkan, _, _>(|enc| {
+            if let Some(enc) = enc {
+                raw_device.cmd_pipeline_barrier(
+                    enc.raw_handle(),
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &scratch,
+                );
+                copy_planes(&raw_device, enc.raw_handle(), &copies_out);
+            }
+        });
+        buffers.push(post.finish());
+    }
 
     // Wait for each semaphore once, at the highest value asked, and signal one more.
     let mut sems: Vec<(u64, u64)> = Vec::new();

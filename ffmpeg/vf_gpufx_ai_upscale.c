@@ -275,6 +275,22 @@ static int config_out_frames(AVFilterContext *ctx, enum AVPixelFormat sw_format,
         av_log(ctx, AV_LOG_ERROR, "A %dx%d frame upscaled %d times is too large.\n", w, h, s->scale);
         return AVERROR(EINVAL);
     }
+    /* Multiplane images where the device makes them (Vulkan encoders take only those). */
+    if (s->hw_fmt == AV_PIX_FMT_VULKAN) {
+        AVBufferRef *ref = gpufx_vk_multiplane_frames(s->hw_device, sw_format, (int)ow, (int)oh);
+        int ret;
+
+        if (ref) {
+            if (s->out_frames && (ret = av_dynarray_add_nofree(&s->old_frames, &s->nb_old_frames, s->out_frames)) < 0) {
+                av_buffer_unref(&ref);
+                return ret;
+            }
+            s->out_frames = ref;
+            s->in_w       = w;
+            s->in_h       = h;
+            return 0;
+        }
+    }
     for (int uav = 1; uav >= 0; uav--) {
         AVBufferRef *ref = av_hwframe_ctx_alloc(s->hw_device);
         AVHWFramesContext *fc;
