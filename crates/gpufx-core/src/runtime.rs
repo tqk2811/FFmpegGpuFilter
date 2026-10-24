@@ -112,6 +112,9 @@ pub(crate) fn request_adapter(backend: Backend) -> Result<wgpu::Adapter, Error> 
         backends: backend.wgpu(),
         // Honours WGPU_DX12_COMPILER (fxc, dxc) and the other backend variables.
         backend_options: wgpu::BackendOptions::from_env_or_default(),
+        // Honours WGPU_DEBUG, WGPU_VALIDATION... over the defaults of the build (debug
+        // builds compile D3D12 shaders unoptimized, WGPU_DEBUG=0 turns that off).
+        flags: wgpu::InstanceFlags::from_env_or_default(),
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
     let request = |force_fallback_adapter| {
