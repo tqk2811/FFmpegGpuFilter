@@ -594,8 +594,9 @@ impl ShaderCache {
 /// `expr` parameters), as `(path in the package, file)`, for `gpufx pack --precompile`.
 /// Needs a D3D12 adapter (WARP will do) and `dxcompiler.dll`; existing `compiled/` files
 /// of `pkg` are ignored. Each file is DXIL followed by its SHA-256. Every pass group that
-/// may run on D3D12 on Windows is compiled, whatever its vendor and features; a package
-/// without one has nothing to precompile (an empty list).
+/// may run on D3D12 on Windows is compiled, whatever its vendor, unless it needs features
+/// the precompile device lacks; a package without one has nothing to precompile (an
+/// empty list).
 pub fn precompile(pkg: &Package) -> Result<Vec<(String, Vec<u8>)>, crate::Error> {
     let groups = &pkg.manifest.groups;
     let packages: Vec<(Package, Vec<String>)> = (0..groups.len())
