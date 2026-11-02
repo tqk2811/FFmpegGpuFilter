@@ -13,7 +13,7 @@ stream. Rate output tuỳ ý, không cần là bội của rate input.
 ## Cú pháp
 
 ```
-gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>]
+gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>][:scale=<0..1>]
 ```
 
 ## Option
@@ -24,6 +24,7 @@ gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>]
 | `fps` | rational | gấp đôi rate input | 0..INT_MAX | Frame rate output, số hoặc phân số (`30`, `24000/1001`); không nhận tên rate như `ntsc`. `0` (mặc định) nghĩa là gấp đôi rate input. Nếu không biết rate input thì phải đặt `fps` |
 | `scene` | double | `0.2` | 0..1 | Ngưỡng đổi cảnh: SSIM của cặp frame ở 32x32, tính như `inference_video.py` gốc của RIFE. Cặp dưới ngưỡng là một cú cắt và không nội suy (lặp source frame gần hơn). `0` không bao giờ phát hiện cắt: mọi cặp đều nội suy. Trên anime 0.2 vẫn trộn vài cú cắt giữa các cảnh có bố cục giống nhau; 0.4 bắt được 89% cú cắt của ba clip OP/ED 90 s, đổi lại có lúc lặp một frame ở vài cú zoom và flash rất nhanh |
 | `max_gap` | double | `2.0` | 1..100 | Cặp source frame cách nhau hơn từng này lần thời lượng frame input (khoảng trống trong stream VFR) thì lặp frame, không nội suy |
+| `scale` | double | `0` (auto) | 0..1 | Tỉ lệ xử lý: tỉ lệ model ước lượng chuyển động, chính là tham số `scale` của model (`--scale` của RIFE; rife-v4.6 nhận 0.25, 0.5 hoặc 1). `0` (mặc định) là auto: 0.5 cho frame có diện tích trên 1920x1088 pixel (4K), ngược lại 1; model không có tham số này thì chạy nguyên trạng. Giá trị nhỏ hơn thì nhanh hơn, tốn ít bộ nhớ GPU hơn (tensor 4K: 1,2 GiB ở 1, 830 MiB ở 0.5) và theo được chuyển động lớn hơn, đổi lại chuyển động kém chi tiết hơn. Giá trị khác 0 với model không có tham số `scale`, hoặc ngoài khoảng của nó, làm filter dừng với lỗi. Frame được pad lên bội số của `32 / scale` |
 
 Cặp đi ngược thời gian, đổi kích thước hoặc format, hoặc cách nhau hơn `max_gap` cũng bị lặp frame, kèm warning.
 Bước nhảy hơn 10000 output frame (nhảy timestamp, hoặc stream kết thúc rất lâu sau frame cuối) bị bỏ qua.
@@ -91,6 +92,15 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
 ```
 
+**`scale`.** Phần lớn input cứ để auto: 4K chạy ở 0.5 (ít bộ nhớ, nhanh hơn), 1080p trở xuống ở 1. Đặt khi cần ép
+giá trị, ví dụ 0.5 cho 1080p có chuyển động rất nhanh, hoặc 1 cho 4K khi GPU đủ bộ nhớ và cần chi tiết chuyển
+động. Ví dụ dưới chưa chạy thật (FFmpeg prebuilt chưa được build lại với option này).
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scale=0.5,gpufx_download,format=nv12" out.mp4
+```
+
 **Vulkan hay D3D12.** Nên dùng Vulkan: nhanh hơn D3D12 và D3D11 khoảng 1,7 lần trong số đo (xem Giới hạn). D3D12 cần
 DXC cho shader của model, và `GPUFX_SHADER_CACHE` giữ lại shader đã compile. Trên Vulkan dùng `disable_multiplane=1`
 và `gpufx_upload` (bắt buộc trên Intel Windows). Tăng `extra_hw_frames` khi upload nếu filter cảnh báo có thể cần thêm
@@ -103,7 +113,7 @@ Model không nằm trong git: file release `gpufx-packages.zip` có sẵn trong 
 
 - Chưa kiểm: đường VideoToolbox (macOS) chưa từng chạy trên Mac, và filter cùng `packages/gpufx_ai_framerate/rife-v4.6.zip` của bundle
   linux64 chưa được chạy (chỉ Windows đã chạy).
-- Tốc độ (RTX 4060 Laptop): Vulkan khoảng 45 ms mỗi frame 1080p (4K khoảng 174 ms); D3D12 và D3D11 chậm hơn
+- Tốc độ (RTX 4060 Laptop): Vulkan khoảng 45 ms mỗi frame 1080p (4K khoảng 174 ms, đo ở `scale` 1 trước khi auto chọn 0.5 cho 4K); D3D12 và D3D11 chậm hơn
   khoảng 1,7 lần. Nên dùng Vulkan.
 - Frame rate output là cố định: input VFR được lấy mẫu lại theo lưới.
 - Danh sách đầy đủ: [LIMITATIONS-vi.md](../../LIMITATIONS-vi.md#nội-suy-khung-hình-gpufx_ai_framerate).

@@ -5,7 +5,7 @@
   "output": "out0",
   "color": "rgb",
   "range": [0, 1],
-  "pad_multiple": 32,
+  "pad_multiple": { "param": "scale", "mul": 32, "pow": -1 },
   "pad_mode": "zero",
   "output_clamp": [0, 1]
 }

@@ -437,6 +437,19 @@ fn parameter_errors() {
     assert!(e.contains("is not positive"), "{e}");
     let cpu = Reference::from_parts(scaled_graph().as_bytes(), &[0u8; 4], None).unwrap();
     assert!(cpu.run_with(HashMap::new(), &[("scal", 0.5)]).is_err());
+    // a parameter with `values`: only those are accepted, and the default must be one of them
+    let only = scaled_graph().replace(r#""max":1}"#, r#""max":1,"values":[0.5,1]}"#);
+    let m = NnModel::from_parts_with(ctx.clone(), only.as_bytes(), &[0u8; 4], None, Precision::F32).unwrap();
+    let e = m.plan_with(&shapes, &[("scale", 0.75)]).err().unwrap().to_string();
+    assert!(e.contains("is not one of"), "{e}");
+    assert!(m.plan_with(&shapes, &[("scale", 0.5)]).is_ok());
+    let e = load(&only.replace(r#""default":1.0"#, r#""default":0.75"#)).unwrap_err();
+    assert!(e.contains("is not one of"), "{e}");
+    let e = load(&only.replace(r#""values":[0.5,1]"#, r#""values":[]"#)).unwrap_err();
+    assert!(e.contains("non-empty"), "{e}");
+    let cpu = Reference::from_parts(only.as_bytes(), &[0u8; 4], None).unwrap();
+    let e = cpu.run_with(HashMap::new(), &[("scale", 0.75)]).err().unwrap().to_string();
+    assert!(e.contains("is not one of"), "{e}");
 }
 
 fn rgba_texture(ctx: &GpuContext, w: u32, h: u32, usage: wgpu::TextureUsages) -> wgpu::Texture {
@@ -616,6 +629,92 @@ fn rife_matches_the_cpu_reference() {
         eprintln!("{set}: {db:.2} dB against the CPU reference on {}", ctx.description());
         assert!(db > 50.0, "{set}: {db:.2} dB");
     }
+}
+
+/// A 256x128 scene panned by `shift` px: a textured background and a red square with its left edge at
+/// `80 + shift`. Returns RGB.
+fn panned_scene(shift: f64) -> Vec<u8> {
+    let (w, h) = (256usize, 128usize);
+    let mut out = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        for x in 0..w {
+            let u = x as f64 - shift;
+            let v = y as f64;
+            if (80.0..104.0).contains(&u) && (52.0..76.0).contains(&v) {
+                out.extend([230, 30, 30]);
+            } else {
+                let g = 110.0 + 50.0 * (u * 0.11).sin() * (v * 0.07).cos() + 30.0 * ((u + 2.0 * v) * 0.031).sin();
+                out.extend([g as u8 / 2, g as u8, (255.0 - g) as u8]);
+            }
+        }
+    }
+    out
+}
+
+/// x centroid of the red square in an RGBA frame (R > 180, G < 100).
+fn red_centroid(rgba: &[u8], w: usize) -> f64 {
+    let (mut sum, mut n) = (0.0, 0.0);
+    for (i, p) in rgba.chunks(4).enumerate() {
+        if p[0] > 180 && p[1] < 100 {
+            sum += (i % w) as f64;
+            n += 1.0;
+        }
+    }
+    assert!(n > 100.0, "the square is lost: {n} px");
+    sum / n
+}
+
+fn psnr_rgba(a: &[u8], b: &[u8]) -> f64 {
+    let mse = a.chunks(4).zip(b.chunks(4)).flat_map(|(p, q)| (0..3).map(move |c| (p[c] as f64 - q[c] as f64).powi(2))).sum::<f64>()
+        / (a.len() / 4 * 3) as f64;
+    if mse == 0.0 {
+        f64::INFINITY
+    } else {
+        10.0 * (255.0f64 * 255.0 / mse).log10()
+    }
+}
+
+/// The RIFE package with the `scale` parameter (`GPUFX_RIFE_PKG`, built with `--rewrite rife-v4-scale`):
+/// GPU against the CPU reference at scale 1 and 0.5; scale 0.5 close to scale 1 with the moving square in the
+/// middle; and, with `GPUFX_RIFE_OLD_PKG` (a package converted without the rewrite), scale 1 giving the very
+/// pixels of the old package.
+#[test]
+#[ignore = "needs GPUFX_RIFE_PKG (with the scale param); GPUFX_RIFE_OLD_PKG optional"]
+fn rife_scale_param_matches_the_cpu_reference() {
+    let Some(ctx) = gpu() else { return };
+    let pkg = std::env::var("GPUFX_RIFE_PKG").expect("GPUFX_RIFE_PKG");
+    let (w, h) = (256u32, 128u32);
+    let rgb = [panned_scene(0.0), panned_scene(8.0)];
+    let rgba: Vec<Vec<u8>> = rgb.iter().map(|d| d.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect()).collect();
+    let model = Arc::new(NnModel::load(ctx.clone(), &pkg).unwrap());
+    let mut interp = FrameInterp::new(model).unwrap();
+    let cpu = Reference::load(std::path::Path::new(&pkg)).unwrap();
+    let frame = |d: &Vec<u8>| gpufx_nnconv::frames::Rgb8 { w: w as usize, h: h as usize, data: d.clone() };
+
+    let mut outs = Vec::new();
+    for scale in [1.0f32, 0.5] {
+        interp.set_params(&[("scale", scale)]).unwrap();
+        let got = interp.interpolate(&view(&rgba[0], w, h), &view(&rgba[1], w, h), 0.5).unwrap();
+        let want = gpufx_nnconv::frames::interpolate_with(&cpu, &frame(&rgb[0]), &frame(&rgb[1]), 0.5, &[("scale", scale)]).unwrap();
+        let want: Vec<u8> = want.data.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+        let db = psnr_rgba(&got, &want);
+        let x = red_centroid(&got, w as usize);
+        eprintln!("scale {scale}: GPU vs CPU {db:.2} dB, square centroid x {x:.2} (expected 95.5)");
+        assert!(db > 50.0, "scale {scale}: {db:.2} dB");
+        // left edge 80 -> 88, so the middle frame has it at 84: centroid 84 + 11.5
+        assert!((x - 95.5).abs() < 1.0, "scale {scale}: centroid {x:.2}");
+        outs.push(got);
+    }
+    let db = psnr_rgba(&outs[0], &outs[1]);
+    eprintln!("scale 0.5 against scale 1: {db:.2} dB");
+    assert!(db > 30.0, "{db:.2} dB");
+
+    if let Ok(old) = std::env::var("GPUFX_RIFE_OLD_PKG") {
+        let mut old = FrameInterp::new(Arc::new(NnModel::load(ctx.clone(), &old).unwrap())).unwrap();
+        let got = old.interpolate(&view(&rgba[0], w, h), &view(&rgba[1], w, h), 0.5).unwrap();
+        assert!(got == outs[0], "scale 1 differs from the package without the parameter: {:.2} dB", psnr_rgba(&got, &outs[0]));
+    }
+    assert!(interp.set_params(&[("scale", 0.2)]).is_err());
 }
 
 // ---- InterpFrames (the stage behind the FFmpeg filter): the scene check ----
@@ -1387,4 +1486,63 @@ fn models_open_only_in_their_filters() {
     let e = NnModel::load(ctx, &dir).err().unwrap().to_string();
     assert!(e.contains("missing model.json: it is a gpufx effect package, use it with the gpufx filter"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The processing scale of InterpFrames: auto follows the frame size for a model with `"scale"`, a set value
+/// needs that parameter, and io.json `pad_multiple` may follow it.
+#[test]
+fn interp_frames_scale() {
+    use gpufx_core::nn::auto_scale;
+    assert_eq!((auto_scale(1920, 1088), auto_scale(1088, 1920), auto_scale(1920, 1089), auto_scale(3840, 2160)), (1.0, 1.0, 0.5, 0.5));
+    let Some(ctx) = gpu() else { return };
+    // without the parameter: auto is fine, a value is an error
+    let mut plain = interp_frames(&ctx, 0.0);
+    plain.set_scale(0.0).unwrap();
+    let e = plain.set_scale(0.5).unwrap_err().to_string();
+    assert!(e.contains("no \"scale\" parameter"), "{e}");
+    assert!(plain.set_scale(-1.0).is_err());
+
+    let (mut w, mut r) = (Weights::default(), Rng(7));
+    let ops = vec![
+        op("concat", "cat", &["in0", "in1", "in2"], r#""axis":0"#),
+        op(
+            "resize",
+            "down",
+            &["cat"],
+            r#""mode":"bilinear","scale":[{"param":"scale","mul":1,"pow":1},{"param":"scale","mul":1,"pow":1}],"size":null,"align_corners":false"#,
+        ),
+        conv(&mut w, &mut r, "conv2d", "c", "down", 7, 3, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        op(
+            "resize",
+            "out0",
+            &["c"],
+            r#""mode":"bilinear","scale":[{"param":"scale","mul":1,"pow":-1},{"param":"scale","mul":1,"pow":-1}],"size":null,"align_corners":false"#,
+        ),
+    ];
+    let json = model_params(r#"{"scale":{"default":1,"min":0.25,"max":1}}"#, &["in0", "in1", "in2"], &["out0"], &ops);
+    let io = |pad: &str| {
+        format!(
+            r#"{{"kind":"frame_interp","inputs":{{"frame0":"in0","frame1":"in1","timestep":"in2"}},"output":"out0",
+            "color":"rgb","range":[0,1],"pad_multiple":{pad},"pad_mode":"zero","output_clamp":[0,1]}}"#
+        )
+    };
+    let open = |pad: &str| {
+        let m = NnModel::from_parts(ctx.clone(), json.as_bytes(), &w.0, Some(io(pad).as_bytes())).unwrap();
+        InterpFrames::new(ctx.clone(), Arc::new(m))
+    };
+    assert!(open(r#"{"param":"nope","mul":4}"#).err().unwrap().to_string().contains("\"nope\""));
+    assert!(open(r#"{"param":"scale","mul":4,"bad":1}"#).is_err());
+    let mut fi = open(r#"{"param":"scale","mul":32,"pow":-1}"#).unwrap();
+    // FW x FH (64x16) is below the auto threshold: 1
+    call(&ctx, &mut fi, &bright(), &[]).unwrap();
+    call(&ctx, &mut fi, &bright(), &[0.5]).unwrap();
+    assert_eq!(fi.interp().param("scale"), Some(1.0));
+    assert_eq!(fi.interp().plan().unwrap().tensor("in0").unwrap().h, 32);
+    fi.set_scale(0.5).unwrap();
+    call(&ctx, &mut fi, &bright(), &[0.5]).unwrap();
+    assert_eq!(fi.interp().param("scale"), Some(0.5));
+    // FH = 16 padded to 32 / 0.5 = 64
+    assert_eq!(fi.interp().plan().unwrap().tensor("in0").unwrap().h, 64);
+    assert!(fi.set_scale(0.2).unwrap_err().to_string().contains("out of its range"));
+    assert_eq!(fi.interp().param("scale"), Some(0.5), "a failed set keeps the value");
 }

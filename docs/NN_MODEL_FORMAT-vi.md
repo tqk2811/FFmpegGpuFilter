@@ -82,14 +82,26 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 ### Tham số
 
 Model có thể khai báo tham số chạy có tên, ở cấp ngoài cùng, không bắt buộc:
-`"params": { "scale": { "default": 1.0, "min": 0.125, "max": 1.0 } }` (`min` và `max` không bắt buộc). Khi đó
+`"params": { "scale": { "default": 1.0, "min": 0.125, "max": 1.0 } }` (`min` và `max` không bắt buộc; `values` cũng vậy, là danh sách các giá trị duy nhất được phép, vd
+`"values": [0.25, 0.5, 1.0]` cho model chỉ đúng ở các scale đó; phải khác rỗng, nằm trong `[min, max]` và chứa mặc
+định). Khi đó
 một hằng số f32 của op có thể là số hoặc tham chiếu `{"param": "scale", "mul": k, "pow": p}`, có giá trị
 `k * scale ^ p` (`mul` và `pow` mặc định là 1). Tham chiếu được dùng ở `scale` của `resize`, `scalar` của
 `binary` và từng giá trị trong `coeffs` của `eltwise`. Tham chiếu tới tham số chưa khai báo, có key lạ, hoặc
 cho giá trị không hữu hạn ở mặc định thì nạp lỗi. Bên gọi truyền giá trị theo tên khi lập plan
 (`NnModel::plan_with`, `FrameInterp::set_params`; `Reference::run_with` ở gpufx-nnconv); tham số không truyền thì
-lấy mặc định, tên model không khai báo hoặc giá trị ngoài `[min, max]` là lỗi. Model không có `params` chạy như
+lấy mặc định, tên model không khai báo hoặc giá trị ngoài `[min, max]` hoặc không thuộc `values` là lỗi. Model không có `params` chạy như
 cũ.
+
+Với model `frame_interp`, tham số tên `scale` có nghĩa cố định: tỉ lệ model ước lượng chuyển động (1 là đủ cỡ,
+0.5 là nửa). `InterpFrames::set_scale` / `gpufx_ai_interp_set_scale` (option `scale` của filter) đặt nó; giá trị
+auto (0) chọn 0.5 cho frame có diện tích trên 1920x1088 pixel, ngược lại 1, nếu model khai báo `scale`.
+`gpufx-nnconv ncnn --rewrite rife-v4-scale` (hoặc `"rewrite": "rife-v4-scale"` trong `source.json`) thêm nó vào
+IFNet của RIFE v4.6: mọi hằng số phụ thuộc `scale` của RIFE thành tham chiếu (`scale_list = [8, 4, 2, 1] / scale`:
+block `k` resize input theo `scale / k` = `{"mul": 1/k, "pow": 1}`, resize flow như vậy rồi chia cho `k / scale` =
+`{"mul": k, "pow": -1}`, sau đó resize output và nhân flow với `k / scale`), còn bốn bước resize/nhân mà bản
+export bỏ đi ở block cuối (`k = 1`) được chèn thành op, là identity ở `scale = 1`. Các op được kiểm theo tên, loại
+và giá trị; graph khác thì convert lỗi. Ở `scale = 1` plan giống hệt package convert không có rewrite.
 
 Runtime bỏ op trả lại đúng input của nó ở các giá trị đã cho: `resize` với `scale` [1, 1] (không phải `size`),
 `binary` `mul`/`div` với scalar 1 hoặc `add`/`sub` với scalar 0, `eltwise` một input (`sum` không có hệ số khác
@@ -116,11 +128,14 @@ Ngữ nghĩa các op:
 ```json
 { "kind": "frame_interp", "family": "rife-v4",
   "inputs": { "frame0": "in0", "frame1": "in1", "timestep": "in2" }, "output": "out0",
-  "color": "rgb", "range": [0, 1], "pad_multiple": 32, "pad_mode": "zero", "output_clamp": [0, 1] }
+  "color": "rgb", "range": [0, 1], "pad_multiple": { "param": "scale", "mul": 32, "pow": -1 },
+  "pad_mode": "zero", "output_clamp": [0, 1] }
 ```
 
 `timestep` là plane một channel điền giá trị thời gian trong (0, 1); frame được pad lên bội số của
-`pad_multiple`, chạy, rồi output được crop và clamp.
+`pad_multiple`, chạy, rồi output được crop và clamp. `pad_multiple` là số, hoặc (chỉ với `frame_interp`) tham
+chiếu tới tham số như trong op, làm tròn lên: graph thu nhỏ theo `scale / 32` cần kích thước là bội của
+`32 / scale` (32 ở scale 1, 64 ở 0.5, 128 ở 0.25), nên chỉ pad nhiều hơn khi scale giảm.
 
 Bản của Real-ESRGAN (`packages/gpufx_ai_upscale/realesr-*/io-x<N>.json`):
 

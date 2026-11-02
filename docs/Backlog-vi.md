@@ -7,9 +7,9 @@
 - **Ngày ghi**: 2026-10-21
 
 ### [Vừa] Runtime nn: 4K vượt giới hạn binding storage buffer trên GPU 128 MiB
-- **Vấn đề**: RIFE v4.6 ở 4K cần tensor buffer khoảng 400–530 MB; trên adapter có `max_storage_buffer_binding_size` 128 MiB (D3D12, downlevel, nhiều GPU không phải NVIDIA) plan báo lỗi và không có đường lùi.
-- **Vị trí**: [plan.rs:386](../crates/gpufx-core/src/nn/plan.rs#L386)
-- **Vì sao**: nên chia slot theo tensor, chia ảnh thành tile, hoặc chạy RIFE ở `scale` 0.5 cho 4K.
+- **Vấn đề**: RIFE v4.6 ở 4K và `scale` 1 vẫn cần buffer tensor 255 và 383 MiB; trên adapter có `max_storage_buffer_binding_size` 128 MiB (D3D12, downlevel, nhiều GPU không phải NVIDIA) plan báo lỗi. Mặc định auto đã chạy 4K ở `scale` 0.5 (830 MiB, không buffer nào trên 128 MiB), nên chỉ còn khi người dùng ép `scale=1` ở 4K, hoặc khung lớn hơn 4K.
+- **Vị trí**: [plan.rs:443](../crates/gpufx-core/src/nn/plan.rs#L443)
+- **Vì sao**: nên chia slot theo tensor hoặc chia ảnh thành tile; hoặc báo lỗi kèm gợi ý hạ `scale`.
 - **Ngày ghi**: 2026-10-19
 
 ### [Vừa] Runtime nn: lần chạy đầu trên D3D12 biên dịch DXC ~14 s, `pack --precompile` chưa phủ gói nn
@@ -491,3 +491,15 @@ Vấn đề: [`plane_format`](../crates/gpufx-core/src/runtime.rs#L80) chọn `r
 ### [Thấp] Layout convert ghi uniform bằng `queue.write_buffer` ở mỗi lần encode
 
 Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423) gọi `queue.write_buffer` cho uniform (matrix/range) mỗi lần encode; nếu encode vài frame trước một lần submit thì mọi lần chạy đều thấy giá trị ghi cuối cùng (sai matrix/range khi các frame khác tag màu). Nên làm: ghi uniform một lần khi tạo/khi `ColorInfo` đổi, hoặc mỗi frame một buffer riêng. Vì sao: hợp đồng `encode_gpu` cho phép nhiều lần encode trước submit. Ghi ngày 2026-10-23.
+
+### [Thấp] `gpufx_ai_framerate`: option `scale` chưa chạy qua FFmpeg build lại
+- **Vấn đề**: option `scale` mới (FFI `gpufx_ai_interp_set_scale`) mới được kiểm bằng test Rust và bằng `gpufx.dll` mới trên avfilter prebuilt cũ (auto 0.5 ở 4K chạy được); chưa build lại FFmpeg để chạy `scale=0.5`, `scale=1`, giá trị ngoài `values` và model không có param `scale`. Tốc độ 4K ở `scale` 0.5 cũng chưa đo (docs còn ghi 174 ms đo ở `scale` 1).
+- **Vị trí**: [vf_gpufx_ai_framerate.c:141](../ffmpeg/vf_gpufx_ai_framerate.c#L141), [ai.rs:94](../crates/gpufx-ffi/src/ai.rs#L94)
+- **Vì sao**: xác nhận đường option C → FFI → core và thông báo lỗi ở `init`/`config_props` trên bản build thật.
+- **Ngày ghi**: 2026-11-02
+
+### [Thấp] Runtime nn: ngưỡng auto `scale` nằm cứng trong code chung
+- **Vấn đề**: auto chọn 0.5 khi khung > 1920x1088, ngược lại 1, cho mọi model frame_interp có param `scale`; đây là ngữ nghĩa của RIFE nằm trong runtime chung.
+- **Vị trí**: [frames.rs:72](../crates/gpufx-core/src/nn/frames.rs#L72)
+- **Vì sao**: nên để model.json khai bảng auto (vd ngưỡng số pixel → giá trị), runtime chỉ đọc bảng và không cần quy ước tên param.
+- **Ngày ghi**: 2026-11-02

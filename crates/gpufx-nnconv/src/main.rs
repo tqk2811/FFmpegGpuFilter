@@ -12,13 +12,15 @@ usage:
   gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json>
                     --used-for <filter>[,<filter>]
                     [--license <file>] [--readme <file>] [--name <name>]
-                    -o <out.zip|out_dir>
+                    [--rewrite rife-v4-scale] -o <out.zip|out_dir>
              converts an ncnn model to a gpufx-nn package: model.json, weights.bin,
              io.json (copied as given), README.md (--readme, else a minimal generated
              one) and LICENSE. -o ending in .zip writes a zip,
              anything else a directory. The name defaults to the output file stem.
              --used-for lists the FFmpeg filters the model is for (gpufx_ai_upscale
              for super_resolution, gpufx_ai_framerate for frame_interp).
+             --rewrite rife-v4-scale turns the fixed scale 1 of a RIFE v4.6 IFNet into the
+             run-time parameter scale (0.25..1); a model of another layout is an error.
   gpufx-nnconv bundle --variant <dir>=<pkg.zip|dir> [--variant ...]
                       [--license <file>] [--readme <file>] [--name <name>]
                       -o <out.zip|out_dir>
@@ -52,8 +54,8 @@ fn main() -> ExitCode {
 }
 
 fn ncnn(args: &[String]) -> Result<(), String> {
-    let (mut param, mut bin, mut io, mut used_for, mut license, mut readme, mut name, mut out) =
-        (None, None, None, None, None, None, None, None);
+    let (mut param, mut bin, mut io, mut used_for, mut license, mut readme, mut name, mut rewrite, mut out) =
+        (None, None, None, None, None, None, None, None, None);
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let slot = match flag.as_str() {
@@ -64,6 +66,7 @@ fn ncnn(args: &[String]) -> Result<(), String> {
             "--license" => &mut license,
             "--readme" => &mut readme,
             "--name" => &mut name,
+            "--rewrite" => &mut rewrite,
             "-o" => &mut out,
             _ => return Err(USAGE.to_string()),
         };
@@ -80,6 +83,9 @@ fn ncnn(args: &[String]) -> Result<(), String> {
     let param_text = String::from_utf8(read(&param)?).map_err(|e| format!("{param}: {e}"))?;
     let mut converted = convert_ncnn(&param_text, &read(&bin)?, &name).map_err(|e| format!("{param}: {e}"))?;
     converted.model.used_for = gpufx_nnconv::package::parse_used_for(&used_for);
+    if let Some(r) = &rewrite {
+        gpufx_nnconv::rife::apply(&mut converted.model, r).map_err(|e| format!("{param}: {e}"))?;
+    }
 
     let license = license.as_deref().map(read).transpose()?;
     let readme = readme.as_deref().map(read).transpose()?;

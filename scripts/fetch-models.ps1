@@ -8,7 +8,8 @@
 # A source.json with a "variants" array is a multi-scale bundle: each variant has a dir, io, url_param,
 # sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/packages/<filter>/<name>.zip.
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
-# filters the model is for) is passed to gpufx-nnconv --used-for.
+# filters the model is for) is passed to gpufx-nnconv --used-for. A flat source.json may name a
+# "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite.
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Bin = '',
@@ -94,6 +95,7 @@ foreach ($name in $Names) {
  (Join-Path $out "$name.zip"))
         if (Test-Path $readmeFile) { $convertArgs += @('--readme', $readmeFile) }
         if ($license) { $convertArgs += @('--license', $license) }
+        if ($src.rewrite) { $convertArgs += @('--rewrite', $src.rewrite) }
         Invoke-Converter $convertArgs
     }
 }

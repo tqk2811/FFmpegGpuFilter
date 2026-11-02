@@ -18,6 +18,8 @@ pub struct GpufxAiInterp {
     run: Option<InterpFrames>,
     device: CString,
     threshold: f32,
+    /// Processing scale, 0 is auto (`gpufx_ai_interp_set_scale`).
+    scale: f32,
 }
 
 impl GpufxAiInterp {
@@ -29,6 +31,7 @@ impl GpufxAiInterp {
         let device = format!("{} ({api} device shared with the caller)", ctx.description());
         let mut run = InterpFrames::open(ctx, &self.path).map_err(|e| format!("{}: {e}", self.path))?;
         run.set_scene_threshold(self.threshold).map_err(|e| e.to_string())?;
+        run.set_scale(self.scale).map_err(|e| format!("{}: {e}", self.path))?;
         self.run = Some(run);
         self.device = CString::new(device).unwrap_or_default();
         Ok(())
@@ -55,7 +58,7 @@ pub unsafe extern "C" fn gpufx_ai_interp_open(model: *const c_char) -> *mut Gpuf
         let path = str_arg(model, "model")?;
         std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?;
         check_model_package(path, AI_FRAMERATE, None).map_err(|e| format!("{path}: {e}"))?;
-        let ai = GpufxAiInterp { path: path.to_string(), run: None, device: CString::default(), threshold: 0.0 };
+        let ai = GpufxAiInterp { path: path.to_string(), run: None, device: CString::default(), threshold: 0.0, scale: 0.0 };
         Ok(Box::into_raw(Box::new(ai)))
     })
 }
@@ -83,6 +86,21 @@ pub unsafe extern "C" fn gpufx_ai_interp_set_scene(ai: *mut GpufxAiInterp, thres
             return Err(format!("scene threshold {threshold} is not in [0, 1]"));
         }
         ai.threshold = threshold;
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_ai_interp_set_scale(ai: *mut GpufxAiInterp, scale: f64) -> c_int {
+    guard(-1, || {
+        let ai = ai.as_mut().ok_or("interp is NULL")?;
+        let scale = scale as f32;
+        if let Some(run) = ai.run.as_mut() {
+            run.set_scale(scale).map_err(|e| format!("{}: {e}", ai.path))?;
+        } else if !scale.is_finite() || scale < 0.0 {
+            return Err(format!("scale {scale} is not 0 (auto) or positive"));
+        }
+        ai.scale = scale;
         Ok(0)
     })
 }

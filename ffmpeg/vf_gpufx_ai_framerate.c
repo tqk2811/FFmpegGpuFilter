@@ -71,6 +71,7 @@ typedef struct AiFramerateContext {
     AVRational fps;   /* output rate; 0/1: twice the input's */
     double scene;     /* scene change SSIM threshold (0..1), 0: off */
     double max_gap;   /* pairs further apart than this many input frame durations are not interpolated */
+    double scale;     /* processing scale (model param "scale"), 0: auto */
 
     GpufxAiInterp *ai;
     enum AVPixelFormat hw_fmt;
@@ -137,6 +138,8 @@ static av_cold int init(AVFilterContext *ctx)
         return ai_error(ctx, "Cannot open the model");
     if (gpufx_ai_interp_set_scene(s->ai, s->scene) < 0)
         return ai_error(ctx, "Bad scene threshold");
+    if (gpufx_ai_interp_set_scale(s->ai, s->scale) < 0)
+        return ai_error(ctx, "Bad scale");
     return 0;
 }
 
@@ -901,6 +904,7 @@ static const AVOption gpufx_ai_framerate_options[] = {
     { "fps",     "output frame rate; default: twice the input's", OFFSET(fps), AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, INT_MAX, FLAGS },
     { "scene",   "scene change SSIM threshold (32x32): below it a pair is a cut and is not interpolated; 0: off", OFFSET(scene), AV_OPT_TYPE_DOUBLE, { .dbl = 0.2 }, 0, 1, FLAGS },
     { "max_gap", "pairs further apart than this many input frame durations are repeated, not interpolated", OFFSET(max_gap), AV_OPT_TYPE_DOUBLE, { .dbl = 2.0 }, 1, 100, FLAGS },
+    { "scale",   "processing scale of the model (its \"scale\" parameter, RIFE: 0.25, 0.5 or 1): lower is faster and uses less memory; 0: auto, 0.5 above 1920x1088 pixels, else 1", OFFSET(scale), AV_OPT_TYPE_DOUBLE, { .dbl = 0 }, 0, 16, FLAGS },
     { NULL }
 };
 

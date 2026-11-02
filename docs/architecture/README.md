@@ -955,6 +955,18 @@ for the frame at that time. FFI (`gpufx.h`, opaque `GpufxAiInterp`):
   cut and each frame made is the nearer source frame (RIFE repeats frame 0; it also scales the zero-padded frame, here the
   unpadded one). `gpufx_ai_interp_reset` forgets the previous frame (a
   discontinuity).
+- `gpufx_ai_interp_set_scale(scale)`: the processing scale, the model parameter `scale` (RIFE's `--scale`). `0`
+  is auto, resolved by `InterpFrames` from each frame size (0.5 above 1920x1088 pixels, else 1) and only for a
+  model that declares `scale`; another value needs that parameter.
+
+RIFE's `scale` is a converter job, not a runtime one: the ncnn export bakes `scale = 1`, and `gpufx-nnconv
+--rewrite rife-v4-scale` ([rife.rs](../../crates/gpufx-nnconv/src/rife.rs)) turns each constant that follows it
+(block `k` of `scale_list = [8, 4, 2, 1] / scale`: input resize `scale / k`, flow resize and divide, output resize
+and flow multiply by `k / scale`) into a `{"param": "scale", "mul", "pow"}` reference, and inserts the steps the
+export leaves out for the last block as ops that are identities at 1. Every op is checked by name, kind and value,
+so a different graph fails to convert; the runtime keeps running a generic graph. io.json `pad_multiple` follows
+the parameter too (`32 / scale`). At 4K, scale 0.5 lays the model out in 830 MiB of tensors with no buffer above
+128 MiB (1.2 GiB with buffers of 255 and 383 MiB at scale 1).
 
 Before a model is laid out for a frame size, [rewrite.rs](../../crates/gpufx-core/src/nn/rewrite.rs) rewrites its
 graph into one with the same values and smaller tensors, since one storage buffer binding can be as small as

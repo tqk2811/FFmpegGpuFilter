@@ -183,6 +183,7 @@ pub struct Param {
     pub default: f32,
     pub min: Option<f32>,
     pub max: Option<f32>,
+    pub values: Option<Vec<f32>>,
 }
 
 /// Where a parameter goes in an op.
@@ -224,7 +225,22 @@ fn parse_params(m: &Value) -> Result<Vec<Param>> {
         if !default.is_finite() || min.is_some_and(|v| default < v) || max.is_some_and(|v| default > v) {
             return fail(format!("param \"{name}\": default {default} is out of its range"));
         }
-        out.push(Param { name: name.clone(), default, min, max });
+        let values = match d.get("values").filter(|x| !x.is_null()) {
+            None => None,
+            Some(a) => {
+                let vs: Option<Vec<f32>> = a.as_array().and_then(|a| a.iter().map(|x| x.as_f64().map(|f| f as f32)).collect());
+                let Some(vs) = vs else { return fail(format!("param \"{name}\": \"values\" must be an array of numbers")) };
+                let inside = |v: f32| v.is_finite() && min.is_none_or(|m| v >= m) && max.is_none_or(|m| v <= m);
+                if vs.is_empty() || !vs.iter().all(|&v| inside(v)) {
+                    return fail(format!("param \"{name}\": values {vs:?} must be non-empty and inside its range"));
+                }
+                if !vs.contains(&default) {
+                    return fail(format!("param \"{name}\": default {default} is not one of {vs:?}"));
+                }
+                Some(vs)
+            }
+        };
+        out.push(Param { name: name.clone(), default, min, max, values });
     }
     Ok(out)
 }
@@ -540,6 +556,9 @@ impl Reference {
             let p = &self.params[k];
             if !v.is_finite() || p.min.is_some_and(|m| v < m) || p.max.is_some_and(|m| v > m) {
                 return fail(format!("param \"{name}\" = {v} is out of its range"));
+            }
+            if p.values.as_ref().is_some_and(|vs| !vs.contains(&v)) {
+                return fail(format!("param \"{name}\" = {v} is not one of {:?}", p.values.as_deref().unwrap_or(&[])));
             }
             values[k] = v;
         }
@@ -1177,6 +1196,14 @@ mod tests {
         assert!(run(&[("t", 1.0)]).is_err(), "not declared");
         let e = Reference::from_parts(json("").as_bytes(), &[], None).err().unwrap().to_string();
         assert!(e.contains("param \"s\" is not declared"), "{e}");
+        // `values`: only those are accepted; the default must be one of them
+        let r =
+            Reference::from_parts(json(r#","params":{"s":{"default":0.5,"min":0.25,"values":[0.25,0.5]}}"#).as_bytes(), &[], None).unwrap();
+        let e = r.run_with([("x".to_string(), t(1, 1, 1, &[3.]))].into(), &[("s", 0.4)]).err().unwrap().to_string();
+        assert!(e.contains("is not one of"), "{e}");
+        assert!(r.run_with([("x".to_string(), t(1, 1, 1, &[3.]))].into(), &[("s", 0.25)]).is_ok());
+        let e = Reference::from_parts(json(r#","params":{"s":{"default":0.4,"values":[0.25,0.5]}}"#).as_bytes(), &[], None).err().unwrap();
+        assert!(e.to_string().contains("is not one of"), "{e}");
     }
 
     #[test]

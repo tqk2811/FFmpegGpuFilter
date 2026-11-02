@@ -178,6 +178,7 @@ ffmpeg -init_hw_device d3d12va=dx -filter_hw_device dx -i in.mp4 \
 | `fps` | gấp đôi input | frame rate đầu ra; số hoặc phân số (`30`, `24000/1001`; không nhận tên như `ntsc`); tỉ lệ bất kỳ, không chỉ bội số |
 | `scene` | 0.2 | ngưỡng chuyển cảnh (0-1): SSIM của cặp frame ở 32x32, tính như `inference_video.py` của RIFE gốc; cặp thấp hơn ngưỡng là chuyển cảnh, không nội suy (lặp frame gần hơn); 0 thì không bao giờ phát hiện chuyển cảnh (mọi cặp đều được nội suy). Với anime, 0.2 vẫn trộn một số cú cắt giữa hai cảnh bố cục giống nhau; 0.4 bắt được 89% cú cắt trên ba clip OP/ED 90 s, đổi lại lặp frame ở một số cú zoom hoặc chớp sáng rất nhanh |
 | `max_gap` | 2 | cặp frame cách nhau quá số lần thời lượng frame input này (khoảng hở của luồng VFR) thì không nội suy |
+| `scale` | 0 (auto) | tỉ lệ xử lý, chính là tham số `scale` của model (rife-v4.6: 0.25, 0.5 hoặc 1); auto là 0.5 khi trên 1920x1088 pixel (4K), ngược lại 1; nhỏ hơn thì nhanh hơn và tốn ít bộ nhớ GPU hơn |
 
 Đầu ra là lưới frame rate cố định: điểm lưới nằm giữa hai frame nguồn được nội suy đúng thời điểm, điểm trùng
 frame nguồn thì chính là frame đó, frame cuối kéo dài tới hết luồng. Input phải là frame GPU (Vulkan, D3D12, D3D11

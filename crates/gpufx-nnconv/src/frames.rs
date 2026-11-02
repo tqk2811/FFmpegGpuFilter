@@ -127,6 +127,30 @@ fn to_planes(img: &Rgb8, w_padded: usize, h_padded: usize) -> Tensor {
 /// Interpolates between two frames at time `t` in (0, 1) following the `frame_interp` io.json of the package:
 /// pad to `pad_multiple`, run, crop, clamp to `output_clamp`, `*255 + 0.5` truncated.
 pub fn interpolate(model: &Reference, f0: &Rgb8, f1: &Rgb8, t: f32) -> Result<Rgb8> {
+    interpolate_with(model, f0, f1, t, &[])
+}
+
+/// `pad_multiple` of io.json at the parameter values `params` (the others at their defaults): a number, or
+/// `ceil(mul * param ^ pow)`.
+pub fn pad_multiple(model: &Reference, params: &[(&str, f32)]) -> Result<usize> {
+    let v = &model.io["pad_multiple"];
+    if !v.is_object() {
+        return Ok(v.as_u64().unwrap_or(1).max(1) as usize);
+    }
+    let Some(name) = v["param"].as_str() else { return fail("io.json: pad_multiple has no \"param\"") };
+    let Some(p) = model.params.iter().find(|p| p.name == name) else {
+        return fail(format!("io.json: pad_multiple names param \"{name}\" the model does not declare"));
+    };
+    let x = params.iter().rev().find(|(n, _)| *n == name).map_or(p.default, |&(_, x)| x) as f64;
+    let m = (v["mul"].as_f64().unwrap_or(1.0) * x.powf(v["pow"].as_f64().unwrap_or(1.0))).ceil();
+    if !m.is_finite() || !(1.0..=4096.0).contains(&m) {
+        return fail(format!("io.json: pad_multiple {m} at {name} = {x} is not in [1, 4096]"));
+    }
+    Ok(m as usize)
+}
+
+/// [`interpolate`] with model parameter values.
+pub fn interpolate_with(model: &Reference, f0: &Rgb8, f1: &Rgb8, t: f32, params: &[(&str, f32)]) -> Result<Rgb8> {
     if f0.w != f1.w || f0.h != f1.h {
         return fail("frames differ in size");
     }
@@ -136,7 +160,7 @@ pub fn interpolate(model: &Reference, f0: &Rgb8, f1: &Rgb8, t: f32) -> Result<Rg
     }
     let name = |k: &str| io["inputs"][k].as_str().map(String::from).ok_or_else(|| crate::Error(format!("io.json has no inputs.{k}")));
     let out_name = io["output"].as_str().ok_or_else(|| crate::Error("io.json has no output".into()))?;
-    let mult = io["pad_multiple"].as_u64().unwrap_or(1).max(1) as usize;
+    let mult = pad_multiple(model, params)?;
     let clamp = [io["output_clamp"][0].as_f64().unwrap_or(0.0) as f32, io["output_clamp"][1].as_f64().unwrap_or(1.0) as f32];
     let (wp, hp) = (f0.w.div_ceil(mult) * mult, f0.h.div_ceil(mult) * mult);
 
@@ -144,7 +168,7 @@ pub fn interpolate(model: &Reference, f0: &Rgb8, f1: &Rgb8, t: f32) -> Result<Rg
     inputs.insert(name("frame0")?, to_planes(f0, wp, hp));
     inputs.insert(name("frame1")?, to_planes(f1, wp, hp));
     inputs.insert(name("timestep")?, Tensor::filled(1, hp, wp, t));
-    let mut outputs = model.run(inputs)?;
+    let mut outputs = model.run_with(inputs, params)?;
     let Some(out) = outputs.remove(out_name) else { return fail(format!("no output \"{out_name}\"")) };
     if out.c != 3 || out.h != hp || out.w != wp {
         return fail(format!("output is {}x{}x{}, expected 3x{hp}x{wp}", out.c, out.h, out.w));

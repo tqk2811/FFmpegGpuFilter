@@ -7,6 +7,7 @@ pub mod model;
 pub mod ncnn;
 pub mod package;
 pub mod reference;
+pub mod rife;
 
 pub use convert::{convert_ncnn, Converted};
 pub use package::Package;
