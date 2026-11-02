@@ -950,7 +950,11 @@ thành graph cho cùng giá trị nhưng tensor nhỏ hơn, vì một binding st
 riêng từng channel, nên `resize(concat(a, b, ..))` thành `concat(resize(a), resize(b), ..)` đặt tại vị trí concat (RIFE
 không còn ghép các frame ở kích thước đầy đủ rồi mới thu nhỏ), và một resize chỉ bị đọc qua các slice channel bỏ bớt
 channel thì thành resize của từng slice (RIFE phóng flow 6 channel mà chỉ giữ 5). Pass này chung cho mọi model: model
-không có các mẫu này (Real-ESRGAN) lập plan như cũ.
+không có các mẫu này (Real-ESRGAN) lập plan như cũ. Lúc đó tham số model (`"params"` của `model.json`) đã thành số: `model.rs` parse
+các op với mọi tham số ở mặc định và giữ danh sách (op, trường, tham số, `mul`, `pow`); plan với giá trị khác vá
+lên bản sao các op (mọi giá trị đều mặc định thì mượn thẳng các op). Pass rewrite đầu tiên bỏ op identity (resize
+theo 1, nhân 1, ..) trong một lượt, đổi tên chỗ đọc qua bảng alias nên chuỗi identity cũng gộp hết; output của
+model thì giữ. Nhờ vậy tham số ở giá trị trung tính không tốn gì.
 
 ### Ngân sách VRAM (quy tắc cho mọi giai đoạn)
 

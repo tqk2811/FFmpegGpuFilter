@@ -331,10 +331,12 @@ fn shapes_of(m: &NnModel, ops: &[Op], inputs: &[(&str, [u32; 3])]) -> Result<Has
     Ok(shapes)
 }
 
-pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, Error> {
+pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f32)]) -> Result<NnPlan, Error> {
+    // parameters become numbers first, so the rewrites see the constants (and drop identities)
+    let model_ops = m.model.ops_with(params)?;
     // `orig[k]`: the model op that op k comes from (weights, slopes and coop kernels are keyed by it)
     let channels = |ops: &[Op]| shapes_of(m, ops, inputs).map(|s| s.into_iter().map(|(n, s)| (n, s[0])).collect()).unwrap_or_default();
-    let (ops, orig) = rewrite::rewrite(&m.model.ops, &m.model.outputs, channels);
+    let (ops, orig) = rewrite::rewrite(&model_ops, &m.model.outputs, channels);
     let shapes = shapes_of(m, &ops, inputs)?;
     let steps = fuse(m, &ops, &shapes);
 

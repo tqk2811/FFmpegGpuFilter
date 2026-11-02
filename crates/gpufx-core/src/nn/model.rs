@@ -1,5 +1,7 @@
 //! `model.json` of a gpufx-nn package (version 1, see `docs/NN_MODEL_FORMAT.md`), parsed and checked.
 
+use std::borrow::Cow;
+
 use serde::Deserialize;
 
 use crate::Error;
@@ -15,6 +17,8 @@ struct RawModel {
     #[serde(default)]
     name: String,
     used_for: Vec<String>,
+    #[serde(default)]
+    params: serde_json::Map<String, serde_json::Value>,
     inputs: Vec<RawInput>,
     outputs: Vec<String>,
     ops: Vec<RawOp>,
@@ -158,6 +162,9 @@ pub struct Model {
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub ops: Vec<Op>,
+    /// Declared run-time parameters (`"params"`); `ops` hold the constants at their defaults.
+    pub params: Vec<Param>,
+    binds: Vec<Bind>,
 }
 
 fn field<T: serde::de::DeserializeOwned>(v: &serde_json::Value, key: &str) -> Result<T, Error> {
@@ -261,10 +268,21 @@ impl Model {
             return Err(err("model.json is not a gpufx-nn version 1 model"));
         }
         crate::used_for::validate(&raw.used_for).map_err(|e| err(format!("model.json: {e}")))?;
+        let mut params = Vec::with_capacity(raw.params.len());
+        for (name, d) in raw.params {
+            let d: RawParam = serde_json::from_value(d).map_err(|e| err(format!("model.json: param \"{name}\": {e}")))?;
+            if !d.default.is_finite() || d.min.is_some_and(|v| d.default < v) || d.max.is_some_and(|v| d.default > v) {
+                return Err(err(format!("model.json: param \"{name}\": default {} is out of its range", d.default)));
+            }
+            params.push(Param { name, default: d.default, min: d.min, max: d.max });
+        }
         let mut ops = Vec::with_capacity(raw.ops.len());
-        for o in raw.ops {
+        let mut binds = Vec::new();
+        for (i, mut o) in raw.ops.into_iter().enumerate() {
             let name = o.name.clone();
-            ops.push(parse_op(o).map_err(|e| err(format!("model.json: op {name}: {e}")))?);
+            let fail = |e: Error| err(format!("model.json: op {name}: {e}"));
+            take_params(&mut o.params, i, &params, &mut binds).map_err(fail)?;
+            ops.push(parse_op(o).map_err(fail)?);
         }
         Ok(Model {
             name: raw.name,
@@ -272,8 +290,135 @@ impl Model {
             inputs: raw.inputs.into_iter().map(|i| i.name).collect(),
             outputs: raw.outputs,
             ops,
+            params,
+            binds,
         })
     }
+
+    /// The ops with parameter values by name (a parameter not given takes its default). Borrowed when
+    /// nothing changes.
+    pub fn ops_with(&self, values: &[(&str, f32)]) -> Result<Cow<'_, [Op]>, Error> {
+        let mut v: Vec<f32> = self.params.iter().map(|p| p.default).collect();
+        for &(name, x) in values {
+            let Some(k) = self.params.iter().position(|p| p.name == name) else {
+                return Err(err(format!("param \"{name}\" is not declared by the model")));
+            };
+            let p = &self.params[k];
+            if !x.is_finite() || p.min.is_some_and(|m| x < m) || p.max.is_some_and(|m| x > m) {
+                return Err(err(format!("param \"{name}\" = {x} is out of its range")));
+            }
+            v[k] = x;
+        }
+        if v.iter().zip(&self.params).all(|(x, p)| *x == p.default) {
+            return Ok(Cow::Borrowed(&self.ops));
+        }
+        let mut ops = self.ops.clone();
+        for b in &self.binds {
+            let x = param_value(b.mul, v[b.param], b.pow);
+            let op = &mut ops[b.op];
+            if !x.is_finite() {
+                return Err(err(format!("op {}: {} * {} ^ {} is not finite", op.name, b.mul, self.params[b.param].name, b.pow)));
+            }
+            match (&mut op.kind, b.slot) {
+                (OpKind::Binary { scalar: Some(s), .. }, Slot::Scalar) => *s = x,
+                (OpKind::Eltwise { coeffs: Some(c), .. }, Slot::Coeff(n)) => c[n] = x,
+                // the same check as a resize scale read from the file
+                (OpKind::Resize { .. }, Slot::Scale(_)) if x <= 0.0 => {
+                    return Err(err(format!("op {}: resize scale {x} is not positive", op.name)));
+                }
+                (OpKind::Resize { scale: Some(s), .. }, Slot::Scale(n)) => s[n] = x,
+                _ => return Err(err(format!("op {}: a parameter is set on a field the op does not have", op.name))),
+            }
+        }
+        Ok(Cow::Owned(ops))
+    }
+}
+
+/// A run-time parameter of the model (`"params"` of `model.json`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    pub name: String,
+    pub default: f32,
+    pub min: Option<f32>,
+    pub max: Option<f32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawParam {
+    default: f32,
+    min: Option<f32>,
+    max: Option<f32>,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// `{"param": name, "mul": k, "pow": p}` in place of an f32 constant: `k * value ^ p`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRef {
+    param: String,
+    #[serde(default = "one")]
+    mul: f32,
+    #[serde(default = "one")]
+    pow: f32,
+}
+
+/// Where a parameter goes in an op.
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    Scalar,
+    Coeff(usize),
+    Scale(usize),
+}
+
+/// The constant at `slot` of op `op` is `mul * params[param] ^ pow`.
+#[derive(Debug, Clone, Copy)]
+struct Bind {
+    op: usize,
+    slot: Slot,
+    param: usize,
+    mul: f32,
+    pow: f32,
+}
+
+/// In f64, like the CPU reference of gpufx-nnconv.
+fn param_value(mul: f32, v: f32, pow: f32) -> f32 {
+    (mul as f64 * (v as f64).powf(pow as f64)) as f32
+}
+
+/// Replaces the parameter references of op `i` (scalar, coeffs, scale) by their values at the defaults
+/// and records them in `binds`.
+fn take_params(o: &mut serde_json::Value, i: usize, params: &[Param], binds: &mut Vec<Bind>) -> Result<(), Error> {
+    let mut at = |v: &mut serde_json::Value, slot: Slot| -> Result<(), Error> {
+        if !v.is_object() {
+            return Ok(());
+        }
+        let r: RawRef = serde_json::from_value(v.take()).map_err(|e| err(format!("parameter reference: {e}")))?;
+        let Some(param) = params.iter().position(|p| p.name == r.param) else {
+            return Err(err(format!("param \"{}\" is not declared in \"params\"", r.param)));
+        };
+        let x = param_value(r.mul, params[param].default, r.pow);
+        if !x.is_finite() {
+            return Err(err(format!("{} * {} ^ {} is not finite at the default", r.mul, r.param, r.pow)));
+        }
+        *v = serde_json::Value::from(x);
+        binds.push(Bind { op: i, slot, param, mul: r.mul, pow: r.pow });
+        Ok(())
+    };
+    if let Some(v) = o.get_mut("scalar") {
+        at(v, Slot::Scalar)?;
+    }
+    for (key, slot) in [("coeffs", Slot::Coeff as fn(usize) -> Slot), ("scale", Slot::Scale)] {
+        if let Some(a) = o.get_mut(key).and_then(serde_json::Value::as_array_mut) {
+            for (n, v) in a.iter_mut().enumerate() {
+                at(v, slot(n))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -293,5 +438,33 @@ mod tests {
         assert!(missing.contains("missing field `used_for`") && missing.contains(r#""used_for": ["gpufx_ai_upscale"]"#), "{missing}");
         assert!(parse(r#","used_for":[]"#).err().unwrap().contains("`used_for` is empty"));
         assert!(parse(r#","used_for":["upscale"]"#).err().unwrap().contains("unknown filter `upscale`"));
+    }
+
+    fn with_ops(extra: &str, ops: &str) -> Result<Model, String> {
+        let json = format!(
+            r#"{{"format":"gpufx-nn","version":1,"used_for":["gpufx_ai_upscale"]{extra},"inputs":[{{"name":"x"}}],"outputs":["y"],"ops":[{ops}]}}"#
+        );
+        Model::parse(json.as_bytes()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn parameters_resolve_to_numbers() {
+        let ops =
+            r#"{"op":"resize","name":"y","inputs":["x"],"output":"y","mode":"bilinear","scale":[{"param":"s","mul":2,"pow":-1},0.5]}"#;
+        let m = with_ops(r#","params":{"s":{"default":0.5}}"#, ops).unwrap();
+        let scale = |ops: &[Op]| match ops[0].kind {
+            OpKind::Resize { scale, .. } => scale.unwrap(),
+            _ => unreachable!(),
+        };
+        assert_eq!(scale(&m.ops), [4.0, 0.5]);
+        assert!(matches!(m.ops_with(&[("s", 0.5)]).unwrap(), Cow::Borrowed(_)));
+        assert_eq!(scale(&m.ops_with(&[("s", 0.25)]).unwrap()), [8.0, 0.5]);
+        // a model without parameters: nothing declared, ops as written
+        let old = with_ops("", r#"{"op":"binary","name":"y","inputs":["x"],"output":"y","kind":"mul","scalar":3}"#).unwrap();
+        assert!(old.params.is_empty() && matches!(old.ops_with(&[]).unwrap(), Cow::Borrowed(_)));
+        assert!(old.ops_with(&[("s", 1.0)]).is_err());
+        // a value that is not finite at the default
+        let e = with_ops(r#","params":{"s":{"default":0}}"#, ops).unwrap_err();
+        assert!(e.contains("not finite"), "{e}");
     }
 }

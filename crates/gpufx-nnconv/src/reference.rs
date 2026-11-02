@@ -123,6 +123,7 @@ enum Mode {
     Bicubic,
 }
 
+#[derive(Clone)]
 struct ConvOp {
     cin: usize,
     cout: usize,
@@ -138,6 +139,7 @@ struct ConvOp {
     b: Vec<f32>,
 }
 
+#[derive(Clone)]
 enum Kind {
     Conv(ConvOp),
     Deconv(ConvOp),
@@ -167,7 +169,106 @@ pub struct Reference {
     pub outputs: Vec<String>,
     /// `io.json` as given (null when the package has none).
     pub io: Value,
+    /// The declared parameters: name, default, min, max.
+    pub params: Vec<Param>,
+    /// Ops as parsed with the parameter defaults.
     ops: Vec<RefOp>,
+    binds: Vec<Bind>,
+}
+
+/// A run-time parameter of `model.json` (`"params"`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Param {
+    pub name: String,
+    pub default: f32,
+    pub min: Option<f32>,
+    pub max: Option<f32>,
+}
+
+/// Where a parameter goes in an op.
+#[derive(Clone, Copy, Debug)]
+enum Slot {
+    Scalar,
+    Coeff(usize),
+    Scale(usize),
+}
+
+/// The constant at `slot` of op `op` is `mul * params[param] ^ pow`.
+#[derive(Clone, Copy, Debug)]
+struct Bind {
+    op: usize,
+    slot: Slot,
+    param: usize,
+    mul: f32,
+    pow: f32,
+}
+
+fn param_value(mul: f32, v: f32, pow: f32) -> f32 {
+    (mul as f64 * (v as f64).powf(pow as f64)) as f32
+}
+
+fn parse_params(m: &Value) -> Result<Vec<Param>> {
+    let Some(p) = m.get("params").filter(|p| !p.is_null()) else { return Ok(Vec::new()) };
+    let Some(p) = p.as_object() else { return fail("\"params\" must be an object") };
+    let mut out = Vec::new();
+    for (name, d) in p {
+        let num = |k: &str| d.get(k).filter(|x| !x.is_null()).map(|x| x.as_f64().map(|f| f as f32));
+        let bad = || crate::Error(format!("param \"{name}\": \"default\" must be a number, \"min\" and \"max\" numbers or absent"));
+        let default = num("default").flatten().ok_or_else(bad)?;
+        let opt = |k: &str| match num(k) {
+            None => Ok(None),
+            Some(Some(v)) => Ok(Some(v)),
+            Some(None) => Err(bad()),
+        };
+        let (min, max) = (opt("min")?, opt("max")?);
+        if !default.is_finite() || min.is_some_and(|v| default < v) || max.is_some_and(|v| default > v) {
+            return fail(format!("param \"{name}\": default {default} is out of its range"));
+        }
+        out.push(Param { name: name.clone(), default, min, max });
+    }
+    Ok(out)
+}
+
+/// Replaces `{"param", "mul", "pow"}` at `v` by its value at the defaults; returns `(param, mul, pow)`.
+fn take_param(v: &mut Value, params: &[Param]) -> Result<Option<(usize, f32, f32)>> {
+    let Some(o) = v.as_object() else { return Ok(None) };
+    if let Some(k) = o.keys().find(|k| !["param", "mul", "pow"].contains(&k.as_str())) {
+        return fail(format!("unknown key \"{k}\" in a parameter reference"));
+    }
+    let Some(name) = o.get("param").and_then(Value::as_str) else { return fail("a parameter reference needs \"param\"") };
+    let Some(p) = params.iter().position(|p| p.name == name) else { return fail(format!("param \"{name}\" is not declared")) };
+    let num = |k: &str, d: f32| match o.get(k) {
+        None => Ok(d),
+        Some(x) => x.as_f64().map(|f| f as f32).ok_or_else(|| crate::Error(format!("\"{k}\" must be a number"))),
+    };
+    let (mul, pow) = (num("mul", 1.0)?, num("pow", 1.0)?);
+    let at = param_value(mul, params[p].default, pow);
+    if !at.is_finite() {
+        return fail(format!("{mul} * {name} ^ {pow} is not finite at the default"));
+    }
+    *v = Value::from(at);
+    Ok(Some((p, mul, pow)))
+}
+
+/// Resolves the parameter references of op `i` in place, recording them in `binds`.
+fn take_params(o: &mut Value, i: usize, params: &[Param], binds: &mut Vec<Bind>) -> Result<()> {
+    let mut at = |v: &mut Value, slot: Slot| -> Result<()> {
+        if let Some((param, mul, pow)) = take_param(v, params)? {
+            binds.push(Bind { op: i, slot, param, mul, pow });
+        }
+        Ok(())
+    };
+    if let Some(v) = o.get_mut("scalar") {
+        at(v, Slot::Scalar)?;
+    }
+    for (key, slot) in [("coeffs", Slot::Coeff as fn(usize) -> Slot), ("scale", Slot::Scale)] {
+        if let Some(a) = o.get_mut(key).and_then(Value::as_array_mut) {
+            for (n, v) in a.iter_mut().enumerate() {
+                at(v, slot(n))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn get<'a>(v: &'a Value, key: &str) -> Result<&'a Value> {
@@ -403,10 +504,14 @@ impl Reference {
             .as_array()
             .map(|a| a.iter().filter_map(|x| x.get("name").and_then(Value::as_str).map(String::from)).collect())
             .unwrap_or_default();
+        let params = parse_params(&m)?;
         let mut ops = Vec::new();
-        for o in get(&m, "ops")?.as_array().map(Vec::as_slice).unwrap_or_default() {
-            let op = parse_op(o, weights).map_err(|e| crate::Error(format!("op {}: {e}", o["name"].as_str().unwrap_or("?"))))?;
-            ops.push(op);
+        let mut binds = Vec::new();
+        for (i, o) in get(&m, "ops")?.as_array().map(Vec::as_slice).unwrap_or_default().iter().enumerate() {
+            let fail_op = |e: crate::Error| crate::Error(format!("op {}: {e}", o["name"].as_str().unwrap_or("?")));
+            let mut o = o.clone();
+            take_params(&mut o, i, &params, &mut binds).map_err(fail_op)?;
+            ops.push(parse_op(&o, weights).map_err(fail_op)?);
         }
         Ok(Reference {
             name: m["name"].as_str().unwrap_or("").to_string(),
@@ -416,19 +521,53 @@ impl Reference {
                 Some(b) => serde_json::from_slice(b)?,
                 None => Value::Null,
             },
+            params,
             ops,
+            binds,
         })
     }
 
     /// Runs the graph. `inputs` must hold every input tensor by name; the result holds the model outputs.
     pub fn run(&self, inputs: HashMap<String, Tensor>) -> Result<HashMap<String, Tensor>> {
+        self.run_with(inputs, &[])
+    }
+
+    /// [`Reference::run`] with parameter values by name; a parameter not given takes its default.
+    pub fn run_with(&self, inputs: HashMap<String, Tensor>, params: &[(&str, f32)]) -> Result<HashMap<String, Tensor>> {
+        let mut values: Vec<f32> = self.params.iter().map(|p| p.default).collect();
+        for &(name, v) in params {
+            let Some(k) = self.params.iter().position(|p| p.name == name) else { return fail(format!("param \"{name}\" is not declared")) };
+            let p = &self.params[k];
+            if !v.is_finite() || p.min.is_some_and(|m| v < m) || p.max.is_some_and(|m| v > m) {
+                return fail(format!("param \"{name}\" = {v} is out of its range"));
+            }
+            values[k] = v;
+        }
+        let mut kinds: HashMap<usize, Kind> = HashMap::new();
+        for b in &self.binds {
+            let v = param_value(b.mul, values[b.param], b.pow);
+            if !v.is_finite() {
+                return fail(format!("op {}: {} * {} ^ {} is not finite", self.ops[b.op].name, b.mul, self.params[b.param].name, b.pow));
+            }
+            let k = kinds.entry(b.op).or_insert_with(|| self.ops[b.op].kind.clone());
+            match (k, b.slot) {
+                (Kind::Binary { scalar: Some(s), .. }, Slot::Scalar) => *s = v,
+                (Kind::Eltwise { coeffs: Some(c), .. }, Slot::Coeff(n)) => c[n] = v,
+                (Kind::Resize { .. }, Slot::Scale(_)) if v <= 0.0 => {
+                    return fail(format!("op {}: resize scale {v} is not positive", self.ops[b.op].name));
+                }
+                (Kind::Resize { scale: Some(s), .. }, Slot::Scale(n)) => s[n] = v,
+                _ => return fail(format!("op {}: a parameter is set on a field the op does not have", self.ops[b.op].name)),
+            }
+        }
         let mut t = inputs;
         for n in &self.inputs {
             if !t.contains_key(n) {
                 return fail(format!("missing input tensor \"{n}\""));
             }
         }
-        for op in &self.ops {
+        for (i, op) in self.ops.iter().enumerate() {
+            let kind = kinds.get(&i).unwrap_or(&op.kind);
             let mut args: Vec<&Tensor> = Vec::new();
             for i in &op.inputs {
                 match t.get(i) {
@@ -436,7 +575,7 @@ impl Reference {
                     None => return fail(format!("op {}: tensor \"{i}\" does not exist", op.name)),
                 }
             }
-            let out = exec(&op.kind, &args).map_err(|e| crate::Error(format!("op {}: {e}", op.name)))?;
+            let out = exec(kind, &args).map_err(|e| crate::Error(format!("op {}: {e}", op.name)))?;
             t.insert(op.output.clone(), out);
         }
         let mut res = HashMap::new();
@@ -1018,6 +1157,26 @@ mod tests {
         assert_eq!(up.data, [5., 5., 7., 7.]);
         let down = resize(&t(1, 1, 4, &[1., 2., 3., 4.]), Mode::Nearest, Some([1.0, 0.5]), None, false).unwrap();
         assert_eq!(down.data, [1., 3.]);
+    }
+
+    #[test]
+    fn parameters_take_defaults_or_given_values() {
+        let num = crate::model::Num::Param { param: "s".into(), mul: 2.0, pow: -1.0 };
+        let ops = serde_json::json!([
+            {"op": "binary", "name": "m", "inputs": ["x"], "output": "m", "kind": "mul", "scalar": num},
+            {"op": "eltwise", "name": "e", "inputs": ["m", "x"], "output": "e", "kind": "sum", "coeffs": [1, {"param": "s"}]}
+        ]);
+        let json =
+            |params: &str| format!(r#"{{"format":"gpufx-nn","version":1{params},"inputs":[{{"name":"x"}}],"outputs":["e"],"ops":{ops}}}"#);
+        let r = Reference::from_parts(json(r#","params":{"s":{"default":0.5,"min":0.25}}"#).as_bytes(), &[], None).unwrap();
+        let run = |p: &[(&str, f32)]| r.run_with([("x".to_string(), t(1, 1, 1, &[3.]))].into(), p).map(|o| o["e"].data[0]);
+        // 3 * 2 / s + 3 * s
+        assert_eq!(run(&[]).unwrap(), 13.5);
+        assert_eq!(run(&[("s", 0.25)]).unwrap(), 24.75);
+        assert!(run(&[("s", 0.125)]).is_err(), "below min");
+        assert!(run(&[("t", 1.0)]).is_err(), "not declared");
+        let e = Reference::from_parts(json("").as_bytes(), &[], None).err().unwrap().to_string();
+        assert!(e.contains("param \"s\" is not declared"), "{e}");
     }
 
     #[test]
