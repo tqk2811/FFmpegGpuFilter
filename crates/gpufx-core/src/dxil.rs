@@ -20,14 +20,18 @@ pub(crate) const SHADER_MODEL: hlsl::ShaderModel = hlsl::ShaderModel::V6_0;
 
 /// `dxcompiler.dll`, loaded once per process.
 pub(crate) struct DxcCompiler {
-    compiler: Mutex<Dxc::IDxcCompiler3>,
+    /// Compilers not in use: each compile takes one (or makes one), so threads compile in parallel.
+    idle: Mutex<Vec<Dxc::IDxcCompiler3>>,
+    create: CreateInstance,
     /// Version and commit of the DLL, part of the cache key.
     pub(crate) version: String,
-    // Declared last: the compiler is released before the DLL is unloaded.
+    // Declared last: the compilers are released, and `create` last used, before the DLL is unloaded.
     _lib: libloading::Library,
 }
 
-// SAFETY: the COM object is only used under the mutex; DXC objects are free-threaded.
+type CreateInstance = unsafe extern "system" fn(*const GUID, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT;
+
+// SAFETY: a compiler is used by one thread at a time (taken out of `idle`); DXC objects are free-threaded.
 unsafe impl Send for DxcCompiler {}
 unsafe impl Sync for DxcCompiler {}
 
@@ -41,17 +45,10 @@ impl DxcCompiler {
     }
 
     unsafe fn load() -> Option<DxcCompiler> {
-        type CreateInstance = unsafe extern "system" fn(*const GUID, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT;
         let lib = unsafe { libloading::Library::new("dxcompiler.dll") }.ok()?;
-        let compiler = unsafe {
-            let create = lib.get::<CreateInstance>(b"DxcCreateInstance\0").ok()?;
-            let mut raw = std::ptr::null_mut();
-            create(&Dxc::CLSID_DxcCompiler, &Dxc::IDxcCompiler3::IID, &mut raw).ok().ok()?;
-            if raw.is_null() {
-                return None;
-            }
-            Dxc::IDxcCompiler3::from_raw(raw)
-        };
+        // The pointer stays valid while `_lib` holds the DLL.
+        let create = unsafe { *lib.get::<CreateInstance>(b"DxcCreateInstance\0").ok()? };
+        let compiler = unsafe { new_compiler(create) }?;
         let (mut major, mut minor) = (1, 0);
         if let Ok(info) = compiler.cast::<Dxc::IDxcVersionInfo>() {
             let _ = unsafe { info.GetVersion(&mut major, &mut minor) };
@@ -65,7 +62,7 @@ impl DxcCompiler {
                 version.push_str(&format!("+{count}.{hash}"));
             }
         }
-        Some(DxcCompiler { compiler: Mutex::new(compiler), version, _lib: lib })
+        Some(DxcCompiler { idle: Mutex::new(vec![compiler]), create, version, _lib: lib })
     }
 
     /// DXIL of the compute entry point `entry` of `hlsl`, `None` on any error. `f16`: shader model 6.2 with
@@ -88,10 +85,18 @@ impl DxcCompiler {
         ];
         let args = if f16 { &args[..] } else { &args[..args.len() - 1] };
         let buffer = Dxc::DxcBuffer { Ptr: hlsl.as_ptr().cast(), Size: hlsl.len(), Encoding: Dxc::DXC_CP_UTF8.0 };
-        let compiler = self.compiler.lock().ok()?;
+        let idle = self.idle.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        // SAFETY: `create` is DxcCreateInstance of the DLL this struct keeps loaded.
+        let compiler = idle.or_else(|| unsafe { new_compiler(self.create) })?;
+        let dxil = Self::run(&compiler, &buffer, args);
+        self.idle.lock().unwrap_or_else(|e| e.into_inner()).push(compiler);
+        dxil
+    }
+
+    fn run(compiler: &Dxc::IDxcCompiler3, buffer: &Dxc::DxcBuffer, args: &[PCWSTR]) -> Option<Vec<u8>> {
         // SAFETY: every pointer outlives the call.
         unsafe {
-            let result: Dxc::IDxcResult = compiler.Compile(&buffer, Some(args), None).ok()?;
+            let result: Dxc::IDxcResult = compiler.Compile(buffer, Some(args), None).ok()?;
             if result.GetStatus().ok()?.is_err() {
                 return None;
             }
@@ -101,6 +106,18 @@ impl DxcCompiler {
             let data = std::slice::from_raw_parts(blob.GetBufferPointer().cast::<u8>(), blob.GetBufferSize());
             (!data.is_empty()).then(|| data.to_vec())
         }
+    }
+}
+
+/// A new `IDxcCompiler3`. Safety: `create` is `DxcCreateInstance` of a loaded `dxcompiler.dll`.
+unsafe fn new_compiler(create: CreateInstance) -> Option<Dxc::IDxcCompiler3> {
+    let mut raw = std::ptr::null_mut();
+    unsafe {
+        create(&Dxc::CLSID_DxcCompiler, &Dxc::IDxcCompiler3::IID, &mut raw).ok().ok()?;
+        if raw.is_null() {
+            return None;
+        }
+        Some(Dxc::IDxcCompiler3::from_raw(raw))
     }
 }
 

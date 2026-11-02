@@ -742,6 +742,7 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
         mapped_at_creation: false,
     });
     m.ctx.queue.write_buffer(&params, 0, &bytes);
+    m.kernels.prepare(device, pend.iter().map(|p| p.kernel));
     let dispatches = pend
         .iter()
         .enumerate()
