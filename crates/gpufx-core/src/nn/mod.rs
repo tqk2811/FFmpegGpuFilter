@@ -12,6 +12,7 @@ mod interp;
 mod kernels;
 pub mod model;
 mod plan;
+mod rewrite;
 mod upscale;
 
 use std::collections::HashMap;
