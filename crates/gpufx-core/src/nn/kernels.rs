@@ -715,26 +715,70 @@ impl Kernels {
 
     /// The pipeline of `kernel`, compiled on first use.
     pub fn get(&self, device: &wgpu::Device, kernel: Kernel) -> wgpu::ComputePipeline {
-        let mut map = self.pipelines.lock().unwrap_or_else(|e| e.into_inner());
-        map.entry(kernel)
-            .or_insert_with(|| {
-                let (label, source) = match kernel {
-                    Kernel::Fixed(Fixed::Ew) => ("gpufx nn ew", include_str!("ew.wgsl").to_string()),
-                    Kernel::Fixed(Fixed::Resize) => ("gpufx nn resize", include_str!("resize.wgsl").to_string()),
-                    Kernel::Fixed(Fixed::Warp) => ("gpufx nn warp", include_str!("warp.wgsl").to_string()),
-                    Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
-                    Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
-                    Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
-                    Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
-                };
-                let (layout, entries) = match (kernel, &self.coop_pipeline_layout) {
-                    (Kernel::Coop(..), Some(l)) => (l, &COOP_ENTRIES[..]),
-                    (Kernel::Coop(..), None) => panic!("tensor core kernel on a device without them"),
-                    _ => (&self.pipeline_layout, &ENTRIES[..]),
-                };
-                compute_pipeline(device, self.cache.as_deref(), label, layout, entries, source)
-            })
-            .clone()
+        if let Some(p) = self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).get(&kernel) {
+            return p.clone();
+        }
+        // Compiled outside the lock, so the threads of [`Kernels::prepare`] do not wait on each other.
+        let pipeline = self.compile(device, kernel);
+        self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).entry(kernel).or_insert(pipeline).clone()
+    }
+
+    /// Compiles the pipelines of `kernels` not made yet on parallel threads: on D3D12 DXC takes about a second
+    /// per convolution and a model needs a dozen of them per frame size.
+    pub fn prepare(&self, device: &wgpu::Device, kernels: impl IntoIterator<Item = Kernel>) {
+        let mut missing: Vec<Kernel> = Vec::new();
+        {
+            let map = self.pipelines.lock().unwrap_or_else(|e| e.into_inner());
+            for k in kernels {
+                if !map.contains_key(&k) && !missing.contains(&k) {
+                    missing.push(k);
+                }
+            }
+        }
+        // Capped: every thread may keep a DXC compiler alive in the pool of `dxil.rs`.
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8).min(missing.len());
+        if threads < 2 {
+            for k in missing {
+                self.get(device, k);
+            }
+            return;
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|s| {
+            let workers: Vec<_> = (0..threads)
+                .map(|_| {
+                    s.spawn(|| {
+                        while let Some(&k) = missing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                            self.get(device, k);
+                        }
+                    })
+                })
+                .collect();
+            for w in workers {
+                // A shader that does not parse panics, as it would on this thread.
+                if let Err(e) = w.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+        });
+    }
+
+    fn compile(&self, device: &wgpu::Device, kernel: Kernel) -> wgpu::ComputePipeline {
+        let (label, source) = match kernel {
+            Kernel::Fixed(Fixed::Ew) => ("gpufx nn ew", include_str!("ew.wgsl").to_string()),
+            Kernel::Fixed(Fixed::Resize) => ("gpufx nn resize", include_str!("resize.wgsl").to_string()),
+            Kernel::Fixed(Fixed::Warp) => ("gpufx nn warp", include_str!("warp.wgsl").to_string()),
+            Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
+            Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
+            Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
+            Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
+        };
+        let (layout, entries) = match (kernel, &self.coop_pipeline_layout) {
+            (Kernel::Coop(..), Some(l)) => (l, &COOP_ENTRIES[..]),
+            (Kernel::Coop(..), None) => panic!("tensor core kernel on a device without them"),
+            _ => (&self.pipeline_layout, &ENTRIES[..]),
+        };
+        compute_pipeline(device, self.cache.as_deref(), label, layout, entries, source)
     }
 }
 

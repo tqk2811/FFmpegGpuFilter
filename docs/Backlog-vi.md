@@ -12,11 +12,11 @@
 - **Vì sao**: nên chia slot theo tensor, chia ảnh thành tile, hoặc chạy RIFE ở `scale` 0.5 cho 4K.
 - **Ngày ghi**: 2026-10-19
 
-### [Vừa] Runtime nn: lần chạy đầu trên D3D12 biên dịch DXC ~14 s, `pack --precompile` chưa phủ gói nn
-- **Vấn đề**: không có `GPUFX_SHADER_CACHE` ấm thì RIFE v4.6 trên D3D12 mất khoảng 14 s biên dịch 12 pipeline conv/deconv ở frame đầu (mỗi lớp kích thước mới thêm pipeline); `pack --precompile` không biết tới gói nn. Các `poll(wait_indefinitely)` trong nn vẫn không có timeout.
-- **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs) (`compute_pipeline`), [plan.rs](../crates/gpufx-core/src/nn/plan.rs), [interp.rs](../crates/gpufx-core/src/nn/interp.rs)
-- **Vì sao**: filter `gpufx_ai_framerate` sẽ khựng hàng chục giây ở lần chạy đầu trên Windows; nên precompile DXIL cho gói nn hoặc biên dịch nền lúc init.
-- **Ngày ghi**: 2026-10-19
+### [Thấp] Runtime nn: các `poll(wait_indefinitely)` không có timeout
+- **Vấn đề**: GPU treo (TDR, driver lỗi) thì filter nn đứng chờ mãi thay vì báo lỗi. Cần chọn mức timeout đủ rộng cho GPU yếu xử lý frame 4K.
+- **Vị trí**: [plan.rs](../crates/gpufx-core/src/nn/plan.rs) (`poll` trong `NnPlan`), [interp.rs](../crates/gpufx-core/src/nn/interp.rs) (`bench`), [upscale.rs](../crates/gpufx-core/src/nn/upscale.rs)
+- **Vì sao**: phần biên dịch chậm lần đầu đã giảm bằng biên dịch song song; còn lại chỉ là chặn treo vô hạn. Không precompile DXIL qua `pack --precompile` được vì shader conv sinh theo tile chọn từ kích thước frame.
+- **Ngày ghi**: 2026-11-02
 
 ### [Thấp] Bật/tắt bypass trên graph có pad planar dựng lại plan và input slot mỗi lần
 

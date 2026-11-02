@@ -361,6 +361,7 @@ impl NnModel {
         let mut coop_ops = std::collections::HashSet::new();
         let mut conv_weights = HashMap::new();
         let mut slopes = HashMap::new();
+        let mut eager = Vec::new();
         for (i, op) in model.ops.iter().enumerate() {
             let fail = |e: Error| Error::Package(format!("op {}: {e}", op.name));
             let kernel = match &op.kind {
@@ -424,11 +425,12 @@ impl NnModel {
             // compiled now, so a broken shader fails the load; convolutions get the tile of each output size
             // when a plan is made
             if !matches!(kernel, Kernel::Conv(..)) {
-                kernels.get(device, kernel);
+                eager.push(kernel);
             }
         }
         // ew also fills and copies (concat, timestep planes).
-        kernels.get(device, Kernel::Fixed(Fixed::Ew));
+        eager.push(Kernel::Fixed(Fixed::Ew));
+        kernels.prepare(device, eager);
         if blob.is_empty() {
             blob.resize(4, 0.0);
         }
