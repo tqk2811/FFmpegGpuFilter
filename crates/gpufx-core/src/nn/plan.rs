@@ -7,13 +7,15 @@
 //! step order, best fit first; a slot is only released after the step's output got its own, so an op never
 //! reads and writes the same buffer. A tensor only read by a concat is written straight into its channel
 //! range of the concat output (no copy).
+//!
+//! The graph is first rewritten by `rewrite.rs` (resizes of concats and sliced resizes, same values).
 
 use std::collections::HashMap;
 use std::time::Instant;
 
 use super::kernels::{self, ConvConfig, CoopConfig, Fixed, Kernel, PARAM_SLOT};
-use super::model::{Activation, BinaryKind, EltwiseKind, OpKind, ResizeMode};
-use super::{conv_shape, NnModel};
+use super::model::{Activation, BinaryKind, EltwiseKind, Op, OpKind, ResizeMode};
+use super::{conv_shape, rewrite, NnModel};
 use crate::Error;
 
 /// Where a tensor lives: `c x h x w` f32 values at element `offset` of `buffer`.
@@ -100,9 +102,9 @@ fn is_unary_act(kind: &OpKind) -> bool {
     matches!(kind, OpKind::Activation(_) | OpKind::Prelu { .. } | OpKind::Clip { .. })
 }
 
-/// The epilogue code of activation op `k` (see [`is_unary_act`]).
-fn op_act_code(m: &NnModel, k: usize) -> ActCode {
-    match &m.model.ops[k].kind {
+/// The epilogue code of activation op `kind` (see [`is_unary_act`]), model op `k`.
+fn op_act_code(m: &NnModel, kind: &OpKind, k: usize) -> ActCode {
+    match kind {
         OpKind::Activation(a) => act_code(Some(*a)),
         OpKind::Prelu { .. } => {
             let (off, n) = m.slopes[&k];
@@ -232,8 +234,7 @@ struct Step {
 
 /// Finds `conv [-> activation] [-> add(conv, r) [-> activation]]` where every intermediate has one reader and `r`
 /// exists before the conv runs (activation: relu, leaky relu, sigmoid, prelu or clip).
-fn fuse(m: &NnModel, shapes: &HashMap<String, [u32; 3]>) -> Vec<Step> {
-    let ops = &m.model.ops;
+fn fuse(m: &NnModel, ops: &[Op], shapes: &HashMap<String, [u32; 3]>) -> Vec<Step> {
     let mut uses: HashMap<&str, usize> = HashMap::new();
     for op in ops {
         for i in &op.inputs {
@@ -297,7 +298,10 @@ struct Alloc {
 
 /// The `c x h x w` shape of every tensor of the graph for the given input shapes.
 pub(crate) fn infer_shapes(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<HashMap<String, [u32; 3]>, Error> {
-    let ops = &m.model.ops;
+    shapes_of(m, &m.model.ops, inputs)
+}
+
+fn shapes_of(m: &NnModel, ops: &[Op], inputs: &[(&str, [u32; 3])]) -> Result<HashMap<String, [u32; 3]>, Error> {
     let graph = |msg: String| Error::Graph(msg);
     let mut shapes: HashMap<String, [u32; 3]> = HashMap::new();
     for name in &m.model.inputs {
@@ -328,9 +332,11 @@ pub(crate) fn infer_shapes(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<H
 }
 
 pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, Error> {
-    let ops = &m.model.ops;
-    let shapes = infer_shapes(m, inputs)?;
-    let steps = fuse(m, &shapes);
+    // `orig[k]`: the model op that op k comes from (weights, slopes and coop kernels are keyed by it)
+    let channels = |ops: &[Op]| shapes_of(m, ops, inputs).map(|s| s.into_iter().map(|(n, s)| (n, s[0])).collect()).unwrap_or_default();
+    let (ops, orig) = rewrite::rewrite(&m.model.ops, &m.model.outputs, channels);
+    let shapes = shapes_of(m, &ops, inputs)?;
+    let steps = fuse(m, &ops, &shapes);
 
     // lifetimes: tensor -> (alloc, offset)
     let mut allocs: Vec<Alloc> = Vec::new();
@@ -508,9 +514,9 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
             OpKind::Conv2d(c) | OpKind::Deconv2d(c) => {
                 let x = &ins[0];
                 let res = step.residual.as_deref().map(view);
-                let pre = step.pre_act.map_or_else(|| act_code(c.activation), |k| op_act_code(m, k));
-                let post = step.post_act.map_or_else(|| act_code(None), |k| op_act_code(m, k));
-                let (w_off, b_off) = m.conv_weights[&step.op];
+                let pre = step.pre_act.map_or_else(|| act_code(c.activation), |k| op_act_code(m, &ops[k].kind, orig[k]));
+                let post = step.post_act.map_or_else(|| act_code(None), |k| op_act_code(m, &ops[k].kind, orig[k]));
+                let (w_off, b_off) = m.conv_weights[&orig[step.op]];
                 let words = Words::default()
                     .u(x.c)
                     .u(x.h)
@@ -538,7 +544,7 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
                     .u(post.4);
                 let shape = conv_shape(c);
                 let src1 = res.map_or(x.slot, |r| r.slot);
-                if m.coop_ops.contains(&step.op) {
+                if m.coop_ops.contains(&orig[step.op]) {
                     let cfg = CoopConfig::choose(&shape, x.c, out.c)
                         .ok_or_else(|| Error::Unsupported(format!("op {}: kernel {:?} is too large", op.name, c.kernel)))?;
                     let groups = cfg.groups(out.w, out.h, out.c);
@@ -584,7 +590,7 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, 
             }
             OpKind::Prelu { .. } => {
                 let x = &ins[0];
-                let (off, n) = m.slopes[&step.op];
+                let (off, n) = m.slopes[&orig[step.op]];
                 // the slopes stand in for input b: offset and count (read from the weights, not src1)
                 let slopes = TensorView { slot: x.slot, offset: off, c: n, h: 1, w: 1 };
                 pend.push(ew("prelu", ew_words(15, true, x, &slopes, 0.0, 1.0, 1.0), x, x, out.len()));

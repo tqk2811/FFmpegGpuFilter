@@ -283,6 +283,63 @@ fn chains_with_slot_reuse_and_nested_concats_match_the_reference() {
     check(&ctx, &json, &w.0, &[("x", [5, 11, 17])], &mut r);
 }
 
+/// The graph rewrites before planning (nn/rewrite.rs): a resize of (nested) concats becomes a concat of resizes,
+/// and a resize read only by channel slices resizes each slice; values stay the same, and the full size
+/// concat of the downscaled inputs is never allocated.
+#[test]
+fn resizes_of_concats_and_sliced_resizes_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(7));
+    let bilinear = |s: f32| format!(r#""mode":"bilinear","scale":[{s},{s}],"size":null,"align_corners":false"#);
+    let ops = vec![
+        op("binary", "a", &["x"], r#""kind":"mul","scalar":2"#),
+        // nested concats of model inputs and an op output (x twice), downscaled; a model output
+        op("concat", "c1", &["x", "a"], r#""axis":0"#),
+        op("concat", "c2", &["c1", "y", "x"], r#""axis":0"#),
+        op("resize", "down", &["c2"], &bilinear(0.125)),
+        // by size with align_corners, and nearest upscaled
+        op("concat", "c3", &["y", "x"], r#""axis":0"#),
+        op("resize", "sized", &["c3"], r#""mode":"bilinear","scale":null,"size":[8,12],"align_corners":true"#),
+        op("concat", "c4", &["down", "sized"], r#""axis":0"#),
+        op("binary", "c4b", &["y"], r#""kind":"add","scalar":1"#),
+        op("concat", "c5", &["c4b", "a"], r#""axis":0"#),
+        op("resize", "near", &["c5"], r#""mode":"nearest","scale":[2,2],"size":null,"align_corners":false"#),
+        // a 6 channel resize of which slices read channels 0..4 and 4 (channel 5 unused)
+        conv(&mut w, &mut r, "conv2d", "flow", "x", 3, 6, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        op("resize", "up", &["flow"], &bilinear(4.0)),
+        op("slice", "s0", &["up"], r#""axis":0,"start":0,"end":4"#),
+        op("slice", "s1", &["up"], r#""axis":0,"start":4,"end":5"#),
+        op("activation", "o0", &["s0"], r#""type":"relu""#),
+    ];
+    let json = model(&["x", "y"], &["down", "sized", "c4", "near", "o0", "s1"], &ops);
+    let (h, wd) = (64, 96);
+    let shapes = [("x", [3, h, wd]), ("y", [3, h, wd])];
+    check(&ctx, &json, &w.0, &shapes, &mut r);
+}
+
+/// The rewrites take memory away (each assert fails without its rewrite): no full size concat of the inputs of
+/// a downscale, and only the sliced channel of an upscale. In planes `p` of `h x w`: about 16p with both rewrites,
+/// 21p without the first (the 9 channel concat), 36p without the second (the 6 channel upscale is 24p).
+#[test]
+fn resize_rewrites_shrink_the_plan() {
+    let Some(ctx) = gpu() else { return };
+    let ops = vec![
+        op("binary", "a", &["x"], r#""kind":"mul","scalar":2"#),
+        op("concat", "c1", &["x", "a"], r#""axis":0"#),
+        op("concat", "c2", &["c1", "y"], r#""axis":0"#),
+        op("resize", "down", &["c2"], r#""mode":"bilinear","scale":[0.125,0.125],"size":null,"align_corners":false"#),
+        op("resize", "up", &["f"], r#""mode":"bilinear","scale":[2,2],"size":null,"align_corners":false"#),
+        op("slice", "s0", &["up"], r#""axis":0,"start":2,"end":3"#),
+        op("activation", "o", &["s0"], r#""type":"relu""#),
+    ];
+    let json = model(&["x", "y", "f"], &["down", "o"], &ops);
+    let (h, w) = (64, 96);
+    let gpu = NnModel::from_parts_with(ctx.clone(), json.as_bytes(), &[0u8; 4], None, Precision::F32).unwrap();
+    let bytes = gpu.plan(&[("x", [3, h, w]), ("y", [3, h, w]), ("f", [6, h, w])]).unwrap().tensor_bytes();
+    let p = h as u64 * w as u64 * 4;
+    assert!(bytes < 18 * p, "{} planes", bytes as f64 / p as f64);
+}
+
 fn rgba_texture(ctx: &GpuContext, w: u32, h: u32, usage: wgpu::TextureUsages) -> wgpu::Texture {
     ctx.device().create_texture(&wgpu::TextureDescriptor {
         label: None,

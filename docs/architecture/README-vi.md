@@ -945,6 +945,13 @@ tại thời điểm đó. FFI (`gpufx.h`, kiểu mờ `GpufxAiInterp`):
   RIFE gốc (hai frame thu bilinear về 32x32, `ssim_matlab` trên RGB); cặp thấp hơn ngưỡng là cảnh cắt và mỗi frame
   tạo ra là frame nguồn gần hơn (RIFE lặp frame 0; RIFE thu nhỏ frame đã pad 0, ở đây thu frame chưa pad). `gpufx_ai_interp_reset` quên frame trước (gián đoạn).
 
+Trước khi lập plan cho một kích thước frame, [rewrite.rs](../../crates/gpufx-core/src/nn/rewrite.rs) viết lại graph
+thành graph cho cùng giá trị nhưng tensor nhỏ hơn, vì một binding storage buffer có thể chỉ được 128 MiB. Resize tính
+riêng từng channel, nên `resize(concat(a, b, ..))` thành `concat(resize(a), resize(b), ..)` đặt tại vị trí concat (RIFE
+không còn ghép các frame ở kích thước đầy đủ rồi mới thu nhỏ), và một resize chỉ bị đọc qua các slice channel bỏ bớt
+channel thì thành resize của từng slice (RIFE phóng flow 6 channel mà chỉ giữ 5). Pass này chung cho mọi model: model
+không có các mẫu này (Real-ESRGAN) lập plan như cũ.
+
 ### Ngân sách VRAM (quy tắc cho mọi giai đoạn)
 
 VRAM có hạn, nên bộ nhớ GPU giữ ở mức thấp nhất và không nhân bản:

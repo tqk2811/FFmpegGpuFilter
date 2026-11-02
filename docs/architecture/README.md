@@ -956,6 +956,14 @@ for the frame at that time. FFI (`gpufx.h`, opaque `GpufxAiInterp`):
   unpadded one). `gpufx_ai_interp_reset` forgets the previous frame (a
   discontinuity).
 
+Before a model is laid out for a frame size, [rewrite.rs](../../crates/gpufx-core/src/nn/rewrite.rs) rewrites its
+graph into one with the same values and smaller tensors, since one storage buffer binding can be as small as
+128 MiB: a resize works on each channel alone, so `resize(concat(a, b, ..))` becomes `concat(resize(a),
+resize(b), ..)` at the concat's place (RIFE no longer concatenates the frames at full size to scale them down),
+and a resize read only by channel slices that leave channels out becomes the resize of each slice (RIFE upscales
+a 6 channel flow and keeps 5 channels). The rewrite is generic: models without these patterns (Real-ESRGAN) plan
+as before.
+
 ### VRAM budget (rule for every phase)
 
 VRAM is limited, so GPU memory is kept as low as possible and nothing is duplicated:
