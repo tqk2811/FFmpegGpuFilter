@@ -11,6 +11,8 @@
 #   FFBUILD_TAG      release tag             Release-2026-08-10
 #   FFBUILD_VERSION  FFmpeg version string   n9.0-2-g03d9533176
 #   FFBUILD_LICENSE  lgpl | gpl | lgpl2 | gpl2   lgpl
+#   FFBUILD_SHA256   sha256 of the prebuilt archive; pinned for the default release,
+#                    otherwise read from the release asset's digest on GitHub.
 #   VULKAN_HEADERS   directory with include/vulkan/vulkan.h (Khronos Vulkan-Headers); by
 #                    default tag VULKAN_HEADERS_TAG (v1.4.321) is cloned into build/downloads.
 #                    gpufx takes Vulkan frames (hwupload, -hwaccel vulkan) only when the
@@ -79,8 +81,38 @@ fi
 
 mkdir -p "$WORK" "$ROOT/build/downloads"
 echo "==> prebuilt FFmpeg: $NAME"
+# sha256 of the archive, checked on every run so a cut or damaged cached file is fetched again.
+prebuilt_sum() {
+    if [ -n "${FFBUILD_SHA256:-}" ]; then echo "$FFBUILD_SHA256"; return; fi
+    case $TAG/$NAME in
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-linux64-lgpl-shared-9.0) echo f06c52559d378904f2930d799f6770ffbd16b70ac614b6164cbbfab8bd2c9799 ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-linux64-gpl-shared-9.0) echo 0230ca89b8dec353d528b0b63bdae3391f7d0c4427d782de5aa2b575d86307b3 ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-linux64-lgpl2-shared-9.0) echo 70718645b35ea43307a25329b7c7f7d84f222b1529eebd5489f08a44ee61a5cb ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-linux64-gpl2-shared-9.0) echo b88478f1c6a603993c8a3b8dc6ed47fb148cdc09784935cb8c0a015a1da04ff6 ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-win64-lgpl-shared-9.0) echo 72dfd4a1b3b59f5764e73a926c3e64f88906df3e590b9fe82cae0fab7cdc4d29 ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-win64-gpl-shared-9.0) echo 73b57b05bfc4cbed227904cb547d09ac8510a899c1da0507ca6cf13a15e26043 ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-win64-lgpl2-shared-9.0) echo eac98408b67e292d3ede994c4b84d3e285b6f691f92331bd786ed7fabdfcee20 ;;
+        Release-2026-08-10/ffmpeg-n9.0-2-g03d9533176-win64-gpl2-shared-9.0) echo b0a42fe2aa6cc498bdcfde1e1af6d9089be544e5d72fb373be696407ca2ed372 ;;
+        *)  # GitHub keeps a sha256 digest for every release asset.
+            curl -fsSL --retry 3 "https://api.github.com/repos/tqk2811/FFmpegBuild/releases/tags/$TAG" |
+                tr ',{}' '\n\n\n' |
+                awk -v n="\"$NAME.$EXT\"" '/"name":/ { f = index($0, n) > 0 } f && /"digest":/ { print; exit }' |
+                sed -n 's/.*"sha256:\([0-9a-f]\{64\}\)".*/\1/p' ;;
+    esac
+}
+SUM=$(prebuilt_sum)
+[ -n "$SUM" ] || { echo "no sha256 for $TAG/$NAME.$EXT; set FFBUILD_SHA256" >&2; exit 1; }
+file_sum() { sha256sum "$1" | cut -d' ' -f1; }
+if [ -f "$WORK/$NAME.$EXT" ] && [ "$(file_sum "$WORK/$NAME.$EXT")" != "$SUM" ]; then
+    echo "    cached $NAME.$EXT: sha256 mismatch, fetching again"
+    rm -f "$WORK/$NAME.$EXT"
+fi
 if [ ! -f "$WORK/$NAME.$EXT" ]; then
     curl -fL --retry 3 -o "$WORK/$NAME.$EXT.part" "$URL"
+    GOT=$(file_sum "$WORK/$NAME.$EXT.part")
+    [ "$GOT" = "$SUM" ] || {
+        rm -f "$WORK/$NAME.$EXT.part"
+        echo "$NAME.$EXT: sha256 $GOT, expected $SUM" >&2; exit 1; }
     mv "$WORK/$NAME.$EXT.part" "$WORK/$NAME.$EXT"
 fi
 rm -rf "$OUT" "${WORK:?}/$NAME"
