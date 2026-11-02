@@ -99,7 +99,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                         return Err(layer.err("coefficient count differs from the input count"));
                     }
                 }
-                OpParams::Eltwise(EltwiseParams { kind, coeffs })
+                OpParams::Eltwise(EltwiseParams { kind, coeffs: coeffs.map(|c| c.into_iter().map(Num::from).collect()) })
             }
             "Concat" => {
                 p.expect_only(&[0]).map_err(|e| layer.err(e))?;
@@ -153,6 +153,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
         version: 1,
         name: name.to_string(),
         used_for: Vec::new(),
+        params: Default::default(),
         source: Source { kind: "ncnn" },
         weights: WeightsFile { file: "weights.bin" },
         inputs,
@@ -370,7 +371,7 @@ fn binary(layer: &Layer) -> Result<BinaryParams> {
     let with_scalar = p.int(1, 0).map_err(|e| layer.err(e))? != 0;
     if with_scalar {
         arity(layer, 1, 1)?;
-        Ok(BinaryParams { kind, scalar: Some(p.float(2, 0.0).map_err(|e| layer.err(e))?) })
+        Ok(BinaryParams { kind, scalar: Some(p.float(2, 0.0).map_err(|e| layer.err(e))?.into()) })
     } else {
         arity(layer, 2, 1)?;
         Ok(BinaryParams { kind, scalar: None })
@@ -425,7 +426,7 @@ fn interp(layer: &Layer) -> Result<ResizeParams> {
         if hs <= 0.0 || ws <= 0.0 {
             return Err(layer.err("scales must be positive"));
         }
-        (Some([hs, ws]), None)
+        (Some([hs.into(), ws.into()]), None)
     };
     let align_corners = p.int(6, 0).map_err(|e| layer.err(e))? != 0;
     Ok(ResizeParams { mode, scale, size, align_corners })

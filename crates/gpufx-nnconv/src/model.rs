@@ -1,5 +1,7 @@
 //! `model.json` schema, version 1.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 #[derive(Serialize, Debug)]
@@ -9,11 +11,34 @@ pub struct Model {
     pub name: String,
     /// The FFmpeg filters the model is for (`--used-for`), checked by [`crate::Package::new`].
     pub used_for: Vec<String>,
+    /// Run-time parameters the op constants may refer to ([`Num::Param`]); left out when empty.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, ParamDecl>,
     pub source: Source,
     pub weights: WeightsFile,
     pub inputs: Vec<TensorRef>,
     pub outputs: Vec<String>,
     pub ops: Vec<Op>,
+}
+
+/// A run-time parameter: its value when none is given.
+#[derive(Serialize, Debug, Clone, Copy, PartialEq)]
+pub struct ParamDecl {
+    pub default: f32,
+}
+
+/// An f32 constant of an op: a number, or `mul * param ^ pow` of a declared parameter.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Num {
+    Value(f32),
+    Param { param: String, mul: f32, pow: f32 },
+}
+
+impl From<f32> for Num {
+    fn from(v: f32) -> Self {
+        Num::Value(v)
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -151,7 +176,7 @@ pub enum BinaryKind {
 #[derive(Serialize, Debug)]
 pub struct BinaryParams {
     pub kind: BinaryKind,
-    pub scalar: Option<f32>,
+    pub scalar: Option<Num>,
 }
 
 #[derive(Serialize, Clone, Copy, Debug)]
@@ -165,7 +190,7 @@ pub enum EltwiseKind {
 #[derive(Serialize, Debug)]
 pub struct EltwiseParams {
     pub kind: EltwiseKind,
-    pub coeffs: Option<Vec<f32>>,
+    pub coeffs: Option<Vec<Num>>,
 }
 
 #[derive(Serialize, Debug)]
@@ -192,7 +217,7 @@ pub enum ResizeMode {
 #[derive(Serialize, Debug)]
 pub struct ResizeParams {
     pub mode: ResizeMode,
-    pub scale: Option<[f32; 2]>,
+    pub scale: Option<[Num; 2]>,
     pub size: Option<[u32; 2]>,
     pub align_corners: bool,
 }

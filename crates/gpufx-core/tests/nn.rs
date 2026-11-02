@@ -129,9 +129,24 @@ fn check_with(
     precision: Precision,
     tol: f32,
 ) {
+    check_params(ctx, json, weights, shapes, rng, precision, tol, &[]);
+}
+
+/// [`check_with`] with model parameter values.
+#[allow(clippy::too_many_arguments)]
+fn check_params(
+    ctx: &Arc<GpuContext>,
+    json: &str,
+    weights: &[u8],
+    shapes: &[(&str, [u32; 3])],
+    rng: &mut Rng,
+    precision: Precision,
+    tol: f32,
+    params: &[(&str, f32)],
+) {
     let gpu = NnModel::from_parts_with(ctx.clone(), json.as_bytes(), weights, None, precision).expect("gpu model");
     let cpu = Reference::from_parts(json.as_bytes(), weights, None).expect("cpu model");
-    let plan = gpu.plan(shapes).expect("plan");
+    let plan = gpu.plan_with(shapes, params).expect("plan");
     let mut inputs = HashMap::new();
     for (name, [c, h, w]) in shapes {
         let data = rng.vec((c * h * w) as usize);
@@ -139,7 +154,7 @@ fn check_with(
         inputs.insert(name.to_string(), Tensor::new(*c as usize, *h as usize, *w as usize, data));
     }
     plan.run().unwrap();
-    let want = cpu.run(inputs).expect("cpu run");
+    let want = cpu.run_with(inputs, params).expect("cpu run");
     for name in gpu.outputs() {
         let w = &want[name];
         let got = plan.read(name).unwrap();
@@ -338,6 +353,90 @@ fn resize_rewrites_shrink_the_plan() {
     let bytes = gpu.plan(&[("x", [3, h, w]), ("y", [3, h, w]), ("f", [6, h, w])]).unwrap().tensor_bytes();
     let p = h as u64 * w as u64 * 4;
     assert!(bytes < 18 * p, "{} planes", bytes as f64 / p as f64);
+}
+
+/// `model()` with a `"params"` object.
+fn model_params(params: &str, inputs: &[&str], outputs: &[&str], ops: &[String]) -> String {
+    model(inputs, outputs, ops).replacen(r#""inputs""#, &format!(r#""params":{params},"inputs""#), 1)
+}
+
+/// A graph whose resize scales, binary scalar and eltwise coefficients follow `scale`: at 1 the resizes and
+/// the multiply are identities.
+fn scaled_graph() -> String {
+    let resize = |by: &str| format!(r#""mode":"bilinear","scale":[{by},{by}],"size":null,"align_corners":false"#);
+    let ops = vec![
+        op("resize", "r", &["x"], &resize(r#"{"param":"scale"}"#)),
+        op("binary", "m", &["r"], r#""kind":"mul","scalar":{"param":"scale","pow":-1}"#),
+        op("eltwise", "e", &["m", "r"], r#""kind":"sum","coeffs":[{"param":"scale","mul":2},-1]"#),
+        op("resize", "u", &["e"], &resize(r#"{"param":"scale","pow":-1}"#)),
+        op("activation", "o", &["u"], r#""type":"relu""#),
+    ];
+    model_params(r#"{"scale":{"default":1.0,"min":0.125,"max":1}}"#, &["x"], &["e", "o"], &ops)
+}
+
+#[test]
+fn parameters_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let json = scaled_graph();
+    let shapes = [("x", [3, 64, 96])];
+    for params in [&[][..], &[("scale", 1.0)], &[("scale", 0.5)], &[("scale", 0.25)]] {
+        check_params(&ctx, &json, &[0u8; 4], &shapes, &mut Rng(11), Precision::F32, 2e-5, params);
+    }
+}
+
+/// At a neutral value the parameterised ops are dropped: the plan is the one of the graph without them
+/// (fails when `rewrite.rs` keeps identities).
+#[test]
+fn neutral_parameters_cost_nothing() {
+    let Some(ctx) = gpu() else { return };
+    let plain = model(
+        &["x"],
+        &["e", "o"],
+        &[op("eltwise", "e", &["x", "x"], r#""kind":"sum","coeffs":[2,-1]"#), op("activation", "o", &["e"], r#""type":"relu""#)],
+    );
+    let shapes = [("x", [3, 64, 96])];
+    let load = |j: &str| NnModel::from_parts_with(ctx.clone(), j.as_bytes(), &[0u8; 4], None, Precision::F32).unwrap();
+    let (scaled, plain) = (load(&scaled_graph()), load(&plain));
+    let want = plain.plan(&shapes).unwrap();
+    let got = scaled.plan(&shapes).unwrap();
+    assert_eq!((got.tensor_bytes(), got.dispatch_count()), (want.tensor_bytes(), want.dispatch_count()));
+    let half = scaled.plan_with(&shapes, &[("scale", 0.5)]).unwrap();
+    assert!(half.dispatch_count() > want.dispatch_count());
+}
+
+#[test]
+fn parameter_errors() {
+    let Some(ctx) = gpu() else { return };
+    let load = |j: &str| {
+        NnModel::from_parts_with(ctx.clone(), j.as_bytes(), &[0u8; 4], None, Precision::F32).map(|_| ()).map_err(|e| e.to_string())
+    };
+    let mul = |s: &str| vec![op("binary", "m", &["x"], &format!(r#""kind":"mul","scalar":{s}"#))];
+    // a reference to a parameter that is not declared, with or without "params"
+    let e = load(&model(&["x"], &["m"], &mul(r#"{"param":"scale"}"#))).unwrap_err();
+    assert!(e.contains(r#"param "scale" is not declared"#), "{e}");
+    let e = load(&model_params(r#"{"size":{"default":1}}"#, &["x"], &["m"], &mul(r#"{"param":"scale"}"#))).unwrap_err();
+    assert!(e.contains(r#"param "scale" is not declared"#), "{e}");
+    let e = load(&model_params(r#"{"scale":{"default":1}}"#, &["x"], &["m"], &mul(r#"{"param":"scale","power":2}"#))).unwrap_err();
+    assert!(e.contains("unknown field `power`"), "{e}");
+    let e = load(&model_params(r#"{"scale":{"min":1}}"#, &["x"], &["m"], &mul("2"))).unwrap_err();
+    assert!(e.contains("missing field `default`"), "{e}");
+    // values at plan time: unknown name, out of range
+    let m = NnModel::from_parts_with(ctx.clone(), scaled_graph().as_bytes(), &[0u8; 4], None, Precision::F32).unwrap();
+    let shapes = [("x", [3, 64, 96])];
+    let e = m.plan_with(&shapes, &[("scal", 0.5)]).err().unwrap().to_string();
+    assert!(e.contains(r#"param "scal" is not declared"#), "{e}");
+    let e = m.plan_with(&shapes, &[("scale", 2.0)]).err().unwrap().to_string();
+    assert!(e.contains("out of its range"), "{e}");
+    // a value inside the declared range (none here) that makes a resize scale negative
+    let neg = scaled_graph().replace(r#","min":0.125,"max":1"#, "").replace(r#"{"param":"scale"}"#, r#"{"param":"scale","mul":-1}"#);
+    let n = NnModel::from_parts_with(ctx.clone(), neg.as_bytes(), &[0u8; 4], None, Precision::F32);
+    let e = match n {
+        Ok(n) => n.plan_with(&shapes, &[("scale", 0.5)]).err().unwrap().to_string(),
+        Err(e) => e.to_string(),
+    };
+    assert!(e.contains("is not positive"), "{e}");
+    let cpu = Reference::from_parts(scaled_graph().as_bytes(), &[0u8; 4], None).unwrap();
+    assert!(cpu.run_with(HashMap::new(), &[("scal", 0.5)]).is_err());
 }
 
 fn rgba_texture(ctx: &GpuContext, w: u32, h: u32, usage: wgpu::TextureUsages) -> wgpu::Texture {

@@ -92,6 +92,8 @@ pub struct FrameInterp {
     out_layout: wgpu::BindGroupLayout,
     in_pipeline: wgpu::ComputePipeline,
     out_pipeline: wgpu::ComputePipeline,
+    /// Values of model parameters (`"params"` of `model.json`); the others are at their defaults.
+    params: Vec<(String, f32)>,
     sized: Option<Sized>,
 }
 
@@ -161,7 +163,23 @@ impl FrameInterp {
             compute_pipeline(device, cache, "gpufx nn frame in", &pl(&in_layout), &in_entries, include_str!("frame_in.wgsl").into());
         let out_pipeline =
             compute_pipeline(device, cache, "gpufx nn frame out", &pl(&out_layout), &out_entries, include_str!("frame_out.wgsl").into());
-        Ok(FrameInterp { model, io, in_layout, out_layout, in_pipeline, out_pipeline, sized: None })
+        let params = model.model.params.iter().map(|p| (p.name.clone(), p.default)).collect();
+        Ok(FrameInterp { model, io, in_layout, out_layout, in_pipeline, out_pipeline, params, sized: None })
+    }
+
+    /// Sets model parameter values by name (the others take their defaults); the next frame lays the model
+    /// out again when they change. A parameter the model does not declare, or out of its range, is an error.
+    pub fn set_params(&mut self, params: &[(&str, f32)]) -> Result<(), Error> {
+        self.model.model.ops_with(params)?;
+        // every declared parameter in declaration order, so the order given and spelled out defaults are no change
+        let decl = &self.model.model.params;
+        let params: Vec<(String, f32)> =
+            decl.iter().map(|p| (p.name.clone(), params.iter().rev().find(|(n, _)| *n == p.name).map_or(p.default, |&(_, v)| v))).collect();
+        if params != self.params {
+            self.params = params;
+            self.sized = None;
+        }
+        Ok(())
     }
 
     /// Lays the model out for `w x h` frames (done by the calls that take frames when the size changes).
@@ -175,7 +193,10 @@ impl FrameInterp {
         self.sized = None;
         let m = self.io.pad_multiple;
         let (wp, hp) = (w.div_ceil(m) * m, h.div_ceil(m) * m);
-        let plan = self.model.plan(&[(&self.io.frame0, [3, hp, wp]), (&self.io.frame1, [3, hp, wp]), (&self.io.timestep, [1, hp, wp])])?;
+        let params: Vec<(&str, f32)> = self.params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        let shapes =
+            [(self.io.frame0.as_str(), [3, hp, wp]), (self.io.frame1.as_str(), [3, hp, wp]), (self.io.timestep.as_str(), [1, hp, wp])];
+        let plan = self.model.plan_with(&shapes, &params)?;
         let out = plan.tensor(&self.io.output).expect("model output");
         if out.c < 3 || out.h != hp || out.w != wp {
             return Err(Error::Package(format!("output is {}x{}x{}, expected 3x{hp}x{wp}", out.c, out.h, out.w)));

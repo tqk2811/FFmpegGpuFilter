@@ -79,6 +79,23 @@ parameters of its kind. Unknown ncnn layer types or parameters make the converte
 `activation` of a conv is `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}` or `{"type":"sigmoid"}`,
 applied after the bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
 
+### Parameters
+
+A model may declare named run-time parameters, top level, optional:
+`"params": { "scale": { "default": 1.0, "min": 0.125, "max": 1.0 } }` (`min` and `max` are optional). An f32
+constant of an op may then be a number or a reference `{"param": "scale", "mul": k, "pow": p}`, whose value is
+`k * scale ^ p` (`mul` and `pow` default to 1). References are allowed in `scale` of `resize`, `scalar` of
+`binary` and each value of `coeffs` of `eltwise`. A reference to a parameter that is not declared, an unknown key
+in it, or a value that is not finite at the default fails to load. The caller gives values by name when it lays
+the model out (`NnModel::plan_with`, `FrameInterp::set_params`; `Reference::run_with` in gpufx-nnconv); a
+parameter not given takes its default, a name the model does not declare or a value outside `[min, max]` is an
+error. A model without `params` runs as before.
+
+The runtime drops an op that returns its input at the values given: `resize` by `scale` [1, 1] (not by `size`),
+`binary` `mul`/`div` by a scalar 1 or `add`/`sub` of a scalar 0, `eltwise` of one input (`sum` with no
+coefficient other than 1). Its readers read the input, so a parameter at a neutral value costs no memory and no
+dispatch. An op whose output is a model output is kept.
+
 Op semantics:
 
 - **conv2d / deconv2d:** `in_channels = weight.count / (out_channels * kh * kw)`. Deconv output size is

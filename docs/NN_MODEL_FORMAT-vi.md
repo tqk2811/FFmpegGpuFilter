@@ -79,6 +79,23 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 `activation` của conv là `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}` hoặc `{"type":"sigmoid"}`,
 áp sau khi cộng bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
 
+### Tham số
+
+Model có thể khai báo tham số chạy có tên, ở cấp ngoài cùng, không bắt buộc:
+`"params": { "scale": { "default": 1.0, "min": 0.125, "max": 1.0 } }` (`min` và `max` không bắt buộc). Khi đó
+một hằng số f32 của op có thể là số hoặc tham chiếu `{"param": "scale", "mul": k, "pow": p}`, có giá trị
+`k * scale ^ p` (`mul` và `pow` mặc định là 1). Tham chiếu được dùng ở `scale` của `resize`, `scalar` của
+`binary` và từng giá trị trong `coeffs` của `eltwise`. Tham chiếu tới tham số chưa khai báo, có key lạ, hoặc
+cho giá trị không hữu hạn ở mặc định thì nạp lỗi. Bên gọi truyền giá trị theo tên khi lập plan
+(`NnModel::plan_with`, `FrameInterp::set_params`; `Reference::run_with` ở gpufx-nnconv); tham số không truyền thì
+lấy mặc định, tên model không khai báo hoặc giá trị ngoài `[min, max]` là lỗi. Model không có `params` chạy như
+cũ.
+
+Runtime bỏ op trả lại đúng input của nó ở các giá trị đã cho: `resize` với `scale` [1, 1] (không phải `size`),
+`binary` `mul`/`div` với scalar 1 hoặc `add`/`sub` với scalar 0, `eltwise` một input (`sum` không có hệ số khác
+1). Các op đọc nó đọc thẳng input, nên tham số ở giá trị trung tính không tốn bộ nhớ hay dispatch. Op có output là
+output của model thì giữ.
+
 Ngữ nghĩa các op:
 
 - **conv2d / deconv2d:** `in_channels = weight.count / (out_channels * kh * kw)`. Kích thước ra của deconv theo

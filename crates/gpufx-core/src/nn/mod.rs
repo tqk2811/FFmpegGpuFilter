@@ -504,9 +504,21 @@ impl NnModel {
         &self.ctx
     }
 
-    /// Lays the graph out for inputs of the given `C x H x W` shapes (every model input).
+    /// Lays the graph out for inputs of the given `C x H x W` shapes (every model input), parameters at
+    /// their defaults.
     pub fn plan(&self, inputs: &[(&str, [u32; 3])]) -> Result<NnPlan, Error> {
-        plan::build(self, inputs)
+        plan::build(self, inputs, &[])
+    }
+
+    /// [`NnModel::plan`] with parameter values by name (`"params"` of `model.json`); a parameter not given
+    /// takes its default, one the model does not declare is an error.
+    pub fn plan_with(&self, inputs: &[(&str, [u32; 3])], params: &[(&str, f32)]) -> Result<NnPlan, Error> {
+        plan::build(self, inputs, params)
+    }
+
+    /// The declared parameters of the model.
+    pub fn params(&self) -> &[model::Param] {
+        &self.model.params
     }
 }
 

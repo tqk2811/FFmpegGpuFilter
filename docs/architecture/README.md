@@ -962,7 +962,11 @@ graph into one with the same values and smaller tensors, since one storage buffe
 resize(b), ..)` at the concat's place (RIFE no longer concatenates the frames at full size to scale them down),
 and a resize read only by channel slices that leave channels out becomes the resize of each slice (RIFE upscales
 a 6 channel flow and keeps 5 channels). The rewrite is generic: models without these patterns (Real-ESRGAN) plan
-as before.
+as before. Model parameters (`"params"` of `model.json`) are numbers by then: `model.rs` parses the ops
+with every parameter at its default and keeps a list of (op, field, parameter, `mul`, `pow`), and a plan with
+other values patches a copy of the ops (the ops are borrowed when every value is the default). The first rewrite
+drops identity ops (resize by 1, multiply by 1, ..) in one pass, renaming readers through an alias map so
+chains collapse; a model output is kept. A parameter at its neutral value then costs nothing.
 
 ### VRAM budget (rule for every phase)
 

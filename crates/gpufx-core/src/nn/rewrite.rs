@@ -2,23 +2,60 @@
 //! - `resize(concat(a, b, ..))` is `concat(resize(a), resize(b), ..)`: no concat at the input size, and the
 //!   resized parts are written in place into the concat (RIFE downscales the two frames at full size);
 //! - a resize read only by channel slices is the resize of each slice: channels no slice reads are never
-//!   resized (RIFE upscales a 6 channel flow and keeps 5 of them).
+//!   resized (RIFE upscales a 6 channel flow and keeps 5 of them);
+//! - an op that returns its input (resize by 1, multiply or divide by 1, add or subtract 0, eltwise of one
+//!   input without a coefficient other than 1) is dropped and its readers read the input: a parameter at a
+//!   value that makes it neutral costs no memory and no dispatch.
 //!
 //! Tensors that still exist keep their names (plans look model inputs and outputs up by name); a model
 //! output or a tensor read anywhere else is never removed.
 
 use std::collections::{HashMap, HashSet};
 
-use super::model::{Op, OpKind};
+use super::model::{BinaryKind, EltwiseKind, Op, OpKind};
 
 /// The rewritten ops and, per op, the index of the model op it comes from (weights are keyed by it).
 pub(crate) fn rewrite(ops: &[Op], outputs: &[String], channels: impl Fn(&[Op]) -> HashMap<String, u32>) -> (Vec<Op>, Vec<usize>) {
-    let mut g: Vec<(Op, usize)> = ops.iter().cloned().zip(0..).collect();
+    let mut g = drop_identities(ops.iter().cloned().zip(0..).collect(), outputs);
     let mut names: HashSet<String> = ops.iter().flat_map(|o| o.inputs.iter().chain([&o.output, &o.name])).cloned().collect();
     while let Some(next) = rewrite_one(&g, outputs, &mut names, &channels) {
         g = next;
     }
     g.into_iter().unzip()
+}
+
+/// Whether `op` returns its only input unchanged.
+fn is_identity(op: &Op) -> bool {
+    if op.inputs.len() != 1 {
+        return false;
+    }
+    match &op.kind {
+        OpKind::Resize { scale: Some(s), size: None, .. } => *s == [1.0, 1.0],
+        OpKind::Binary { kind: BinaryKind::Mul | BinaryKind::Div, scalar: Some(s) } => *s == 1.0,
+        OpKind::Binary { kind: BinaryKind::Add | BinaryKind::Sub, scalar: Some(s) } => *s == 0.0,
+        OpKind::Eltwise { kind: EltwiseKind::Sum, coeffs } => coeffs.as_ref().is_none_or(|c| c[..] == [1.0]),
+        OpKind::Eltwise { kind: EltwiseKind::Prod | EltwiseKind::Max, .. } => true,
+        _ => false,
+    }
+}
+
+/// Drops identity ops, their readers read the input instead (chains too); a model output is kept.
+fn drop_identities(g: Vec<(Op, usize)>, outputs: &[String]) -> Vec<(Op, usize)> {
+    let mut alias: HashMap<String, String> = HashMap::new();
+    let mut out = Vec::with_capacity(g.len());
+    for (mut op, src) in g {
+        for i in &mut op.inputs {
+            if let Some(a) = alias.get(i) {
+                *i = a.clone();
+            }
+        }
+        if is_identity(&op) && !outputs.contains(&op.output) {
+            alias.insert(op.output.clone(), op.inputs[0].clone());
+            continue;
+        }
+        out.push((op, src));
+    }
+    out
 }
 
 fn fresh(names: &mut HashSet<String>, base: &str) -> String {
@@ -239,6 +276,33 @@ mod tests {
             let (got, _) = rewrite(&ops, &outs, chans);
             assert_eq!(show(&got), show(&ops));
         }
+    }
+
+    fn bin(name: &str, input: &str, kind: BinaryKind, s: f32) -> Op {
+        op(name, &[input], OpKind::Binary { kind, scalar: Some(s) })
+    }
+
+    #[test]
+    fn identities_are_dropped_unless_outputs() {
+        let unit = OpKind::Resize { mode: ResizeMode::Bilinear, scale: Some([1.0, 1.0]), size: None, align_corners: true };
+        let ops = vec![
+            act("a", "x"),
+            op("r", &["a"], unit.clone()),
+            bin("m", "r", BinaryKind::Mul, 1.0),
+            bin("d", "m", BinaryKind::Div, 1.0),
+            bin("p", "d", BinaryKind::Add, 0.0),
+            op("e", &["p"], OpKind::Eltwise { kind: EltwiseKind::Sum, coeffs: Some(vec![1.0]) }),
+            act("b", "e"),
+            // not identities: scale 2, rdiv by 1, sum of two inputs
+            bin("k", "b", BinaryKind::Mul, 2.0),
+            bin("q", "k", BinaryKind::Rdiv, 1.0),
+            op("s", &["q", "a"], OpKind::Eltwise { kind: EltwiseKind::Sum, coeffs: None }),
+            // a model output stays
+            op("o", &["s"], unit),
+        ];
+        let (got, orig) = rewrite(&ops, &["o".into()], chans);
+        assert_eq!(show(&got), ["other x -> a", "other a -> b", "other b -> k", "other k -> q", "other q,a -> s", "resize s -> o"]);
+        assert_eq!(orig, [0, 6, 7, 8, 9, 10]);
     }
 
     #[test]
