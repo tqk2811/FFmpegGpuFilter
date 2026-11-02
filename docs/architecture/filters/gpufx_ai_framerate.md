@@ -13,7 +13,7 @@ frame lasts until the end of the stream. Any output rate works, not only multipl
 ## Syntax
 
 ```
-gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>]
+gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>][:scale=<0..1>]
 ```
 
 ## Options
@@ -24,6 +24,7 @@ gpufx_ai_framerate=model=<path>[:fps=<rate>][:scene=<0..1>][:max_gap=<n>]
 | `fps` | rational | twice the input's | 0..INT_MAX | Output frame rate, a number or a fraction (`30`, `24000/1001`); named rates such as `ntsc` are not accepted. `0` (default) means twice the input rate. If the input rate is unknown, `fps` must be set |
 | `scene` | double | `0.2` | 0..1 | Scene change threshold: the SSIM of the pair at 32x32, as the official RIFE `inference_video.py` computes it. A pair below it is a cut and is not interpolated (the nearer source frame is repeated). `0` never detects a cut: every pair is interpolated. On anime 0.2 still blends some cuts between shots of similar layout; 0.4 caught 89% of the cuts of three 90 s OP/ED clips, at the cost of repeating a frame on some very fast zooms and flashes |
 | `max_gap` | double | `2.0` | 1..100 | A pair of source frames further apart than this many input frame durations (a gap in a VFR stream) is repeated, not interpolated |
+| `scale` | double | `0` (auto) | 0..1 | Processing scale: the scale the model estimates motion at, its `scale` parameter (RIFE's `--scale`; rife-v4.6 takes 0.25, 0.5 or 1). `0` (default) is auto: 0.5 for frames above 1920x1088 pixels in area (4K), 1 otherwise; a model without the parameter runs as it is. A lower value is faster, needs less GPU memory (4K tensors: 1.2 GiB at 1, 830 MiB at 0.5) and follows larger motion, with less detail in the motion. A value other than 0 with a model that has no `scale` parameter, or out of its range, stops the filter with an error. The frames are padded to a multiple of `32 / scale` |
 
 Pairs that go back in time, change size or format, or are further apart than `max_gap` are also repeated, with a
 warning. A jump of more than 10000 output frames (a timestamp jump, or the stream ending long after the last frame)
@@ -93,6 +94,15 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scene=0:max_gap=4,gpufx_download,format=nv12" out.mp4
 ```
 
+**`scale`.** Leave it at auto for most input: 4K runs at 0.5 (less memory, faster), 1080p and below at 1. Set it
+to force a value, for example 0.5 on 1080p with very fast motion, or 1 on 4K when the GPU has the memory and fine
+motion detail matters. The example below has not been run (the prebuilt FFmpeg was not rebuilt with the option).
+
+```sh
+ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i in.mp4 \
+  -vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip:scale=0.5,gpufx_download,format=nv12" out.mp4
+```
+
 **Vulkan or D3D12.** Prefer Vulkan: about 1.7x faster than D3D12 and D3D11 in the measurements (see Limitations). D3D12
 needs DXC for the model shaders, and `GPUFX_SHADER_CACHE` keeps the compiled ones. On Vulkan use `disable_multiplane=1`
 and `gpufx_upload` (needed on Intel Windows). Raise `extra_hw_frames` when uploading if the filter warns that more
@@ -105,7 +115,7 @@ The model is not in git: the release asset `gpufx-packages.zip` ships it in `gpu
 
 - Untested: the VideoToolbox (macOS) path has never run on a Mac, and the linux64 bundle's filter and
   `packages/gpufx_ai_framerate/rife-v4.6.zip` have not been run (only Windows has).
-- Speed (RTX 4060 Laptop): Vulkan about 45 ms per 1080p frame (4K about 174 ms); D3D12 and D3D11 are about
+- Speed (RTX 4060 Laptop): Vulkan about 45 ms per 1080p frame (4K about 174 ms, measured at `scale` 1 before auto chose 0.5 for 4K); D3D12 and D3D11 are about
   1.7x slower. Prefer Vulkan.
 - Output frame rate is constant: variable frame rate input is resampled to the grid.
 - Full list: [LIMITATIONS.md](../../LIMITATIONS.md#frame-interpolation-gpufx_ai_framerate).

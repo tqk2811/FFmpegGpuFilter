@@ -651,6 +651,16 @@ const char *gpufx_ai_interp_device(const GpufxAiInterp *ai);
  * interpolates every pair; RIFE uses 0.2.
  */
 int gpufx_ai_interp_set_scene(GpufxAiInterp *ai, double threshold);
+/*
+ * Processing scale: the value of the model parameter "scale" (the scale motion is estimated
+ * at; docs/NN_MODEL_FORMAT.md). 0 (the default) is auto: 0.5 for frames above 1920x1088
+ * pixels in area, 1 otherwise, for a model that declares "scale", and nothing for one that
+ * does not. Any other value needs a model that declares "scale" with the value in its range
+ * (rife-v4.6: 0.25..1); otherwise this call fails, or gpufx_ai_interp_use_* when the model is
+ * not loaded yet. Lower is faster and needs less memory (4K at 0.5: about 830 MiB of tensors
+ * instead of 1.2 GiB) and copes with larger motion, at some loss of detail in the motion.
+ */
+int gpufx_ai_interp_set_scale(GpufxAiInterp *ai, double scale);
 /* Forgets the previous source frame (a discontinuity): the next call makes no frame below time 1. */
 void gpufx_ai_interp_reset(GpufxAiInterp *ai);
 

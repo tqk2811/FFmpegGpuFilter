@@ -82,14 +82,26 @@ applied after the bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
 ### Parameters
 
 A model may declare named run-time parameters, top level, optional:
-`"params": { "scale": { "default": 1.0, "min": 0.125, "max": 1.0 } }` (`min` and `max` are optional). An f32
+`"params": { "scale": { "default": 1.0, "min": 0.125, "max": 1.0 } }` (`min` and `max` are optional; so is `values`, the list of the only values allowed, e.g. `"values": [0.25, 0.5, 1.0]`
+for a model that is right at those scales only; it must be non-empty, inside `[min, max]` and hold the default). An f32
 constant of an op may then be a number or a reference `{"param": "scale", "mul": k, "pow": p}`, whose value is
 `k * scale ^ p` (`mul` and `pow` default to 1). References are allowed in `scale` of `resize`, `scalar` of
 `binary` and each value of `coeffs` of `eltwise`. A reference to a parameter that is not declared, an unknown key
 in it, or a value that is not finite at the default fails to load. The caller gives values by name when it lays
 the model out (`NnModel::plan_with`, `FrameInterp::set_params`; `Reference::run_with` in gpufx-nnconv); a
-parameter not given takes its default, a name the model does not declare or a value outside `[min, max]` is an
+parameter not given takes its default, a name the model does not declare or a value outside `[min, max]` or not in `values` is an
 error. A model without `params` runs as before.
+
+For `frame_interp` models the parameter named `scale` has a fixed meaning: the scale the model estimates motion
+at (1 full size, 0.5 half). `InterpFrames::set_scale` / `gpufx_ai_interp_set_scale` (the filter option `scale`)
+set it, and their auto value (0) picks 0.5 for frames above 1920x1088 pixels in area and 1 otherwise when the
+model declares `scale`. `gpufx-nnconv ncnn --rewrite rife-v4-scale` (or `"rewrite": "rife-v4-scale"` in
+`source.json`) adds it to the RIFE v4.6 IFNet: every constant that depends on RIFE's `scale` becomes a reference
+(`scale_list = [8, 4, 2, 1] / scale`: block `k` resizes its input by `scale / k` = `{"mul": 1/k, "pow": 1}`, its
+flow by the same and divides it by `k / scale` = `{"mul": k, "pow": -1}`, then resizes its output and multiplies
+the flow by `k / scale`), and the four resize/multiply steps the export leaves out for the last block (`k = 1`)
+are inserted as ops that are identities at `scale = 1`. The ops are checked by name, kind and value; another
+graph fails to convert. At `scale = 1` the plan is the one of the package converted without the rewrite.
 
 The runtime drops an op that returns its input at the values given: `resize` by `scale` [1, 1] (not by `size`),
 `binary` `mul`/`div` by a scalar 1 or `add`/`sub` of a scalar 0, `eltwise` of one input (`sum` with no
@@ -116,11 +128,14 @@ Op semantics:
 ```json
 { "kind": "frame_interp", "family": "rife-v4",
   "inputs": { "frame0": "in0", "frame1": "in1", "timestep": "in2" }, "output": "out0",
-  "color": "rgb", "range": [0, 1], "pad_multiple": 32, "pad_mode": "zero", "output_clamp": [0, 1] }
+  "color": "rgb", "range": [0, 1], "pad_multiple": { "param": "scale", "mul": 32, "pow": -1 },
+  "pad_mode": "zero", "output_clamp": [0, 1] }
 ```
 
 `timestep` is a one-channel plane filled with the time in (0, 1); the frames are padded to a multiple of
-`pad_multiple`, run, and the output is cropped and clamped.
+`pad_multiple`, run, and the output is cropped and clamped. `pad_multiple` is a number, or (`frame_interp` only)
+a reference to a parameter as in the ops, rounded up: a graph that shrinks by `scale / 32` needs sizes that are
+multiples of `32 / scale` (32 at scale 1, 64 at 0.5, 128 at 0.25), so the padding grows only when the scale drops.
 
 The Real-ESRGAN ones (`packages/gpufx_ai_upscale/realesr-*/io-x<N>.json`) are:
 

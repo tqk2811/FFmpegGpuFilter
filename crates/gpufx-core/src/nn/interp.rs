@@ -25,7 +25,7 @@ struct InterpIo {
     frame1: String,
     timestep: String,
     output: String,
-    pad_multiple: u32,
+    pad_multiple: PadMultiple,
     range: [f32; 2],
     clamp: [f32; 2],
 }
@@ -58,10 +58,53 @@ impl InterpIo {
             frame1: name("frame1")?,
             timestep: name("timestep")?,
             output: io["output"].as_str().map(String::from).ok_or_else(|| bad("no output"))?,
-            pad_multiple: io["pad_multiple"].as_u64().unwrap_or(1).clamp(1, 4096) as u32,
+            pad_multiple: PadMultiple::parse(io.get("pad_multiple"))
+                .ok_or_else(|| bad("pad_multiple must be a number or {\"param\", \"mul\", \"pow\"}"))?,
             range,
             clamp: pair("output_clamp", range)?,
         })
+    }
+}
+
+/// `pad_multiple` of io.json: a number, or `ceil(mul * param ^ pow)` of a model parameter (a model whose
+/// downscale depends on a parameter needs more padding when it shrinks more).
+#[derive(Debug, Clone)]
+enum PadMultiple {
+    Fixed(u32),
+    Param { param: String, mul: f32, pow: f32 },
+}
+
+impl PadMultiple {
+    fn parse(v: Option<&serde_json::Value>) -> Option<Self> {
+        match v {
+            None | Some(serde_json::Value::Null) => Some(PadMultiple::Fixed(1)),
+            Some(serde_json::Value::Object(o)) => {
+                let param = o.get("param")?.as_str()?.to_string();
+                let num = |k: &str, d: f64| o.get(k).map_or(Some(d), |v| v.as_f64()).map(|v| v as f32);
+                if o.keys().any(|k| !["param", "mul", "pow"].contains(&k.as_str())) {
+                    return None;
+                }
+                Some(PadMultiple::Param { param, mul: num("mul", 1.0)?, pow: num("pow", 1.0)? })
+            }
+            Some(v) => Some(PadMultiple::Fixed(v.as_u64()?.clamp(1, 4096) as u32)),
+        }
+    }
+
+    /// The multiple at the parameter values `params` (every declared parameter).
+    fn at(&self, params: &[(String, f32)]) -> Result<u32, Error> {
+        match self {
+            PadMultiple::Fixed(m) => Ok(*m),
+            PadMultiple::Param { param, mul, pow } => {
+                let Some((_, v)) = params.iter().find(|(n, _)| n == param) else {
+                    return Err(Error::Package(format!("io.json: pad_multiple names param \"{param}\" the model does not declare")));
+                };
+                let m = (*mul as f64 * (*v as f64).powf(*pow as f64)).ceil();
+                if !m.is_finite() || !(1.0..=4096.0).contains(&m) {
+                    return Err(Error::Package(format!("io.json: pad_multiple {m} at {param} = {v} is not in [1, 4096]")));
+                }
+                Ok(m as u32)
+            }
+        }
     }
 }
 
@@ -69,6 +112,8 @@ impl InterpIo {
 struct Sized {
     w: u32,
     h: u32,
+    /// `pad_multiple` at the current parameter values.
+    pad: u32,
     plan: NnPlan,
     /// Slots: frame0 in, frame1 in, timestep fill, out.
     params: wgpu::Buffer,
@@ -163,7 +208,8 @@ impl FrameInterp {
             compute_pipeline(device, cache, "gpufx nn frame in", &pl(&in_layout), &in_entries, include_str!("frame_in.wgsl").into());
         let out_pipeline =
             compute_pipeline(device, cache, "gpufx nn frame out", &pl(&out_layout), &out_entries, include_str!("frame_out.wgsl").into());
-        let params = model.model.params.iter().map(|p| (p.name.clone(), p.default)).collect();
+        let params: Vec<(String, f32)> = model.model.params.iter().map(|p| (p.name.clone(), p.default)).collect();
+        io.pad_multiple.at(&params)?;
         Ok(FrameInterp { model, io, in_layout, out_layout, in_pipeline, out_pipeline, params, sized: None })
     }
 
@@ -176,6 +222,7 @@ impl FrameInterp {
         let params: Vec<(String, f32)> =
             decl.iter().map(|p| (p.name.clone(), params.iter().rev().find(|(n, _)| *n == p.name).map_or(p.default, |&(_, v)| v))).collect();
         if params != self.params {
+            self.io.pad_multiple.at(&params)?;
             self.params = params;
             self.sized = None;
         }
@@ -191,7 +238,7 @@ impl FrameInterp {
             return Err(Error::Frame("empty frame".into()));
         }
         self.sized = None;
-        let m = self.io.pad_multiple;
+        let m = self.io.pad_multiple.at(&self.params)?;
         let (wp, hp) = (w.div_ceil(m) * m, h.div_ceil(m) * m);
         let params: Vec<(&str, f32)> = self.params.iter().map(|(n, v)| (n.as_str(), *v)).collect();
         let shapes =
@@ -247,7 +294,7 @@ impl FrameInterp {
         });
         let g = ts.len().div_ceil(256);
         let gx = g.min(32768);
-        self.sized = Some(Sized { w, h, plan, params, fill: fill_group, fill_groups: (gx, g.div_ceil(gx)), owned: None });
+        self.sized = Some(Sized { w, h, pad: m, plan, params, fill: fill_group, fill_groups: (gx, g.div_ceil(gx)), owned: None });
         Ok(&self.sized.as_ref().expect("just set").plan)
     }
 
@@ -309,7 +356,7 @@ impl FrameInterp {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(out) },
             ],
         });
-        let m = self.io.pad_multiple;
+        let m = s.pad;
         let (wp, hp) = (w.div_ceil(m) * m, h.div_ceil(m) * m);
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("gpufx nn interp"), timestamp_writes: None });
         cpass.set_pipeline(&self.in_pipeline);
@@ -436,6 +483,16 @@ impl FrameInterp {
         }
         device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| Error::Gpu(e.to_string()))?;
         Ok(start.elapsed().as_secs_f64() * 1e3 / n.max(1) as f64)
+    }
+
+    /// Whether the model declares the parameter `name`.
+    pub fn has_param(&self, name: &str) -> bool {
+        self.model.model.params.iter().any(|p| p.name == name)
+    }
+
+    /// The current value of parameter `name` (its default until set), `None` when the model does not declare it.
+    pub fn param(&self, name: &str) -> Option<f32> {
+        self.params.iter().find(|(n, _)| n == name).map(|&(_, v)| v)
     }
 
     /// The plan of the current frame size, after a frame was given.

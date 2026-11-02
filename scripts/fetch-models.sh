@@ -9,7 +9,8 @@
 # A source.json with a "variants" array is a multi-scale bundle: each variant has a dir, io, url_param,
 # sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/packages/<filter>/<name>.zip.
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
-# filters the model is for) is passed to gpufx-nnconv --used-for.
+# filters the model is for) is passed to gpufx-nnconv --used-for. A flat source.json may name a
+# "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite.
 
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -142,9 +143,11 @@ for name in "$@"; do
             ${readme:+--readme "$readme"} ${license:+--license "$license"} -o "$out/$name.zip"
     else
         # Single-model package (e.g. RIFE).
+        rewrite=$(json_get "$src" rewrite)
         fetch "$(json_get "$src" url_param)" "$(json_get "$src" sha256_param)" "$dir/flownet.param"
         fetch "$(json_get "$src" url_bin)" "$(json_get "$src" sha256_bin)" "$dir/flownet.bin"
         convert ncnn --param "$dir/flownet.param" --bin "$dir/flownet.bin" --io "$mdir/io.json" \
-            --used-for "$used_for" ${license:+--license "$license"} ${readme:+--readme "$readme"} --name "$name" -o "$out/$name.zip"
+            --used-for "$used_for" ${license:+--license "$license"} ${readme:+--readme "$readme"} \
+            ${rewrite:+--rewrite "$rewrite"} --name "$name" -o "$out/$name.zip"
     fi
 done

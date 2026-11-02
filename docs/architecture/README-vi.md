@@ -944,6 +944,17 @@ tại thời điểm đó. FFI (`gpufx.h`, kiểu mờ `GpufxAiInterp`):
 - `gpufx_ai_interp_set_scene(threshold)`: ngưỡng chuyển cảnh là SSIM trong 0..1, tính như `inference_video.py` của
   RIFE gốc (hai frame thu bilinear về 32x32, `ssim_matlab` trên RGB); cặp thấp hơn ngưỡng là cảnh cắt và mỗi frame
   tạo ra là frame nguồn gần hơn (RIFE lặp frame 0; RIFE thu nhỏ frame đã pad 0, ở đây thu frame chưa pad). `gpufx_ai_interp_reset` quên frame trước (gián đoạn).
+- `gpufx_ai_interp_set_scale(scale)`: tỉ lệ xử lý, chính là tham số `scale` của model (`--scale` của RIFE). `0` là
+  auto, do `InterpFrames` chọn theo từng kích thước frame (0.5 khi trên 1920x1088 pixel, ngược lại 1) và chỉ với
+  model có khai báo `scale`; giá trị khác thì model phải có tham số đó.
+
+`scale` của RIFE là việc của converter, không phải runtime: bản export ncnn đóng cứng `scale = 1`, và `gpufx-nnconv
+--rewrite rife-v4-scale` ([rife.rs](../../crates/gpufx-nnconv/src/rife.rs)) đổi mọi hằng số phụ thuộc nó (block `k`
+của `scale_list = [8, 4, 2, 1] / scale`: resize input `scale / k`, resize và chia flow, resize output và nhân flow
+`k / scale`) thành tham chiếu `{"param": "scale", "mul", "pow"}`, đồng thời chèn các bước bản export bỏ đi ở block
+cuối thành op, là identity ở 1. Mỗi op được kiểm theo tên, loại và giá trị nên graph khác thì convert lỗi; runtime
+vẫn chạy graph chung. `pad_multiple` của io.json cũng theo tham số (`32 / scale`). Ở 4K, scale 0.5 lập plan với
+830 MiB tensor, không buffer nào trên 128 MiB (scale 1 là 1,2 GiB với buffer 255 và 383 MiB).
 
 Trước khi lập plan cho một kích thước frame, [rewrite.rs](../../crates/gpufx-core/src/nn/rewrite.rs) viết lại graph
 thành graph cho cùng giá trị nhưng tensor nhỏ hơn, vì một binding storage buffer có thể chỉ được 128 MiB. Resize tính

@@ -62,7 +62,22 @@ pub struct InterpFrames {
     between: Vec<Between>,
     times: Vec<f32>,
     threshold: f32,
+    /// [`InterpFrames::set_scale`]: 0 is auto.
+    scale: f32,
     scene: Scene,
+}
+
+/// Frames above 1920x1088 pixels in area: the auto processing scale drops to 0.5 (as RIFE's own inference
+/// scripts advise for 4K).
+pub const AUTO_SCALE_MAX_PIXELS: u64 = 1920 * 1088;
+
+/// The auto processing scale of `w x h` frames: 0.5 above [`AUTO_SCALE_MAX_PIXELS`], 1 otherwise.
+pub fn auto_scale(w: u32, h: u32) -> f32 {
+    if w as u64 * h as u64 > AUTO_SCALE_MAX_PIXELS {
+        0.5
+    } else {
+        1.0
+    }
 }
 
 fn texture(device: &wgpu::Device, w: u32, h: u32, label: &str) -> wgpu::Texture {
@@ -159,6 +174,7 @@ impl InterpFrames {
             between: Vec::new(),
             times: Vec::new(),
             threshold: 0.0,
+            scale: 0.0,
             scene,
         })
     }
@@ -192,6 +208,29 @@ impl InterpFrames {
         }
         self.threshold = threshold;
         Ok(())
+    }
+
+    /// Processing scale: the value of the model parameter `"scale"` (the scale the model estimates motion at,
+    /// e.g. 0.5 for 4K with RIFE). 0 is auto: [`auto_scale`] of each frame size for a model that declares
+    /// `"scale"`, nothing for one that does not. Any other value needs a model that declares `"scale"` with
+    /// the value in its range.
+    pub fn set_scale(&mut self, scale: f32) -> Result<(), Error> {
+        if !scale.is_finite() || scale < 0.0 {
+            return Err(Error::Param(format!("scale {scale} is not 0 (auto) or positive")));
+        }
+        if scale != 0.0 {
+            if !self.interp.has_param("scale") {
+                return Err(Error::Param(format!("scale {scale}: the model has no \"scale\" parameter (use 0, auto)")));
+            }
+            self.interp.set_params(&[("scale", scale)]).map_err(|e| Error::Param(format!("scale {scale}: {e}")))?;
+        }
+        self.scale = scale;
+        Ok(())
+    }
+
+    /// The frame interpolation the frames run through (its parameter values, its plan).
+    pub fn interp(&self) -> &FrameInterp {
+        &self.interp
     }
 
     /// Forgets the previous source frame: the next call takes a frame and makes none.
@@ -258,6 +297,10 @@ impl InterpFrames {
         let (device, queue, conv) = (&ctx.device, &ctx.queue, &ctx.conv);
         input.check("input", false)?;
         let (w, h) = (input.width, input.height);
+        if self.scale == 0.0 && self.interp.has_param("scale") {
+            // a no-op unless the size crosses the auto threshold
+            self.interp.set_params(&[("scale", auto_scale(w, h))])?;
+        }
         if outs.len() != self.times.len() {
             return Err(Error::Frame(format!("{} output frames for {} interpolation times", outs.len(), self.times.len())));
         }

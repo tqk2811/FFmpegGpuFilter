@@ -21,10 +21,17 @@ pub struct Model {
     pub ops: Vec<Op>,
 }
 
-/// A run-time parameter: its value when none is given.
-#[derive(Serialize, Debug, Clone, Copy, PartialEq)]
+/// A run-time parameter: its value when none is given and its optional range.
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct ParamDecl {
     pub default: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f32>,
+    /// The only values allowed, when the model has no meaning in between.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<f32>>,
 }
 
 /// An f32 constant of an op: a number, or `mul * param ^ pow` of a declared parameter.

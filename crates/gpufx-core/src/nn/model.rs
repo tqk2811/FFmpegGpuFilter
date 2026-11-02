@@ -274,7 +274,16 @@ impl Model {
             if !d.default.is_finite() || d.min.is_some_and(|v| d.default < v) || d.max.is_some_and(|v| d.default > v) {
                 return Err(err(format!("model.json: param \"{name}\": default {} is out of its range", d.default)));
             }
-            params.push(Param { name, default: d.default, min: d.min, max: d.max });
+            if let Some(vs) = &d.values {
+                let inside = |v: f32| v.is_finite() && d.min.is_none_or(|m| v >= m) && d.max.is_none_or(|m| v <= m);
+                if vs.is_empty() || !vs.iter().all(|&v| inside(v)) {
+                    return Err(err(format!("model.json: param \"{name}\": values {vs:?} must be non-empty and inside its range")));
+                }
+                if !vs.contains(&d.default) {
+                    return Err(err(format!("model.json: param \"{name}\": default {} is not one of {vs:?}", d.default)));
+                }
+            }
+            params.push(Param { name, default: d.default, min: d.min, max: d.max, values: d.values });
         }
         let mut ops = Vec::with_capacity(raw.ops.len());
         let mut binds = Vec::new();
@@ -306,6 +315,9 @@ impl Model {
             let p = &self.params[k];
             if !x.is_finite() || p.min.is_some_and(|m| x < m) || p.max.is_some_and(|m| x > m) {
                 return Err(err(format!("param \"{name}\" = {x} is out of its range")));
+            }
+            if p.values.as_ref().is_some_and(|vs| !vs.contains(&x)) {
+                return Err(err(format!("param \"{name}\" = {x} is not one of {:?}", p.values.as_deref().unwrap_or(&[]))));
             }
             v[k] = x;
         }
@@ -341,6 +353,8 @@ pub struct Param {
     pub default: f32,
     pub min: Option<f32>,
     pub max: Option<f32>,
+    /// The only values allowed, when the model has no meaning in between.
+    pub values: Option<Vec<f32>>,
 }
 
 #[derive(Deserialize)]
@@ -349,6 +363,7 @@ struct RawParam {
     default: f32,
     min: Option<f32>,
     max: Option<f32>,
+    values: Option<Vec<f32>>,
 }
 
 fn one() -> f32 {

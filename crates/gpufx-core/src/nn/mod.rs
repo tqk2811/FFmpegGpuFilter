@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-pub use frames::{InterpFrames, UpscaleFrames};
+pub use frames::{auto_scale, InterpFrames, UpscaleFrames, AUTO_SCALE_MAX_PIXELS};
 pub use interp::FrameInterp;
 pub use plan::{NnPlan, Profile, TensorView};
 pub use upscale::{FrameUpscale, TileLayout, UpscaleOptions, DEFAULT_TENSOR_BYTES};
