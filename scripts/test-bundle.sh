@@ -389,10 +389,11 @@ ok "chroma-key: yuv420p in, rgba out" -i "$A" -vf "format=yuv420p,gpufx=graph=$F
 ok "chroma-key: gray input is accepted" -i "$A" -vf "format=gray,gpufx=graph=$FX/ffmpeg/chroma-key.zip" $NULL
 # shellcheck disable=SC2086
 rejects "crossfade: inputs of different sizes" "must equal the first input" -i "$A" -i "$C" -filter_complex "[0][1]gpufx=graph=$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip" -an $NULL
-# Without graph reinit, frames of the new size reach gpufx: it must refuse them, not
-# overflow its buffers. chroma-key takes YUV as it is, so no scale sits in between.
+# Without graph reinit, frames of the new size must be refused, not overflow gpufx's
+# buffers (libavfilter refuses them first, as gpufx does not declare a dynamic size).
+# chroma-key takes YUV as it is, so no scale sits in between.
 # shellcheck disable=SC2086
-rejects "size change mid-stream" "changed from 320x180 yuvj420p to 300x180" -reinit_filter 0 -f concat -i "$R" -an -vf "gpufx=graph=$FX/ffmpeg/chroma-key.zip" $NULL
+rejects "size change mid-stream" "Frame size or format changed" -reinit_filter 0 -f concat -i "$R" -an -vf "gpufx=graph=$FX/ffmpeg/chroma-key.zip" $NULL
 # GPU frames only: a CPU filter right after gpufx needs hwdownload first.
 # shellcheck disable=SC2086
 rejects "GPU output into a CPU filter" "Impossible to convert\|hwdownload" -i "$A" -an -vf "gpufx=graph=$FX/ffmpeg/invert.zip,format=rgba" $NULL

@@ -647,7 +647,7 @@ const FFFilter ff_vf_gpufx_ai_upscale = {
     .p.description  = NULL_IF_CONFIG_SMALL("Upscale frames with a neural super resolution model on the GPU."),
     .p.priv_class   = &gpufx_ai_upscale_class,
     .priv_size      = sizeof(AiUpscaleContext),
-    .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
+    .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE | FF_FILTER_FLAG_DYNAMIC_FRAME_SIZE,
     .init           = init,
     .uninit         = uninit,
     FILTER_INPUTS(inputs),
