@@ -362,11 +362,13 @@ static int upload_filter_frame(AVFilterLink *inlink, AVFrame *in)
                             in->linesize[i], s->row_bytes[i], s->region[i].imageExtent.height);
     ff_vk_flush_buffer(&s->vkctx, &s->bufs[e->idx], 0, VK_WHOLE_SIZE, 1);
 
-    if ((ret = transfer_record(ctx, e, out, 1)) < 0 ||
-        (ret = ff_vk_exec_submit(&s->vkctx, e)) < 0) {
-        ff_vk_exec_discard_deps(&s->vkctx, e);
+    if ((ret = transfer_record(ctx, e, out, 1)) < 0) {
+        ff_vk_exec_discard(&s->vkctx, e);
         goto fail;
     }
+    /* ff_vk_exec_submit() discards the recording itself when it fails. */
+    if ((ret = ff_vk_exec_submit(&s->vkctx, e)) < 0)
+        goto fail;
     av_frame_free(&in);
     return ff_filter_frame(outlink, out);
 
@@ -473,10 +475,17 @@ static int download_submit(AVFilterContext *ctx, AVFrame *in)
     }
     /* The slot's previous frame was read back already (FIFO of latency + 1). */
     e = ff_vk_exec_get(&s->vkctx, &s->exec);
-    if ((ret = ff_vk_exec_start(&s->vkctx, e)) < 0 ||
-        (ret = transfer_record(ctx, e, in, 0)) < 0 ||
-        (ret = ff_vk_exec_submit(&s->vkctx, e)) < 0) {
-        ff_vk_exec_discard_deps(&s->vkctx, e);
+    if ((ret = ff_vk_exec_start(&s->vkctx, e)) < 0) {
+        av_frame_free(&props);
+        goto end;
+    }
+    if ((ret = transfer_record(ctx, e, in, 0)) < 0) {
+        ff_vk_exec_discard(&s->vkctx, e);
+        av_frame_free(&props);
+        goto end;
+    }
+    /* ff_vk_exec_submit() discards the recording itself when it fails. */
+    if ((ret = ff_vk_exec_submit(&s->vkctx, e)) < 0) {
         av_frame_free(&props);
         goto end;
     }
