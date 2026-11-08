@@ -58,10 +58,10 @@ jobs:
         with:
           command: check licenses
 
-  # Prebuilt shared FFmpeg 9.0 (tqk2811/FFmpegBuild) with only libavfilter rebuilt:
+  # Prebuilt shared FFmpeg master (backup release of this repository) with only libavfilter rebuilt:
   # gpufx plus every filter libavfilter builds on its own. A few minutes each.
   ffmpeg-linux64:
-    name: FFmpeg 9.0 prebuilt + gpufx (linux64)
+    name: FFmpeg master prebuilt + gpufx (linux64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -103,7 +103,7 @@ jobs:
           retention-days: 14
 
   ffmpeg-win64:
-    name: FFmpeg 9.0 prebuilt + gpufx (win64, cross-compiled)
+    name: FFmpeg master prebuilt + gpufx (win64, cross-compiled)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +141,7 @@ jobs:
           retention-days: 1
 
   ffmpeg-windows:
-    name: FFmpeg 9.0 prebuilt + gpufx (win64, run on Windows)
+    name: FFmpeg master prebuilt + gpufx (win64, run on Windows)
     needs: [ffmpeg-win64, ffmpeg-linux64]
     runs-on: windows-latest
     steps:
@@ -168,10 +168,10 @@ jobs:
         # with a warning too, and only the device-free checks run here.
         run: REQUIRE_D3D=1 REQUIRE_MODELS=1 GPUFX_PACKAGES=dist/packages scripts/test-bundle.sh dist/win64 build/test-clips
 
-  # FFmpeg 9.0 from the external/FFmpeg submodule with gpufx and VideoToolbox (no prebuilt
+  # FFmpeg from the external/FFmpeg submodule with gpufx and VideoToolbox (no prebuilt
   # macOS FFmpeg to swap libavfilter into). Test only: nothing is released.
   ffmpeg-macos:
-    name: FFmpeg 9.0 + gpufx (macOS, VideoToolbox frames)
+    name: FFmpeg master + gpufx (macOS, VideoToolbox frames)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -256,7 +256,7 @@ jobs:
       - name: Create or update the release
         run: |
           TAG=${SHA::7}
-          NOTES="Temporary build of ${SHA} (${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}): prebuilt FFmpeg 9.0 with libavfilter rebuilt for gpufx.
+          NOTES="Temporary build of ${SHA} (${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}): prebuilt FFmpeg master with libavfilter rebuilt for gpufx.
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if OLD=$(gh release view "$TAG" --json targetCommitish -q .targetCommitish 2> /dev/null); then
             # Re-run of the same commit; a different commit with the same short id must not

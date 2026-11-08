@@ -1,7 +1,7 @@
 #!/bin/sh
 # Rebuilds the prebuilt FFmpeg's libavutil with the patches of ffmpeg/patches (D3D11/D3D12
-# frames of every DXGI format with a software pixel format). Runs inside BtbN's
-# FFmpeg-Builds image of the target (ghcr.io/btbn/ffmpeg-builds/<target>-lgpl-9.0), which
+# frames of every DXGI format with a software pixel format). Runs inside the
+# FFmpeg-Builds image of the target (ghcr.io/ffmpeg-builds/ffmpeg-builds/<target>-lgpl), which
 # has the toolchain (UCRT mingw-w64 / glibc 2.28) and the static libraries libavutil
 # links (libvpl, OpenCL loader, libva, libdrm, nv-codec-headers, AMF, Vulkan): the
 # configure line is the one stored in the prebuilt library itself, so the hardware device
@@ -11,7 +11,7 @@
 #     SRC          copy of the FFmpeg source (external/FFmpeg), patched in place
 #     PREBUILT_LIB the prebuilt avutil-NN.dll or libavutil.so.NN.x.y
 #     OUT_DIR      where the new library is written (same file name)
-#     VERSION      FFmpeg version string of the prebuilt (n9.0-2-g03d9533176)
+#     VERSION      FFmpeg version string of the prebuilt (N-128691-gcc583787bb)
 set -eu
 SRC=${1:?usage: build-avutil.sh SRC PREBUILT_LIB OUT_DIR VERSION}
 LIB=${2:?}

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fast build: takes a prebuilt shared FFmpeg from tqk2811/FFmpegBuild, rebuilds
+# Fast build: takes a prebuilt shared FFmpeg (a backup of an FFmpeg-Builds autobuild, in a
+# release of this repository, since upstream deletes old autobuilds), rebuilds
 # libavfilter (with gpufx and every filter it can build) and libavutil (with ffmpeg/patches,
 # in docker) from the external/FFmpeg submodule, and swaps them into the bundle. Every
 # other library and the ffmpeg/ffprobe executables stay the prebuilt ones. Takes a few
@@ -8,9 +9,9 @@
 #   scripts/build-prebuilt.sh [linux64|win64]        default linux64
 #
 # Environment (defaults match the commit external/FFmpeg is pinned to):
-#   FFBUILD_TAG      release tag             Release-2026-08-10
-#   FFBUILD_VERSION  FFmpeg version string   n9.0-2-g03d9533176
-#   FFBUILD_LICENSE  lgpl | gpl | lgpl2 | gpl2   lgpl
+#   FFBUILD_VERSION  FFmpeg version string   N-128691-gcc583787bb
+#   FFBUILD_TAG      release tag             ffmpeg-$FFBUILD_VERSION
+#   FFBUILD_LICENSE  lgpl | gpl | lgpl2 | gpl2   lgpl (the backup release only has lgpl)
 #   VULKAN_HEADERS   directory with include/vulkan/vulkan.h (Khronos Vulkan-Headers); by
 #                    default tag VULKAN_HEADERS_TAG (v1.4.321) is cloned into build/downloads.
 #                    gpufx takes Vulkan frames (hwupload, -hwaccel vulkan) only when the
@@ -22,8 +23,8 @@
 #   FFMPEG_FILTERS   all (default): every filter libavfilter builds without avcodec, avformat
 #                    and external libraries; keep: only gpufx and docker/keep-filters.txt.
 #   AVUTIL_IMAGE     image libavutil is rebuilt in with ffmpeg/patches (scripts/build-avutil.sh);
-#                    default BtbN's ghcr.io/btbn/ffmpeg-builds/<target>-lgpl-9.0 pinned by digest
-#                    (lgpl, n9.0-2-g03d9533176 only). Empty: the prebuilt libavutil is kept.
+#                    default ghcr.io/ffmpeg-builds/ffmpeg-builds/<target>-lgpl pinned by digest
+#                    (lgpl, N-128691-gcc583787bb only). Empty: the prebuilt libavutil is kept.
 #   AVUTIL_LIB       a libavutil built elsewhere by scripts/build-avutil.sh, used instead.
 #   REQUIRE_D3D      win64: 1 makes building without D3D12/D3D11 frames an error (CI).
 #   REQUIRE_LICENSES 1 makes a missing cargo-about an error (CI); without it the bundle
@@ -35,8 +36,8 @@
 set -eu
 TARGET=${1:-linux64}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TAG=${FFBUILD_TAG:-Release-2026-08-10}
-VERSION=${FFBUILD_VERSION:-n9.0-2-g03d9533176}
+VERSION=${FFBUILD_VERSION:-N-128691-gcc583787bb}
+TAG=${FFBUILD_TAG:-ffmpeg-$VERSION}
 LICENSE=${FFBUILD_LICENSE:-lgpl}
 WORK=$ROOT/build/prebuilt-$TARGET
 OUT=$ROOT/dist/$TARGET
@@ -56,14 +57,14 @@ case "$LICENSE" in
     gpl2) LICENSE_FLAGS=--enable-gpl ;;
     *) echo "unknown license $LICENSE (lgpl, gpl, lgpl2, gpl2)" >&2; exit 1 ;;
 esac
-# e.g. ffmpeg-n9.0-2-g03d9533176-linux64-lgpl-shared-9.0
-NAME=ffmpeg-$VERSION-$TARGET-$LICENSE-shared-$(echo "$VERSION" | sed 's/^n\([0-9]*\.[0-9]*\).*/\1/')
-URL=https://github.com/tqk2811/FFmpegBuild/releases/download/$TAG/$NAME.$EXT
+# e.g. ffmpeg-N-128691-gcc583787bb-linux64-lgpl-shared
+NAME=ffmpeg-$VERSION-$TARGET-$LICENSE-shared
+URL=https://github.com/tqk2811/FFmpegGpuFilter/releases/download/$TAG/$NAME.$EXT
 
 # libavfilter must come from the same commit as the prebuilt libraries.
 SRC=$ROOT/external/FFmpeg
 [ -f "$SRC/configure" ] || git -C "$ROOT" submodule update --init --depth 1 external/FFmpeg
-# The commit comes from the git-describe version (n9.0-2-g<sha>); FFBUILD_COMMIT overrides
+# The commit comes from the git-describe version (N-128691-g<sha>); FFBUILD_COMMIT overrides
 # it for prebuilts named after a plain tag.
 WANT=${FFBUILD_COMMIT:-${VERSION##*-g}}
 [ "$WANT" != "$VERSION" ] || {
@@ -92,18 +93,18 @@ esac
 cp -R "$WORK/$NAME/." "$OUT/"
 
 # libavutil with ffmpeg/patches (D3D11/D3D12 frames of every DXGI format), rebuilt in
-# BtbN's FFmpeg-Builds image of the target: it has the toolchain and the libraries the
+# the FFmpeg-Builds image of the target: it has the toolchain and the libraries the
 # prebuilt libavutil links (scripts/build-avutil.sh).
 if [ "$TARGET" = win64 ]; then
     AV_OLD=$(ls "$OUT"/bin/avutil-*.dll | head -n1)
-    AV_DIGEST=sha256:fcead969d7dbda9252d0502af2db571106a3b9a247ae61d1c072dd56473219e7
+    AV_DIGEST=sha256:c810b6bd886c5a2c99e75b8f3c3aa769542f5363fb28558e18ba58f325e71230
 else
     AV_OLD=$(ls "$OUT"/lib/libavutil.so.*.*.* | head -n1)
-    AV_DIGEST=sha256:1881806695b6ecdbd256bb057bb0ec80d55e5b649d5c5c048fa439fda18d6609
+    AV_DIGEST=sha256:37398377102d11045ebddcac564b24426401476ff83423fbac33d751a4f37d98
 fi
 AV_DEFAULT=
-[ "$LICENSE" = lgpl ] && [ "$VERSION" = n9.0-2-g03d9533176 ] &&
-    AV_DEFAULT=ghcr.io/btbn/ffmpeg-builds/$TARGET-lgpl-9.0@$AV_DIGEST
+[ "$LICENSE" = lgpl ] && [ "$VERSION" = N-128691-gcc583787bb ] &&
+    AV_DEFAULT=ghcr.io/ffmpeg-builds/ffmpeg-builds/$TARGET-lgpl@$AV_DIGEST
 AVUTIL_IMAGE=${AVUTIL_IMAGE-$AV_DEFAULT}
 [ -f "$AV_OLD" ] || { echo "no libavutil in the prebuilt $OUT" >&2; exit 1; }
 if [ -n "${AVUTIL_LIB:-}" ]; then

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Adds the gpufx filters (gpufx, gpufx_upload, gpufx_download, gpufx_ai_framerate,
 # gpufx_ai_upscale) to an FFmpeg source tree
-# (tested with the external/FFmpeg submodule, n9.0-2-g03d9533176, and 9.1-dev).
+# (tested with the external/FFmpeg submodule, N-128691-gcc583787bb).
 # build.sh and build-prebuilt.sh run it.
 #   ffmpeg/integrate.sh /path/to/FFmpeg
 # Then: ./configure --enable-libgpufx ... (libgpufx must be found by pkg-config)
