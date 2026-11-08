@@ -71,3 +71,23 @@ Texture D3D chia sẻ giữa hai device hoặc hai API qua shared NT handle. gpu
 ## Fence
 
 Đối tượng đồng bộ GPU mang một giá trị tăng dần: bên ghi signal giá trị, bên đọc chờ tới giá trị đó. D3D12 và D3D11.4 có fence; Vulkan có tương đương là timeline semaphore. FFmpeg gắn fence vào frame D3D12 để encoder biết khi nào ghi xong.
+
+## NLE
+
+Non-linear editor: trình dựng video theo timeline, sửa clip ở vị trí bất kỳ mà không đụng file gốc. Project chỉ lưu danh sách clip, điểm cắt và hiệu ứng; frame được tính lại khi xem hoặc xuất.
+
+## Proxy
+
+Bản sao độ phân giải thấp, dễ decode của video gốc, dùng để xem và tua mượt khi dựng. Lúc xuất, editor quay lại dùng file gốc.
+
+## Zero-copy
+
+Chuyển frame giữa các bước mà không chép dữ liệu qua RAM: decoder, hiệu ứng và encoder cùng dùng texture trên GPU.
+
+## OpenTimelineIO (OTIO)
+
+Định dạng và thư viện mở để trao đổi timeline giữa các phần mềm dựng phim. Nó lưu cấu trúc track, clip và điểm cắt, không chứa media.
+
+## OpenFX (OFX)
+
+Chuẩn plugin hiệu ứng mở, được nhiều phần mềm dựng phim và compositing hỗ trợ. Một plugin OFX có thể chạy trên nhiều host khác nhau.
