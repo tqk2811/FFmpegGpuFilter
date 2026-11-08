@@ -215,12 +215,6 @@
 - **Vì sao**: rẻ để thêm, chặn hồi quy chiều chạy.
 - **Ngày ghi**: 2026-10-16
 
-### [Thấp] Báo lỗi host_image_copy cho FFmpeg/Intel; gỡ phần né khi đã sửa
-- **Vấn đề**: FFmpeg 9 bật `VK_EXT_host_image_copy`; driver Intel Windows (101.7082) cấp phát hỏng ảnh optimal một plane (`VK_ERROR_OUT_OF_HOST_MEMORY`) và copy sai chroma của ảnh multi-planar. Đã báo FFmpeg: https://code.ffmpeg.org/FFmpeg/FFmpeg/issues/25063; đã báo Intel: https://github.com/IGCIT/Intel-GPU-Community-Issue-Tracker-IGCIT/issues/1587. gpufx đang né: bỏ cờ `VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT` khỏi frames context của mình (dựa vào cách `hwcontext_vulkan.c` của FFmpeg 9.0 đọc `usage`: kiểm lại mỗi khi nâng FFmpeg; frame của filter Vulkan khác như `scale_vulkan` cũng bị từ chối dù có thể đúng) và từ chối frame `hwupload` trên driver đó; `test-bundle.sh` đổi sang `gpufx_upload` khi gặp driver này.
-- **Vị trí**: [ffmpeg/vf_gpufx_vk.h](../ffmpeg/vf_gpufx_vk.h) (`gpufx_hwframe_ctx_init`, `gpufx_vk_host_copy_broken`), [ffmpeg/vf_gpufx.c](../ffmpeg/vf_gpufx.c) (kiểm input Vulkan trong `config_vulkan`), [scripts/test-bundle.sh](../scripts/test-bundle.sh) (`INTEL_HIC`), [docs/INTEL_VULKAN-vi.md](INTEL_VULKAN-vi.md).
-- **Vì sao**: gửi báo lỗi để FFmpeg/Intel sửa; khi driver hoặc FFmpeg đã sửa thì bỏ lệnh từ chối (đang chặn cả người dùng driver mới) và nhánh `INTEL_HIC` trong test.
-- **Ngày ghi**: 2026-10-14
-
 ### [Thấp] Build lại libavutil trong image FFmpeg-Builds: các finding review để sau
 - **Vấn đề**:
   - `build-avutil.sh` lấy dòng configure từ chuỗi trong avutil dựng sẵn rồi chạy bằng `eval`. Hiện chạy được vì dòng của image FFmpeg-Builds không có khoảng trắng trong giá trị hay ký tự đặc biệt của shell. Đổi sang image khác mà dòng configure có những thứ đó thì configure có thể sai mà không báo, hoặc chạy lệnh lạ.

@@ -816,7 +816,7 @@ static AVBufferRef *blank_frames_ctx(AVBufferRef *frames)
         b->MiscFlags = a->MiscFlags;
     }
 #endif
-    if (gpufx_hwframe_ctx_init(ref) < 0)
+    if (av_hwframe_ctx_init(ref) < 0)
         av_buffer_unref(&ref);
     return ref;
 }
@@ -944,13 +944,6 @@ static int config_vulkan(AVFilterContext *ctx)
         }
         fc0 = fc0 ? fc0 : fc;
         s->hw_in_fmt[i] = fc->sw_format;
-        /* Before the checks below: their hints (disable_multiplane=1) do not help here. */
-        if (gpufx_vk_host_copy_broken(fc)) {
-            av_log(ctx, AV_LOG_ERROR, "Input '%s' has Vulkan frames of %s that FFmpeg fills with "
-                   "host image copies (hwupload?). " GPUFX_VK_HOST_COPY_HINT "\n",
-                   ctx->input_pads[i].name, av_get_pix_fmt_name(fc->sw_format));
-            return AVERROR(ENOSYS);
-        }
         /* A multiplane image (Vulkan decoders) is read by copying its planes. */
         if (av_pix_fmt_count_planes(fc->sw_format) > 1 &&
             ((AVVulkanFramesContext *)fc->hwctx)->format[1] == VK_FORMAT_UNDEFINED &&
@@ -1068,7 +1061,7 @@ static int config_vulkan_output(AVFilterLink *outlink, unsigned k)
          * (vkfmt_from_pixfmt2, feats_secondary), 0 on lavapipe. Init fails without storage. */
         vk->usage     = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (gpufx_hwframe_ctx_init(ref) < 0 || !(vk->usage & VK_IMAGE_USAGE_STORAGE_BIT)) {
+        if (av_hwframe_ctx_init(ref) < 0 || !(vk->usage & VK_IMAGE_USAGE_STORAGE_BIT)) {
             av_log(ctx, AV_LOG_VERBOSE, "No storage Vulkan frames of %s for output '%s'.\n",
                    name, ctx->output_pads[k].name);
             av_buffer_unref(&ref);
@@ -1387,7 +1380,7 @@ static int config_d3d_output(AVFilterLink *outlink, unsigned k)
             }
 #endif
             /* Some devices accept the context but fail to create its textures: try one. */
-            if (gpufx_hwframe_ctx_init(ref) >= 0) {
+            if (av_hwframe_ctx_init(ref) >= 0) {
                 AVFrame *probe = av_frame_alloc();
                 int got;
 
@@ -1735,7 +1728,7 @@ static AVBufferRef *upload_frames_ctx(AVFilterContext *ctx, AVBufferRef *device,
         h->MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
     }
 #endif
-    if (gpufx_hwframe_ctx_init(ref) < 0) {
+    if (av_hwframe_ctx_init(ref) < 0) {
         av_buffer_unref(&ref);
         return NULL;
     }
@@ -1963,9 +1956,9 @@ static int check_frame(AVFilterContext *ctx, unsigned i, const AVFrame *in)
 
         if ((av_pix_fmt_count_planes(fc->sw_format) > 1 && vk->format[1] == VK_FORMAT_UNDEFINED &&
              !(vk->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) ||
-            !(vk->usage & VK_IMAGE_USAGE_SAMPLED_BIT) || gpufx_vk_host_copy_broken(fc)) {
+            !(vk->usage & VK_IMAGE_USAGE_SAMPLED_BIT)) {
             av_log(ctx, AV_LOG_ERROR, "Input '%s': a frame of another Vulkan frames context whose "
-                   "images gpufx cannot read (multiplane without transfers, not sampled or host image copies; "
+                   "images gpufx cannot read (multiplane without transfers or not sampled; "
                    "image usage 0x%x).\n", ctx->input_pads[i].name, vk->usage);
             return AVERROR(ENOSYS);
         }
@@ -2073,8 +2066,8 @@ static const char *relabel_compatible(AVHWFramesContext *ifc, AVHWFramesContext 
     case AV_PIX_FMT_VULKAN: {
         const AVVulkanFramesContext *iv = ifc->hwctx, *ov = ofc->hwctx;
         /* Read by gpufx (sampled) and copied to buffers by hwdownload and gpufx_download.
-         * hwdownload takes the host image copy path when the output context has the usage
-         * (gpufx drops it, gpufx_hwframe_ctx_init): then the texture needs it too.
+         * hwdownload takes the host image copy path when the output context has the usage: then
+         * the texture needs it too.
          * Vulkan encoders make video encode source views of the multiplane images. */
         const VkImageUsageFlags need = ov->usage & (VK_IMAGE_USAGE_SAMPLED_BIT |
                                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT |

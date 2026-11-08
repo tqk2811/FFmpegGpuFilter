@@ -24,8 +24,7 @@ Video effects powered by **GPU shaders** for FFmpeg, loaded from external **`.zi
 > ⚠️ **Read [Limitations and untested parts](docs/LIMITATIONS.md) before using it.** The ones met most often:
 > - It has run for real only on Windows with an NVIDIA RTX 4060 and Intel UHD. **Untested** on AMD GPUs, real GPUs
 >   on Linux and Macs.
-> - HDR is processed as SDR (no tonemap); Intel on Windows needs `gpufx_upload`/`gpufx_download` instead of
->   `hwupload`/`hwdownload`.
+> - HDR is processed as SDR (no tonemap).
 
 - **Vulkan frames without copies**: `hwupload` frames (`AV_PIX_FMT_VULKAN`, one image per plane) are processed
   in place on FFmpeg's own Vulkan device, synchronised with its timeline semaphores; frames never go back
@@ -114,10 +113,6 @@ filters therefore uploads each frame once and reads it back once. Fastest first:
 2. separate filters between `gpufx_upload` and `gpufx_download`, `out_format=rgba` on all but the last;
 3. separate filters behind one upload (by the first `gpufx` or `hwupload`), then `hwdownload`.
 
-Intel GPUs on Windows with FFmpeg 9: `hwupload` (and `hwdownload` of `hwupload` frames) fails to allocate or
-corrupts the picture through the driver's host image copy; use `gpufx_upload` / `gpufx_download`, or open the
-device with `disable_multiplane=1,linear_images=1`. `gpufx` refuses such frames. See [docs/INTEL_VULKAN.md](docs/INTEL_VULKAN.md).
-
 The filter's `backend` option is for testing only (leave it at `auto`, which follows the frames); it refuses
 `backend=metal` except on macOS (the library and the `gpufx` CLI still take it). On macOS the filter works on VideoToolbox frames (nv12, p010le) through Metal, e.g.
 `-init_hw_device videotoolbox=vt -filter_hw_device vt -vf "gpufx=graph=vignette.zip,hwdownload,format=nv12"`;
@@ -134,7 +129,7 @@ and the other effect names are packages from `packages/gpufx` (see [Build](#buil
 |---|---|---|---|
 | `gpufx` effects | you want shader effects or transitions on video, parameters animated over time | `-vf "format=nv12,gpufx=graph=vignette.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx.md) |
 | `gpufx` graph | several effects, branches or several inputs/outputs in one GPU submission | `-vf "format=nv12,gpufx=graph=vignette.zip\|sepia.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx.md) |
-| `gpufx_upload` / `gpufx_download` | faster CPU-GPU copies on Vulkan (needed on Intel Windows instead of `hwupload`/`hwdownload`) | `-vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download,format=nv12"` | [gpufx_transfer](docs/architecture/filters/gpufx_transfer.md) |
+| `gpufx_upload` / `gpufx_download` | faster CPU-GPU copies on Vulkan | `-vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download,format=nv12"` | [gpufx_transfer](docs/architecture/filters/gpufx_transfer.md) |
 | `gpufx_ai_upscale` | upscale video x2/x3/x4 with Real-ESRGAN (offline encodes) | `-vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12"` | [gpufx_ai_upscale](docs/architecture/filters/gpufx_ai_upscale.md) |
 | `gpufx_ai_framerate` | raise the frame rate with RIFE interpolation (12 fps to 24 fps, any rate) | `-vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12"` | [gpufx_ai_framerate](docs/architecture/filters/gpufx_ai_framerate.md) |
 | GPU frame APIs | the filter runs on whichever API the frames come from: Vulkan, D3D12, D3D11 (Windows), VideoToolbox (macOS, untested) | `-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk` (D3D12: `-init_hw_device d3d12va=dx -filter_hw_device dx`) | [gpufx](docs/architecture/filters/gpufx.md) |
@@ -240,7 +235,7 @@ encodes. The VideoToolbox path has never run on a Mac.
 - **Linux**: Vulkan 1.1+ with a graphics + compute queue and timeline semaphores (FFmpeg asks for 1.3);
   NVIDIA proprietary, Mesa RADV/ANV, lavapipe (CPU). The linux64 bundle needs glibc 2.35+ (Ubuntu 22.04).
 - **macOS**: Metal; VideoToolbox frames need Apple silicon (nv12/p010le). Untested on a Mac.
-- Intel GPU on Windows with FFmpeg 9 Vulkan frames: see [Intel Vulkan](docs/INTEL_VULKAN.md).
+- Intel GPU on Windows: FFmpeg master avoids the driver's host image copy bugs, background in [Intel Vulkan](docs/INTEL_VULKAN.md).
 
 Details, sources and known issues: [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 

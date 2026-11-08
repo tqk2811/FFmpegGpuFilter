@@ -41,8 +41,7 @@ Bước nhảy hơn 10000 output frame (nhảy timestamp, hoặc stream kết th
   vào đó trên GPU qua RGBA 8-bit, hơi mất chất lượng.
 - Nếu pool input frame có kích thước cố định, filter cảnh báo có thể cần thêm frame; tăng `extra_hw_frames` khi
   upload, nếu không stream có thể bị treo.
-- Vulkan: dùng device mở với `disable_multiplane=1`, và `gpufx_upload` thay vì `hwupload` (host image copy bị từ
-  chối trên Intel Windows, xem [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md)). Vulkan device cần graphics queue.
+- Vulkan: dùng device mở với `disable_multiplane=1`. Vulkan device cần graphics queue.
 - D3D12: shader của model cần DXC (`dxcompiler.dll`, có sẵn trong `bin/`); lần chạy đầu compile shader, đặt
   `GPUFX_SHADER_CACHE` để giữ lại.
 

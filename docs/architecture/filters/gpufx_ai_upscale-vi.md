@@ -33,8 +33,7 @@ gpufx_ai_upscale=model=<path>[:scale=<n>][:tile=<px>][:precision=auto|f32]
   multiplane). Frame đi qua RGBA 8-bit (input và output của model), nên input 10-bit mất các bit thừa và alpha
   không được giữ.
 - Đổi kích thước giữa stream (`-reinit_filter 0`) cho output frame kích thước mới, kèm warning.
-- Vulkan: dùng device mở với `disable_multiplane=1`, và `gpufx_upload` thay vì `hwupload` trên Intel Windows
-  ([INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md)). Device cần graphics queue và input frame phải sample được.
+- Vulkan: dùng device mở với `disable_multiplane=1`. Device cần graphics queue và input frame phải sample được.
 - D3D12: shader cần DXC (`dxcompiler.dll`, có sẵn trong `bin/`), như `gpufx_ai_framerate`; đặt
   `GPUFX_SHADER_CACHE` để giữ shader đã compile.
 

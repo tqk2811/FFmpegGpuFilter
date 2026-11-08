@@ -54,6 +54,5 @@ No Mac device: only `cargo test` on the CI macOS runner; the VideoToolbox path i
 
 | Platform | Issue | See |
 | --- | --- | --- |
-| Intel GPU, Windows, FFmpeg 9 Vulkan frames | Host image copy bugs in `hwupload`/`hwdownload` | [INTEL_VULKAN.md](INTEL_VULKAN.md) |
 | Windows hosted CI | WARP is the only adapter; shaders run on the CPU and take minutes, so no tests run there | `.github/workflows/ci.yml` |
 | Linux CI / VM | lavapipe is a CPU driver: correct but slow | [README](../README.md#tests) |

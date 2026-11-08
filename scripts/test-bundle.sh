@@ -17,7 +17,7 @@
 # VK_ADAPTER=N picks the Vulkan device index (default 0); DX_ADAPTER=N tries only that D3D
 # adapter index (default: adapters 0-3, first that works).
 # VK_DEVICE_OPTS=a=1,b=2 appends extra options to every Vulkan device the tests open, e.g.
-# linear_images=1 for drivers that cannot allocate optimal rgba images (Intel, FFmpeg 9).
+# linear_images=1 to run the tests on linear images.
 # REQUIRE_VT=1 fails when the VideoToolbox frame tests (macOS) are skipped, unless FFmpeg
 # cannot create a videotoolbox device or there is no Metal adapter.
 set -eu
@@ -165,7 +165,7 @@ dx_encode() {
     # shellcheck disable=SC2086
     if ! "$FF" -hide_banner -nostdin -v error -y "$@" > "$CLIPS/last.log" 2>&1; then
         # Only "this GPU has no such encoder": any other error is a failure.
-        if grep -q "Driver does not support requested features\|No usable encoding profile\|no encode device\|Error creating a MFX session\|Device does not support the VK_KHR_video_encode\|Device does not support encoding\|Encoding of .* is not supported by this device" "$CLIPS/last.log"; then
+        if grep -q "Driver does not support requested features\|Driver does not support any RC mode\|No usable encoding profile\|no encode device\|Error creating a MFX session\|Device does not support the VK_KHR_video_encode\|Device does not support encoding\|Encoding of .* is not supported by this device" "$CLIPS/last.log"; then
             echo "  skip  $name ($(head -n1 "$CLIPS/last.log"))"
         else fail "$name"; cat "$CLIPS/last.log"; fi
         return 0
@@ -269,32 +269,10 @@ NODEV=1 rejects "backend=gl in the filter" "backend=gl" -i "$A" -an -vf "gpufx=g
 # Every test below needs the Vulkan device. Hosted runners may have none: skipped with a
 # warning, not failed (the D3D tests further down have their own device check).
 VK=
-# FFmpeg 9 copies its own Vulkan frames (hwupload, hwdownload) with VK_EXT_host_image_copy,
-# which the Intel Windows driver gets wrong unless the device has both disable_multiplane=1
-# and linear_images=1 (docs/INTEL_VULKAN.md). There the tests upload with gpufx_upload
-# ($UP) and check that gpufx refuses hwupload frames; gpufx's own frames take no host copy.
-UP=hwupload
-INTEL_HIC=
-# shellcheck disable=SC2086
-if [ "${OS:-}" = Windows_NT ] && ! echo "$VKX" | grep -q "linear_images=1" &&
-   "$FF" -hide_banner -nostdin -v verbose $DEV -i "$A" -frames:v 1 -an -f null - > "$CLIPS/last.log" 2>&1 &&
-   grep -q "Device [0-9]* selected: Intel" "$CLIPS/last.log" &&
-   grep -q "Using device extension VK_EXT_host_image_copy" "$CLIPS/last.log"; then
-    INTEL_HIC=1
-    UP=gpufx_upload
-    echo "  note  Intel Windows driver with host image copy: Vulkan frames are uploaded with gpufx_upload"
-fi
 if ! grep -qw hwupload "$CLIPS/filters.txt"; then
     vk_why="this bundle has no hwupload/hwdownload"
-elif [ -n "$INTEL_HIC" ] && ! grep -qw gpufx_upload "$CLIPS/filters.txt"; then
-    vk_why="Intel host image copy and this bundle has no gpufx_upload"
-elif ! gpu_ff -i "$A" -frames:v 1 -an -vf "format=rgba,$UP,hwdownload,format=rgba" -f null - > "$CLIPS/last.log" 2>&1; then
-    # The device opened (INTEL_HIC): only gpufx_upload's own frames failed, a gpufx bug.
-    if [ -n "$INTEL_HIC" ]; then
-        vk_why=; fail "rgba gpufx_upload,hwdownload on the Intel host image copy device"; cat "$CLIPS/last.log"; VK=1
-    else
-        vk_why="no Vulkan device ($(head -n1 "$CLIPS/last.log"))"
-    fi
+elif ! gpu_ff -i "$A" -frames:v 1 -an -vf "format=rgba,hwupload,hwdownload,format=rgba" -f null - > "$CLIPS/last.log" 2>&1; then
+    vk_why="no Vulkan device ($(head -n1 "$CLIPS/last.log"))"
 elif ! gpu_ff -i "$A" -frames:v 1 -an -vf "format=rgba,gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=rgba" -f null - > "$CLIPS/last.log" 2>&1; then
     # A gpufx without Vulkan frames does not output AV_PIX_FMT_VULKAN: no format in common.
     if grep -q "Impossible to convert\|No format\|negotiat\|takes no Vulkan" "$CLIPS/last.log"; then vk_why="this gpufx is built without Vulkan frames"
@@ -409,7 +387,7 @@ md5() {
     gpu_ff -i "$A" -frames:v 3 -an -vf "format=rgba,$1,hwdownload,format=rgba" -pix_fmt rgba -f framemd5 - \
         2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}'
 }
-SRC_MD5=$(md5 "$UP")
+SRC_MD5=$(md5 "hwupload")
 ONCE_MD5=$(md5 "gpufx=graph=$FX/ffmpeg/invert.zip")
 TWICE_MD5=$(md5 "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")
 if [ -n "$SRC_MD5" ] && [ "$ONCE_MD5" != "$SRC_MD5" ] && [ "$TWICE_MD5" = "$SRC_MD5" ]; then
@@ -425,14 +403,14 @@ else
     fail "same package twice keeps parameters per filter"; cat "$CLIPS/last.log"
 fi
 echo "disabled by enable= (passthrough):"
-pt_tests "Vulkan rgba" rgba "$UP" 1
-pt_tests "Vulkan nv12" nv12 "$UP" 0
+pt_tests "Vulkan rgba" rgba "hwupload" 1
+pt_tests "Vulkan nv12" nv12 "hwupload" 0
 # Into gpufx_download, which copies by the layout of its link's frames context: relabelled,
 # same pixels as the input.
 if grep -qw gpufx_download "$CLIPS/filters.txt"; then
     for f in rgba nv12; do
         dl() {
-            gpu_ff -i "$A" -frames:v 3 -an -vf "format=$f,$UP,$1gpufx_download,format=$f" -pix_fmt $f -v verbose \
+            gpu_ff -i "$A" -frames:v 3 -an -vf "format=$f,hwupload,$1gpufx_download,format=$f" -pix_fmt $f -v verbose \
                 -f framemd5 - 2> "$CLIPS/pt.log" | grep -v '^#' | awk -F, '{print $NF}'
         }
         DL_SRC=$(dl "")
@@ -783,7 +761,7 @@ vk_ff() { gpu_ff "$@"; }
 # vk_md5 FORMAT FILTERS...: framemd5 of 3 frames of A in FORMAT, uploaded first.
 vk_md5() {
     f=$1; shift
-    vk_ff -i "$A" -frames:v 3 -an -vf "format=$f,$UP,$1,hwdownload,format=$f" -pix_fmt "$f" -f framemd5 - \
+    vk_ff -i "$A" -frames:v 3 -an -vf "format=$f,hwupload,$1,hwdownload,format=$f" -pix_fmt "$f" -f framemd5 - \
         2> "$(vk_log)" | grep -v '^#' | awk -F, '{print $NF}'
 }
 VKN=grayscale-rgba
@@ -798,7 +776,7 @@ done
 # Two gpufx in a row: the second waits on the semaphores the first signals.
 VKN=invert-twice
 same "invert twice on Vulkan frames restores the frame" \
-    "$(vk_md5 rgba "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")" "$(sw_md5 rgba "$UP")"
+    "$(vk_md5 rgba "gpufx=graph=$FX/ffmpeg/invert.zip,gpufx=graph=$FX/ffmpeg/invert.zip")" "$(sw_md5 rgba "hwupload")"
 # A graph whose two inputs are one frame (split before gpufx): locked and waited once.
 G="[0]split[a][b]; [a]$FX/ffmpeg/gaussian-blur.zip[ba]; [b]$FX/ffmpeg/grayscale.zip|$FX/ffmpeg/vignette.zip[gb]; [ba][gb]$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4[x]; [x][1]$FX/ffmpeg/wipe-transition.zip=progress=0.6[out]"
 VKN=graph
@@ -811,16 +789,16 @@ same "sepia keeps nv12 on Vulkan frames" "$(vk_md5 nv12 "gpufx=graph=$FX/ffmpeg/
     "$(sw_md5 nv12 "gpufx=graph=$FX/ffmpeg/sepia.zip")"
 # shellcheck disable=SC2086
 ok "timeline enable on Vulkan frames" -i "$A" -an \
-    -vf "format=nv12,$UP,gpufx=graph=$FX/ffmpeg/invert.zip:enable='gte(t\,0.5)',hwdownload,format=nv12" $NULL
+    -vf "format=nv12,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip:enable='gte(t\,0.5)',hwdownload,format=nv12" $NULL
 VKN=late-input
 LATE_VK=$(vk_ff -i "$A" -itsoffset 0.5 -i "$B" -an -filter_complex \
-    "[0]format=rgba,$UP[a];[1]format=rgba,$UP[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=rgba" \
+    "[0]format=rgba,hwupload[a];[1]format=rgba,hwupload[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.5',hwdownload,format=rgba" \
     -f framemd5 - 2> "$(vk_log)" | grep -v '^#' | wc -l | tr -d ' ')
 if [ "$LATE_VK" = "$MAIN_N" ]; then pass "late second input on Vulkan frames keeps all $MAIN_N frames"
 else fail "late second input on Vulkan frames (want $MAIN_N, got $LATE_VK)"; show_vk_log; fi
 # yuva420p: the output keeps the input format when the GPU can store it; out_format=rgba pins it.
 VKN=yuva420p-rgba
-YUVA_VK=$(vk_ff -i "$A" -frames:v 3 -an -vf "format=yuva420p,$UP,gpufx=graph=$FX/ffmpeg/invert.zip:out_format=rgba,hwdownload,format=rgba" \
+YUVA_VK=$(vk_ff -i "$A" -frames:v 3 -an -vf "format=yuva420p,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip:out_format=rgba,hwdownload,format=rgba" \
     -f framemd5 - 2> "$(vk_log)" | grep -v '^#' | awk -F, '{print $NF}')
 # FFmpeg does not always give yuva420p images a sampled usage (on lavapipe the usage
 # changes from run to run: 0x400001, 0x400002...); gpufx then refuses the input, by design.
@@ -842,7 +820,7 @@ fi
 # Vulkan and software inputs together: gpufx uploads the software one on the same device.
 VKN=mixed
 same "Vulkan and software inputs mixed" \
-    "$(vk_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba,$UP[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
+    "$(vk_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba,hwupload[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
         -f framemd5 - 2> "$(vk_log)" | grep -v '^#' | awk -F, '{print $NF}')" \
     "$(gpu_ff -i "$A" -i "$B" -frames:v 3 -an -filter_complex "[0]format=rgba[a];[1]format=rgba[b];[a][b]gpufx=graph='$FX/tqk2811/TqkLibrary.FFmpegTransition/crossfade.zip=progress=0.4',hwdownload,format=rgba" \
         -f framemd5 - 2> "$CLIPS/last.log" | grep -v '^#' | awk -F, '{print $NF}')"
@@ -861,10 +839,6 @@ if grep -qw gpufx_upload "$CLIPS/filters.txt"; then
         for f in nv12 yuv420p rgba; do
             for c in "gpufx_upload,gpufx_download" "hwupload,gpufx_download=latency=0" "gpufx_upload=depth=1,hwdownload"; do
                 VKN=transfer-$f
-                # hwupload frames: FFmpeg's host copy, broken on that driver (not gpufx).
-                if [ -n "$INTEL_HIC" ] && [ "${c%%,*}" = hwupload ]; then
-                    echo "  skip  $f: $c ($dev): hwupload uses Intel's host image copy"; continue
-                fi
                 same "$f: $c is lossless ($dev)" \
                     "$("$FF" -hide_banner -nostdin -v error -init_hw_device "$dev" -filter_hw_device vk -i "$A" -frames:v 5 -an \
                         -vf "format=$f,$c,format=$f" -f framemd5 - 2> "$(vk_log)" | grep -v '^#' | awk -F, '{print $NF}')" \
@@ -918,9 +892,6 @@ for f in nv12 p010le; do
     MPF=$("$FF" -hide_banner -nostdin -v error $MPDEV -i "$A" -frames:v 3 -an \
         -vf "format=$f,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=$f" -f framemd5 - 2> "$CLIPS/last.log" |
         grep -v '^#' | awk -F, '{print $NF}')
-    if [ -z "$MPF" ] && grep -q "gpufx_upload instead of hwupload" "$CLIPS/last.log"; then
-        echo "  skip  multiplane $f (hwupload refused on this driver)"; continue
-    fi
     same "multiplane $f equals one image per plane" "$MPF" "$(vk_md5 $f "gpufx=graph=$FX/ffmpeg/invert.zip")"
 done
 # Vulkan decoder frames (multiplane) straight into gpufx: same pixels as the decoded frames
@@ -948,7 +919,7 @@ fi
 "$FF" -hide_banner -encoders > "$CLIPS/encoders.txt" 2>&1
 INV="gpufx=graph=$FX/ffmpeg/invert.zip"
 # shellcheck disable=SC2086
-if ! "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an -vf "format=nv12,$UP,$INV,hwdownload,format=nv12" \
+if ! "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an -vf "format=nv12,hwupload,$INV,hwdownload,format=nv12" \
     -c:v rawvideo "$VREF" > "$CLIPS/last.log" 2>&1; then
     fail "Vulkan: pipeline reference frames"; cat "$CLIPS/last.log"
 else
@@ -956,16 +927,16 @@ else
     for enc in h264_vulkan hevc_vulkan; do
         if ! grep -qw $enc "$CLIPS/encoders.txt"; then echo "  skip  Vulkan: $enc (not in this ffmpeg)"; continue; fi
         # shellcheck disable=SC2086
-        dx_encode "Vulkan: $UP -> gpufx -> $enc" "$VREF" $MPDEV -i "$A" -an -vf "format=nv12,$UP,$INV" -c:v $enc "$ENC_OUT"
+        dx_encode "Vulkan: hwupload -> gpufx -> $enc" "$VREF" $MPDEV -i "$A" -an -vf "format=nv12,hwupload,$INV" -c:v $enc "$ENC_OUT"
     done
     if grep -qw hevc_vulkan "$CLIPS/encoders.txt"; then
         V="gpufx=graph='$FX/ffmpeg/vignette.zip=strength=0.7'"
         # shellcheck disable=SC2086
         if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$A" -an \
-            -vf "format=p010le,$UP,$V,hwdownload,format=p010le,format=yuv420p10le" -c:v ffv1 "$VREF10" > "$CLIPS/last.log" 2>&1; then
+            -vf "format=p010le,hwupload,$V,hwdownload,format=p010le,format=yuv420p10le" -c:v ffv1 "$VREF10" > "$CLIPS/last.log" 2>&1; then
             # shellcheck disable=SC2086
             dx_encode "Vulkan: p010 gpufx -> hevc_vulkan main10" "$VREF10" $MPDEV -i "$A" -an \
-                -vf "format=p010le,$UP,$V" -c:v hevc_vulkan -profile:v main10 "$ENC_OUT"
+                -vf "format=p010le,hwupload,$V" -c:v hevc_vulkan -profile:v main10 "$ENC_OUT"
         else
             fail "Vulkan: p010 reference frames"; cat "$CLIPS/last.log"
         fi
@@ -973,7 +944,7 @@ else
     # Vulkan decoder frames -> gpufx -> Vulkan encoder (the clip made above).
     if [ -s "$VKH" ] && grep -qw h264_vulkan "$CLIPS/encoders.txt"; then
         # shellcheck disable=SC2086
-        if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$VKH" -an -vf "format=nv12,$UP,$INV,hwdownload,format=nv12" \
+        if "$FF" -hide_banner -nostdin -v error -y $MPDEV -i "$VKH" -an -vf "format=nv12,hwupload,$INV,hwdownload,format=nv12" \
             -c:v rawvideo "$VREFH" > "$CLIPS/last.log" 2>&1; then
             # shellcheck disable=SC2086
             dx_encode "Vulkan: -hwaccel vulkan -> gpufx -> h264_vulkan" "$VREFH" $MPDEV -hwaccel vulkan -hwaccel_device vk \
@@ -999,22 +970,6 @@ if "$FF" -hide_banner -nostdin -v error -init_hw_device "vulkan=vk:$VK_ADAPTER" 
     pass "rgba gpufx frames allocate on a device without extra options"
 else
     fail "rgba gpufx frames allocate on a device without extra options"; show_vk_log
-fi
-# hwupload frames on the Intel driver with host image copy: refused before any frame,
-# with the fix, on both kinds of devices (optimal rgba fails to allocate, multiplane nv12
-# gets its chroma corrupted).
-if [ -n "$INTEL_HIC" ]; then
-    for dev in "$VKDEV" "vulkan=vk:$VK_ADAPTER$VKX"; do
-        for f in rgba nv12; do
-            DEV="-init_hw_device $dev -filter_hw_device vk"
-            # shellcheck disable=SC2086
-            rejects "$f: hwupload into gpufx refused on Intel host image copy ($dev)" "gpufx_upload instead of hwupload" \
-                -i "$A" -frames:v 2 -an -vf "format=$f,hwupload,gpufx=graph=$FX/ffmpeg/invert.zip,hwdownload,format=$f" $NULL
-            DEV=$GPU
-        done
-    done
-else
-    echo "  skip  hwupload refused on Intel host image copy (not the Intel Windows driver with host image copy)"
 fi
 }
 # Effects with a pixel_layout of planes (tplanar/: directory packages written here, as in
@@ -1101,7 +1056,7 @@ planar_tests() {
 }
 if [ -n "$VK" ]; then
     vulkan_tests
-    planar_tests Vulkan "$UP" full
+    planar_tests Vulkan "hwupload" full
 fi
 
 echo "D3D12 and D3D11 frames:"

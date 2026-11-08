@@ -787,11 +787,9 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 Usage and options: [filters/gpufx_transfer.md](filters/gpufx_transfer.md).
 
 Drop-in replacements for `hwupload` / `hwdownload` on Vulkan devices (`ffmpeg/vf_gpufx_transfer.c`, plain C
-on FFmpeg's internal Vulkan helpers `libavutil/vulkan.h`, no libgpufx). Why: on NVIDIA FFmpeg 9.0 copies
-through a staging buffer (host image copy and host memory import are off), and `hwdownload` waits on the CPU
-for every copy (`ff_vk_exec_wait`), so CPU and GPU take turns. On the Intel Windows driver FFmpeg 9's host
-image copies are broken; the frames contexts gpufx creates drop the host-transfer usage, and `gpufx` refuses
-`hwupload` frames there ([INTEL_VULKAN.md](../INTEL_VULKAN.md)).
+on FFmpeg's internal Vulkan helpers `libavutil/vulkan.h`, no libgpufx). Why: where FFmpeg copies
+through a staging buffer (NVIDIA multi-plane images, drivers without usable host image copy), `hwdownload`
+waits on the CPU for every copy (`ff_vk_exec_wait`), so CPU and GPU take turns.
 
 - **gpufx_upload** (`depth`, default 3): the frames context is made on `-filter_hw_device` like `hwupload`
   (input formats: the device's sw formats whose planes map 1:1 to Vulkan planes). A ring of `depth`

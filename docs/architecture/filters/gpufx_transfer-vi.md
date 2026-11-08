@@ -8,12 +8,11 @@ song song thay vì thay phiên nhau chờ. Chỉ Vulkan (source: `ffmpeg/vf_gpuf
 - `gpufx_upload`: vào là software frame, ra là Vulkan frame. Thay `hwupload`.
 - `gpufx_download`: vào là Vulkan frame, ra là software frame. Thay `hwdownload`.
 
-Vì sao nhanh hơn: trên NVIDIA, FFmpeg 9 không dùng được host image copy và host memory import, nên `hwupload` và
-`hwdownload` copy qua staging buffer và CPU chờ từng lần copy. Hai filter này giữ nhiều lần copy chạy cùng lúc.
+Vì sao nhanh hơn: khi FFmpeg copy qua staging buffer (image multi-plane trên NVIDIA, driver không dùng được host
+image copy), `hwupload` và `hwdownload` bắt CPU chờ từng lần copy. Hai filter này giữ nhiều lần copy chạy cùng lúc.
 Nền tảng thiết kế (ring staging, đồng bộ, queue, số đo) nằm ở
 [Kiến trúc, Filter truyền frame](../README-vi.md#filter-truyền-frame-gpufx_upload--gpufx_download-vulkan); số đo ở
-[BENCHMARK-vi.md](../../BENCHMARK-vi.md). Trên Intel dưới Windows, hai filter này cũng là cách tránh host image copy
-hỏng của FFmpeg 9, xem [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md).
+[BENCHMARK-vi.md](../../BENCHMARK-vi.md).
 
 ## Cú pháp
 
@@ -40,8 +39,6 @@ Cả hai cần Vulkan device đưa vào filter graph: `-init_hw_device vulkan=vk
 | `gpufx_upload` | Software frame. Format: các software format (`sw_format`) của device mà plane ánh xạ 1:1 sang plane Vulkan (ví dụ `nv12`, `yuv420p`, `rgba`, `p010le`). Không nhận: format hardware, bitstream, Bayer, palette, và packed 4:2:2 (`yuyv422`...) | Vulkan frame (`AV_PIX_FMT_VULKAN`) với `sw_format` là format của input, cùng kích thước, copy property |
 | `gpufx_download` | Vulkan frame, từ filter hoặc decoder bất kỳ cho Vulkan frame có format được hỗ trợ | Software frame theo `sw_format` của frames context |
 
-- Frames context của `gpufx_upload` được tạo trên `-filter_hw_device` và bỏ cờ usage host-transfer, nên frame an
-  toàn trên driver Intel Windows.
 - `gpufx_download` cần `format=<sw_format>` đặt sau nó (cùng luật như `hwdownload`), nếu không sẽ dừng với lỗi nói
   rõ format cần thêm.
 - Ảnh multiplane và mỗi plane một ảnh (`disable_multiplane=1`) đều chạy được. Dùng chung được với `hwupload`,
@@ -103,9 +100,6 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   -vf "format=nv12,hwupload,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
 ```
 
-**Intel trên Windows.** Dùng `gpufx_upload` thay cho `hwupload` (host image copy của FFmpeg 9 hỏng ở đó, xem
-[INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md)); các lệnh ở trên không đổi.
-
 ## Giới hạn
 
 - Chỉ Vulkan. D3D12, D3D11 và VideoToolbox dùng `hwupload` / `hwdownload` có sẵn.
@@ -119,4 +113,4 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 - [Kiến trúc, Filter truyền frame](../README-vi.md#filter-truyền-frame-gpufx_upload--gpufx_download-vulkan)
 - [gpufx_ai_framerate](gpufx_ai_framerate-vi.md), [gpufx_ai_upscale](gpufx_ai_upscale-vi.md)
-- [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md), [BENCHMARK-vi.md](../../BENCHMARK-vi.md)
+- [BENCHMARK-vi.md](../../BENCHMARK-vi.md)

@@ -53,6 +53,5 @@ Không có máy Mac: chỉ chạy `cargo test` trên runner macOS của CI; đư
 
 | Nền tảng | Lỗi | Xem |
 | --- | --- | --- |
-| GPU Intel, Windows, frame Vulkan FFmpeg 9 | Lỗi host image copy trong `hwupload`/`hwdownload` | [INTEL_VULKAN-vi.md](INTEL_VULKAN-vi.md) |
 | CI Windows hosted | WARP là adapter duy nhất; shader chạy bằng CPU mất nhiều phút nên không chạy test | `.github/workflows/ci.yml` |
 | CI Linux / VM | lavapipe là driver CPU: đúng nhưng chậm | [README](../README-vi.md#test) |

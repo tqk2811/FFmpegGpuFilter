@@ -360,8 +360,7 @@ Chỉ để test. Để `auto`, nó theo device của frame; tên được nhậ
 
 ### Vulkan frame
 
-Dùng để giữ decode, effect và encode trên GPU với device Vulkan. GPU Intel trên Windows dùng `gpufx_upload` thay
-`hwupload` (xem [INTEL_VULKAN-vi.md](../../INTEL_VULKAN-vi.md)). Các lệnh theo các bài test encode Vulkan của
+Dùng để giữ decode, effect và encode trên GPU với device Vulkan. Các lệnh theo các bài test encode Vulkan của
 `scripts/test-bundle.sh` (`h264_vulkan`, `hevc_vulkan`; test bỏ `av1_vulkan` vì frame của nó lệch trên driver NVIDIA đã
 thử, kể cả không có gpufx). Khi output đi vào encoder Vulkan, mở device không có `disable_multiplane=1`, để output của
 gpufx là ảnh multiplane mà encoder nhận.

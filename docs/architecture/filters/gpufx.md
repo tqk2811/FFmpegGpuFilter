@@ -364,8 +364,7 @@ Testing only. Leave it at `auto`, which follows the device of the frames; see th
 
 ### Vulkan frames
 
-Use it to keep decode, effects and encode on the GPU on Vulkan devices. On Intel GPUs under Windows use `gpufx_upload`
-instead of `hwupload` (see [INTEL_VULKAN.md](../../INTEL_VULKAN.md)). The commands follow the Vulkan encode tests of
+Use it to keep decode, effects and encode on the GPU on Vulkan devices. The commands follow the Vulkan encode tests of
 `scripts/test-bundle.sh` (`h264_vulkan`, `hevc_vulkan`; the test leaves out `av1_vulkan`, whose frames were off on the
 tested NVIDIA driver even without gpufx). Open the device without `disable_multiplane=1` when the output goes to a
 Vulkan encoder, so the gpufx outputs are multiplane images the encoders accept.

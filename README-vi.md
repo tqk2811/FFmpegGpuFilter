@@ -22,8 +22,7 @@ Hiệu ứng video chạy bằng **shader trên GPU** cho FFmpeg, nạp từ **g
 > ⚠️ **Đọc [Hạn chế và phần chưa kiểm thử](docs/LIMITATIONS-vi.md) trước khi dùng.** Những điểm hay gặp nhất:
 > - Mới chạy thật trên Windows với NVIDIA RTX 4060 và Intel UHD. **Chưa test** trên GPU AMD, GPU thật trên Linux và
 >   máy Mac.
-> - HDR được xử lý như SDR (không tonemap); Intel trên Windows phải dùng `gpufx_upload`/`gpufx_download` thay cho
->   `hwupload`/`hwdownload`.
+> - HDR được xử lý như SDR (không tonemap).
 
 - **Frame Vulkan không copy**: frame của `hwupload` (`AV_PIX_FMT_VULKAN`, mỗi plane một image) được xử lý tại chỗ
   trên chính device Vulkan của FFmpeg, đồng bộ bằng timeline semaphore của nó; giữa các filter frame không quay
@@ -112,10 +111,6 @@ ra format đó). Vì vậy một chuỗi `gpufx` chỉ upload mỗi frame một 
 2. các filter riêng kẹp giữa `gpufx_upload` và `gpufx_download`, `out_format=rgba` trên mọi filter trừ cái cuối;
 3. các filter riêng sau một lần upload (do `gpufx` đầu tiên hoặc `hwupload`), rồi `hwdownload`.
 
-GPU Intel trên Windows với FFmpeg 9: `hwupload` (và `hwdownload` frame của `hwupload`) báo lỗi cấp phát hoặc
-làm hỏng ảnh do host image copy của driver; dùng `gpufx_upload` / `gpufx_download`, hoặc mở device với
-`disable_multiplane=1,linear_images=1`. `gpufx` từ chối các frame đó. Xem [docs/INTEL_VULKAN-vi.md](docs/INTEL_VULKAN-vi.md).
-
 Option `backend` của filter chỉ để thử nghiệm (để mặc định `auto`, tự theo frame); filter từ chối
 `backend=metal` trừ trên macOS (thư viện và CLI `gpufx` vẫn nhận). Trên macOS
 filter chạy trên frame VideoToolbox (nv12, p010le) qua Metal, ví dụ
@@ -133,7 +128,7 @@ effect khác là package trong `packages/gpufx` (xem [Build](#build)).
 |---|---|---|---|
 | Effect `gpufx` | muốn effect shader hoặc transition trên video, tham số đổi theo thời gian | `-vf "format=nv12,gpufx=graph=vignette.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
 | Graph `gpufx` | nhiều effect, rẽ nhánh hoặc nhiều input/output trong một lần submit GPU | `-vf "format=nv12,gpufx=graph=vignette.zip\|sepia.zip,hwdownload,format=nv12"` | [gpufx](docs/architecture/filters/gpufx-vi.md) |
-| `gpufx_upload` / `gpufx_download` | copy CPU-GPU nhanh hơn trên Vulkan (Intel trên Windows bắt buộc dùng thay `hwupload`/`hwdownload`) | `-vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download,format=nv12"` | [gpufx_transfer](docs/architecture/filters/gpufx_transfer-vi.md) |
+| `gpufx_upload` / `gpufx_download` | copy CPU-GPU nhanh hơn trên Vulkan | `-vf "format=nv12,gpufx_upload,gpufx=graph=sepia.zip,gpufx_download,format=nv12"` | [gpufx_transfer](docs/architecture/filters/gpufx_transfer-vi.md) |
 | `gpufx_ai_upscale` | phóng video x2/x3/x4 bằng Real-ESRGAN (encode offline) | `-vf "format=nv12,gpufx_upload,gpufx_ai_upscale=model=packages/gpufx_ai_upscale/realesr-animevideov3.zip:scale=2,gpufx_download,format=nv12"` | [gpufx_ai_upscale](docs/architecture/filters/gpufx_ai_upscale-vi.md) |
 | `gpufx_ai_framerate` | tăng frame rate bằng nội suy RIFE (12 fps lên 24 fps, tỉ lệ bất kỳ) | `-vf "format=nv12,gpufx_upload,gpufx_ai_framerate=model=packages/gpufx_ai_framerate/rife-v4.6.zip,gpufx_download,format=nv12"` | [gpufx_ai_framerate](docs/architecture/filters/gpufx_ai_framerate-vi.md) |
 | API frame GPU | filter chạy trên API mà frame đang dùng: Vulkan, D3D12, D3D11 (Windows), VideoToolbox (macOS, chưa test) | `-init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk` (D3D12: `-init_hw_device d3d12va=dx -filter_hw_device dx`) | [gpufx](docs/architecture/filters/gpufx-vi.md) |
@@ -236,7 +231,7 @@ offline. Đường VideoToolbox chưa từng chạy trên máy Mac.
 - **Linux**: Vulkan 1.1+ có queue graphics + compute và timeline semaphore (FFmpeg xin 1.3);
   NVIDIA proprietary, Mesa RADV/ANV, lavapipe (CPU). Bundle linux64 cần glibc 2.35+ (Ubuntu 22.04).
 - **macOS**: Metal; frame VideoToolbox cần Apple silicon (nv12/p010le). Chưa chạy trên Mac.
-- GPU Intel trên Windows với frame Vulkan của FFmpeg 9: xem [Intel Vulkan](docs/INTEL_VULKAN-vi.md).
+- GPU Intel trên Windows: FFmpeg master đã né lỗi host image copy của driver, nền tảng ở [Intel Vulkan](docs/INTEL_VULKAN-vi.md).
 
 Chi tiết, nguồn và lỗi đã biết: [docs/REQUIREMENTS-vi.md](docs/REQUIREMENTS-vi.md).
 

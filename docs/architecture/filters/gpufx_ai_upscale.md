@@ -33,8 +33,7 @@ gpufx_ai_upscale=model=<path>[:scale=<n>][:tile=<px>][:precision=auto|f32]
   images, multiplane disabled). Frames pass through 8-bit RGBA (the model's input and output), so 10-bit input
   loses its extra bits and alpha is not kept.
 - A size change in the middle of a stream (`-reinit_filter 0`) gives output frames of the new size, with a warning.
-- Vulkan: use a device opened with `disable_multiplane=1`, and `gpufx_upload` rather than `hwupload` on Intel
-  Windows ([INTEL_VULKAN.md](../../INTEL_VULKAN.md)). The device needs a graphics queue and the input frames must be
+- Vulkan: use a device opened with `disable_multiplane=1`. The device needs a graphics queue and the input frames must be
   samplable.
 - D3D12: the shaders need DXC (`dxcompiler.dll`, shipped in `bin/`), as for `gpufx_ai_framerate`; set
   `GPUFX_SHADER_CACHE` to keep the compiled shaders.

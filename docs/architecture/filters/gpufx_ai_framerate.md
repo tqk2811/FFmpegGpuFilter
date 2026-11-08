@@ -42,9 +42,7 @@ is skipped.
   context and the source frames are copied into it on the GPU through 8-bit RGBA, which is slightly lossy.
 - With an input frames pool of fixed size the filter warns that more frames may be needed; raise
   `extra_hw_frames` when uploading, or the stream may stall.
-- Vulkan: use a device opened with `disable_multiplane=1`, and `gpufx_upload` rather than `hwupload` (host image
-  copies are refused on Intel Windows, see [INTEL_VULKAN.md](../../INTEL_VULKAN.md)). The Vulkan device needs a
-  graphics queue.
+- Vulkan: use a device opened with `disable_multiplane=1`. The Vulkan device needs a graphics queue.
 - D3D12: the model shaders need DXC (`dxcompiler.dll`, shipped in `bin/`); the first run compiles them, set
   `GPUFX_SHADER_CACHE` to keep them.
 

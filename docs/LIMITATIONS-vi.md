@@ -31,8 +31,6 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   (D3D12 cũng vậy).
 - **Hạn chế:** lúc khởi động effect được biên dịch hai lần (device mặc định lúc init, rồi device của FFmpeg lúc
   configure).
-- **Hạn chế:** Intel trên Windows (FFmpeg 9): `hwupload`/`hwdownload` hỏng qua host image copy của driver, nên gpufx
-  từ chối frame đó. Dùng `gpufx_upload`/`gpufx_download`. Xem [INTEL_VULKAN-vi.md](INTEL_VULKAN-vi.md).
 - **Chưa test:** `hwmap` từ CUDA/VAAPI, `gpufx_download` với frame của `-hwaccel vulkan`.
 
 ## D3D12 / D3D11

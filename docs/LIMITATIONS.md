@@ -30,8 +30,6 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 - **Limitation:** after a submit the driver rejects, the shared device stays broken for the rest of the process,
   with no recovery (D3D12 too).
 - **Limitation:** the effect is compiled twice at startup (default device at init, FFmpeg's device at configure).
-- **Limitation:** Intel on Windows (FFmpeg 9): `hwupload`/`hwdownload` break through the driver's host image copy,
-  so gpufx refuses those frames. Use `gpufx_upload`/`gpufx_download`. See [INTEL_VULKAN.md](INTEL_VULKAN.md).
 - **Untested:** `hwmap` from CUDA/VAAPI, `gpufx_download` with `-hwaccel vulkan` frames.
 
 ## D3D12 / D3D11

@@ -227,11 +227,6 @@ static int config_vulkan(AVFilterContext *ctx, AVHWFramesContext *fc)
     GpufxVulkanDevice d = { 0 };
     int family = -1;
 
-    if (gpufx_vk_host_copy_broken(fc)) {
-        av_log(ctx, AV_LOG_ERROR, "The input has Vulkan frames of %s that FFmpeg fills with host "
-               "image copies (hwupload?). " GPUFX_VK_HOST_COPY_HINT "\n", av_get_pix_fmt_name(fc->sw_format));
-        return AVERROR(ENOSYS);
-    }
     /* A multiplane image (Vulkan decoders) is read by copying its planes. */
     if (av_pix_fmt_count_planes(fc->sw_format) > 1 && vkfc->format[1] == VK_FORMAT_UNDEFINED &&
         !(vkfc->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
@@ -389,7 +384,7 @@ static int config_out_frames(AVFilterContext *ctx, AVHWFramesContext *in)
             h->MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
         }
 #endif
-        ret = gpufx_hwframe_ctx_init(ref);
+        ret = av_hwframe_ctx_init(ref);
 #if CONFIG_VULKAN
         if (ret >= 0 && s->hw_fmt == AV_PIX_FMT_VULKAN &&
             !(((AVVulkanFramesContext *)fc->hwctx)->usage & VK_IMAGE_USAGE_STORAGE_BIT))

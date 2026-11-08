@@ -8,12 +8,11 @@ the GPU work at the same time instead of taking turns. Vulkan only (source: `ffm
 - `gpufx_upload`: software frames in, Vulkan frames out. Replaces `hwupload`.
 - `gpufx_download`: Vulkan frames in, software frames out. Replaces `hwdownload`.
 
-Why they are faster: on NVIDIA, FFmpeg 9 cannot use host image copy or host memory import, so `hwupload` and
-`hwdownload` copy through a staging buffer and the CPU waits for every copy. These filters keep several copies in
-flight. The design background (staging ring, synchronization, queues, measurements) is in
+Why they are faster: where FFmpeg copies through a staging buffer (NVIDIA multi-plane images, drivers without
+usable host image copy), `hwupload` and `hwdownload` make the CPU wait for every copy. These filters keep several
+copies in flight. The design background (staging ring, synchronization, queues, measurements) is in
 [Architecture, Transfer filters](../README.md#transfer-filters-gpufx_upload--gpufx_download-vulkan); the numbers are in
-[BENCHMARK.md](../../BENCHMARK.md). On Intel under Windows they are also the way to avoid FFmpeg 9's broken host image
-copies, see [INTEL_VULKAN.md](../../INTEL_VULKAN.md).
+[BENCHMARK.md](../../BENCHMARK.md).
 
 ## Syntax
 
@@ -40,8 +39,6 @@ frames to be usable by `gpufx`, `gpufx_ai_framerate` and `gpufx_ai_upscale`, ope
 | `gpufx_upload` | Software frames. Formats: the device's software formats (`sw_format`) whose planes map 1:1 to Vulkan planes (for example `nv12`, `yuv420p`, `rgba`, `p010le`). Not accepted: hardware, bitstream, Bayer and palette formats, and packed 4:2:2 (`yuyv422` and similar) | Vulkan frames (`AV_PIX_FMT_VULKAN`) with the input's format as `sw_format`, same size, properties copied |
 | `gpufx_download` | Vulkan frames, from any filter or decoder that gives Vulkan frames of a supported format | Software frames of the frames' `sw_format` |
 
-- The frames context of `gpufx_upload` is created on `-filter_hw_device` and drops the host-transfer usage, so
-  the frames are safe on the Intel Windows driver.
 - `gpufx_download` needs `format=<sw_format>` after it (same rule as `hwdownload`), otherwise it stops with
   an error naming the format to add.
 - Multiplane images and one image per plane (`disable_multiplane=1`) both work. They mix with `hwupload`,
@@ -104,9 +101,6 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
   -vf "format=nv12,hwupload,gpufx=graph=sepia.zip,gpufx_download,format=nv12" out.mp4
 ```
 
-**Intel on Windows.** Use `gpufx_upload` instead of `hwupload` (FFmpeg 9's host image copies are broken there, see
-[INTEL_VULKAN.md](../../INTEL_VULKAN.md)); the commands above are unchanged.
-
 ## Limitations
 
 - Vulkan only. D3D12, D3D11 and VideoToolbox use the stock `hwupload` / `hwdownload`.
@@ -122,4 +116,4 @@ ffmpeg -init_hw_device vulkan=vk:0,disable_multiplane=1 -filter_hw_device vk -i 
 
 - [Architecture, Transfer filters](../README.md#transfer-filters-gpufx_upload--gpufx_download-vulkan)
 - [gpufx_ai_framerate](gpufx_ai_framerate.md), [gpufx_ai_upscale](gpufx_ai_upscale.md)
-- [INTEL_VULKAN.md](../../INTEL_VULKAN.md), [BENCHMARK.md](../../BENCHMARK.md)
+- [BENCHMARK.md](../../BENCHMARK.md)
