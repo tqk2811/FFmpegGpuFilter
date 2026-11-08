@@ -208,6 +208,12 @@ int gpufx_format_supported(const char *format);
  * No GPU device is made here: shaders are checked on a device with no GPU, limited to
  * the WebGPU default formats. The device comes from gpufx_effect_use_* or the first
  * frame, so a missing GPU is reported there, not by open.
+ *
+ * Packages are cached for the FFmpeg filters; other callers manage these limits themselves:
+ * - One process-wide lock is held while a package is read and compiled, so threads opening
+ *   packages at the same time wait for each other, even for different packages.
+ * - A package stays cached while an effect using it is open, and changes to its file are
+ *   not detected. To load a changed file, free every effect using it, then open it again.
  */
 GpufxEffect *gpufx_effect_open_graph(const char *graph, const char *backend);
 
