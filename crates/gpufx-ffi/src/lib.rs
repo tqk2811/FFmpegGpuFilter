@@ -86,40 +86,111 @@ fn noop_context() -> Result<Arc<GpuContext>, String> {
 /// Device string of an effect not on a device yet.
 const NO_DEVICE: &str = "none yet: chosen by gpufx_effect_use_* or the first frame";
 
-/// Packages read and compiled so far; lets tests check that the cache works.
+/// Packages compiled so far, on any device; lets tests check that they are shared.
 static PROGRAM_LOADS: AtomicUsize = AtomicUsize::new(0);
 /// Backend devices made so far; lets tests check that opening an effect makes none.
 static CONTEXT_OPENS: AtomicUsize = AtomicUsize::new(0);
 
-type ProgramCache = Mutex<Vec<(PathBuf, Weak<Program>)>>;
-
-/// Compiled packages are shared by every effect opened from the same file on the same
-/// device, for as long as one of them is alive. The file is read once: changes made to
-/// it while an effect using it is open are not picked up.
-fn program(path: &str, ctx: Arc<GpuContext>) -> Result<Arc<Program>, String> {
-    static CACHE: OnceLock<ProgramCache> = OnceLock::new();
-    // canonicalize fails on some Windows volumes (RAM disks, virtual drives) that open
-    // fine; the key is then only as good as the absolute path.
-    let canonical = std::fs::canonicalize(path).or_else(|_| std::path::absolute(path)).map_err(|e| format!("{path}: {e}"))?;
-    // Held while loading so two filters opening the same package load it only once.
-    let mut cache = CACHE.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
-    cache.retain(|(_, weak)| weak.strong_count() > 0);
-    let hit =
-        cache.iter().filter(|(p, _)| *p == canonical).filter_map(|(_, weak)| weak.upgrade()).find(|prog| Arc::ptr_eq(prog.context(), &ctx));
-    if let Some(prog) = hit {
-        return Ok(prog);
-    }
-    let package = Package::open(&canonical).map_err(|e| format!("{path}: {e}"))?;
-    let prog = Program::new(ctx, package).map_err(|e| format!("{path}: {e}"))?;
-    PROGRAM_LOADS.fetch_add(1, Ordering::Relaxed);
-    cache.push((canonical, Arc::downgrade(&prog)));
-    Ok(prog)
+/// What a [`GpufxPackage`] has compiled so far.
+#[derive(Default)]
+struct Compiled {
+    /// Kept: the noop device holds no GPU memory, and every open compiles there first.
+    noop: Option<Arc<Program>>,
+    /// Weak: a strong reference would keep a program after the caller has destroyed its
+    /// host device. A program stays while an effect using it is open.
+    devices: Vec<Weak<Program>>,
 }
 
+/// A package in memory. It reads no file after it is loaded, and uploads to a device only
+/// when an effect needs it there.
+pub struct GpufxPackage {
+    package: Package,
+    compiled: Mutex<Compiled>,
+}
+
+impl GpufxPackage {
+    fn new(package: Package) -> Arc<Self> {
+        Arc::new(GpufxPackage { package, compiled: Mutex::default() })
+    }
+
+    /// The package compiled on `ctx`, once per device. The lock is per package, so packages
+    /// compiling at the same time do not wait for each other.
+    fn program(&self, ctx: &Arc<GpuContext>) -> Result<Arc<Program>, String> {
+        let is_noop = Arc::ptr_eq(ctx, &noop_context()?);
+        let mut compiled = self.compiled.lock().unwrap_or_else(|p| p.into_inner());
+        if is_noop {
+            if let Some(prog) = &compiled.noop {
+                return Ok(prog.clone());
+            }
+        } else {
+            compiled.devices.retain(|weak| weak.strong_count() > 0);
+            if let Some(prog) = compiled.devices.iter().filter_map(Weak::upgrade).find(|prog| Arc::ptr_eq(prog.context(), ctx)) {
+                return Ok(prog);
+            }
+        }
+        let prog = Program::new(ctx.clone(), self.package.clone()).map_err(|e| e.to_string())?;
+        PROGRAM_LOADS.fetch_add(1, Ordering::Relaxed);
+        if is_noop {
+            compiled.noop = Some(prog.clone());
+        } else {
+            compiled.devices.push(Arc::downgrade(&prog));
+        }
+        Ok(prog)
+    }
+}
+
+struct CacheEntry {
+    path: PathBuf,
+    package: Weak<GpufxPackage>,
+    /// Set in a cache that keeps its packages.
+    _held: Option<Arc<GpufxPackage>>,
+}
+
+/// Loaded packages by file, each file read once.
+pub struct GpufxPackageCache {
+    entries: Mutex<Vec<CacheEntry>>,
+    /// Keep packages until cleared; otherwise only while something else uses them.
+    hold: bool,
+}
+
+impl GpufxPackageCache {
+    fn new(hold: bool) -> Self {
+        GpufxPackageCache { entries: Mutex::default(), hold }
+    }
+
+    /// The package of `path`, loaded and added when the cache does not have it.
+    fn load(&self, path: &str) -> Result<Arc<GpufxPackage>, String> {
+        // canonicalize fails on some Windows volumes (RAM disks, virtual drives) that open
+        // fine; the key is then only as good as the absolute path.
+        let canonical = std::fs::canonicalize(path).or_else(|_| std::path::absolute(path)).map_err(|e| format!("{path}: {e}"))?;
+        // Held while reading so two callers read a file only once; compiling is outside it.
+        let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        entries.retain(|e| e.package.strong_count() > 0);
+        if let Some(package) = entries.iter().find(|e| e.path == canonical).and_then(|e| e.package.upgrade()) {
+            return Ok(package);
+        }
+        let package = GpufxPackage::new(Package::open(&canonical).map_err(|e| format!("{path}: {e}"))?);
+        entries.push(CacheEntry { path: canonical, package: Arc::downgrade(&package), _held: self.hold.then(|| package.clone()) });
+        Ok(package)
+    }
+}
+
+/// The cache of `gpufx_effect_open_graph`, which the FFmpeg filters go through. A package
+/// leaves it with the last effect using it, so a long-lived process frees it and reads a
+/// changed file at the next open.
+fn default_cache() -> &'static GpufxPackageCache {
+    static CACHE: OnceLock<GpufxPackageCache> = OnceLock::new();
+    CACHE.get_or_init(|| GpufxPackageCache::new(false))
+}
+
+/// A package of a graph: its name in the graph text, its parameter label, the package.
+type NamedPackage = (String, String, Arc<GpufxPackage>);
+
 /// What an effect was opened from, to open it again on another device.
-enum Spec {
-    /// A graph description: `a.zip=key=value|b.zip` or `[0][1]crossfade.zip[out]; ...`.
-    Graph(String),
+struct Spec {
+    /// A graph description: `a=key=value|b` or `[0][1]crossfade[out]; ...`.
+    text: String,
+    packages: Vec<NamedPackage>,
 }
 
 pub struct GpufxEffect {
@@ -365,21 +436,32 @@ fn wrap(graph: EffectGraph, spec: Spec, pending: Backend, name: String) -> *mut 
     Box::into_raw(Box::new(out))
 }
 
+/// Opens a graph on `ctx`, with the name of the effect. `resolve` gives the parameter
+/// label and the package of a package named in the text.
+fn parse_graph(
+    text: &str,
+    ctx: &Arc<GpuContext>,
+    mut resolve: impl FnMut(&str) -> Result<(String, Arc<GpufxPackage>), String>,
+) -> Result<(EffectGraph, String), String> {
+    use gpufx_core::Error::Package as PackageError;
+    let graph = EffectGraph::parse(text, |name| {
+        let (label, package) = resolve(name).map_err(PackageError)?;
+        let program = package.program(ctx).map_err(|e| PackageError(format!("{name}: {e}")))?;
+        let effect = Effect::from_program(program).map_err(|e| PackageError(format!("{name}: {e}")))?;
+        Ok((label, effect))
+    })
+    .map_err(|e| e.to_string())?;
+    let names: Vec<&str> = graph.effects().iter().map(|fx| fx.package().manifest.name.as_str()).collect();
+    let name = if graph.is_chain() { names.join(" | ") } else { format!("graph of {}", names.join(", ")) };
+    Ok((graph, name))
+}
+
 /// Opens what `spec` describes on `ctx`, with the name of the effect.
 fn open_spec(spec: &Spec, ctx: &Arc<GpuContext>) -> Result<(EffectGraph, String), String> {
-    match spec {
-        Spec::Graph(text) => {
-            let graph = EffectGraph::parse(text, |path| {
-                let effect = Effect::from_program(program(path, ctx.clone()).map_err(gpufx_core::Error::Package)?)
-                    .map_err(|e| gpufx_core::Error::Package(format!("{path}: {e}")))?;
-                Ok((label(path), effect))
-            })
-            .map_err(|e| e.to_string())?;
-            let names: Vec<&str> = graph.effects().iter().map(|fx| fx.package().manifest.name.as_str()).collect();
-            let name = if graph.is_chain() { names.join(" | ") } else { format!("graph of {}", names.join(", ")) };
-            Ok((graph, name))
-        }
-    }
+    parse_graph(&spec.text, ctx, |name| {
+        let found = spec.packages.iter().find(|(n, _, _)| n == name);
+        found.map(|(_, label, package)| (label.clone(), package.clone())).ok_or_else(|| format!("no package named `{name}` was given"))
+    })
 }
 
 /// Opens the effect on the noop device: the caller may give it a shared device before the
@@ -425,13 +507,117 @@ fn on_host_device(fx: &GpufxEffect, call: &str) -> Result<(), String> {
     }
 }
 
+/// Package paths go through the default cache; the effect keeps what it got, so moving
+/// to its device reads no file.
 unsafe fn open_graph(text: &str, backend: *const c_char) -> Result<*mut GpufxEffect, String> {
-    open(Spec::Graph(text.to_string()), backend)
+    let backend = backend_arg(backend)?;
+    let mut packages: Vec<NamedPackage> = Vec::new();
+    let (graph, name) = parse_graph(text, &noop_context()?, |path| {
+        let package = default_cache().load(path)?;
+        if !packages.iter().any(|(n, _, _)| n == path) {
+            packages.push((path.to_string(), label(path), package.clone()));
+        }
+        Ok((label(path), package))
+    })?;
+    Ok(wrap(graph, Spec { text: text.to_string(), packages }, backend, name))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn gpufx_effect_open_graph(graph: *const c_char, backend: *const c_char) -> *mut GpufxEffect {
     guard(ptr::null_mut(), || open_graph(str_arg(graph, "graph")?, backend))
+}
+
+/// A new reference to what a handle points at; the caller keeps its own.
+unsafe fn share<T>(handle: *mut T) -> Arc<T> {
+    Arc::increment_strong_count(handle as *const T);
+    Arc::from_raw(handle as *const T)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_package_load(path: *const c_char) -> *mut GpufxPackage {
+    guard(ptr::null_mut(), || {
+        let path = str_arg(path, "path")?;
+        let package = Package::open(path).map_err(|e| format!("{path}: {e}"))?;
+        Ok(Arc::into_raw(GpufxPackage::new(package)) as *mut GpufxPackage)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_package_load_memory(data: *const u8, size: usize) -> *mut GpufxPackage {
+    guard(ptr::null_mut(), || {
+        if data.is_null() {
+            return Err("data is NULL".to_string());
+        }
+        let package = Package::from_zip_bytes(std::slice::from_raw_parts(data, size)).map_err(|e| e.to_string())?;
+        Ok(Arc::into_raw(GpufxPackage::new(package)) as *mut GpufxPackage)
+    })
+}
+
+/// Releases the caller's reference: effects and caches using the package keep it alive.
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_package_free(package: *mut GpufxPackage) {
+    if !package.is_null() {
+        drop(Arc::from_raw(package as *const GpufxPackage));
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn gpufx_package_cache_new() -> *mut GpufxPackageCache {
+    Box::into_raw(Box::new(GpufxPackageCache::new(true)))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_package_cache_load(cache: *mut GpufxPackageCache, path: *const c_char) -> *mut GpufxPackage {
+    guard(ptr::null_mut(), || {
+        let cache = cache.as_ref().ok_or("cache is NULL")?;
+        Ok(Arc::into_raw(cache.load(str_arg(path, "path")?)?) as *mut GpufxPackage)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_package_cache_clear(cache: *mut GpufxPackageCache) {
+    if let Some(cache) = cache.as_ref() {
+        cache.entries.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_package_cache_free(cache: *mut GpufxPackageCache) {
+    if !cache.is_null() {
+        drop(Box::from_raw(cache));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gpufx_effect_open_packages(
+    graph: *const c_char,
+    backend: *const c_char,
+    names: *const *const c_char,
+    packages: *const *mut GpufxPackage,
+    count: u32,
+) -> *mut GpufxEffect {
+    guard(ptr::null_mut(), || {
+        let text = str_arg(graph, "graph")?.to_string();
+        if count > 0 && (names.is_null() || packages.is_null()) {
+            return Err("names or packages is NULL".to_string());
+        }
+        let mut list: Vec<NamedPackage> = Vec::with_capacity(count as usize);
+        for i in 0..count as usize {
+            let name = str_arg(*names.add(i), "package name")?.to_string();
+            let package = *packages.add(i);
+            if package.is_null() {
+                return Err(format!("package `{name}` is NULL"));
+            }
+            if matches!(name.as_str(), "split" | "null") {
+                return Err(format!("package name `{name}` is a built-in of the graph syntax"));
+            }
+            if list.iter().any(|(n, _, _)| *n == name) {
+                return Err(format!("package name `{name}` is given twice"));
+            }
+            list.push((name.clone(), name, share(package)));
+        }
+        open(Spec { text, packages: list }, backend)
+    })
 }
 
 #[no_mangle]
@@ -1708,6 +1894,203 @@ mod tests {
         assert!(!c.is_null());
         assert_eq!(loads(), start + 3);
         unsafe { gpufx_effect_free(c) };
+    }
+
+    /// The zip of an example package, at a path of its own.
+    fn packed(example: &str, tag: &str) -> PathBuf {
+        let out = std::env::temp_dir().join(format!("gpufx-ffi-{tag}-{}.zip", std::process::id()));
+        pack_to(example, &out);
+        out
+    }
+
+    fn pack_to(example: &str, out: &std::path::Path) {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx/ffmpeg").join(example);
+        Package::pack(&dir, out, false).unwrap();
+    }
+
+    fn load(example: &str, tag: &str) -> *mut GpufxPackage {
+        let zip = packed(example, tag);
+        let bytes = std::fs::read(&zip).unwrap();
+        std::fs::remove_file(&zip).unwrap();
+        let package = unsafe { gpufx_package_load_memory(bytes.as_ptr(), bytes.len()) };
+        assert!(!package.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        package
+    }
+
+    fn open_loaded(graph: &str, names: &[&str], packages: &[*mut GpufxPackage]) -> *mut GpufxEffect {
+        let graph = CString::new(graph).unwrap();
+        let names: Vec<CString> = names.iter().map(|n| CString::new(*n).unwrap()).collect();
+        let names: Vec<*const c_char> = names.iter().map(|n| n.as_ptr()).collect();
+        unsafe { gpufx_effect_open_packages(graph.as_ptr(), ptr::null(), names.as_ptr(), packages.as_ptr(), packages.len() as u32) }
+    }
+
+    fn effect_name(package: *mut GpufxPackage) -> String {
+        let fx = open_loaded("fx", &["fx"], &[package]);
+        assert!(!fx.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        let name = unsafe { CStr::from_ptr(gpufx_effect_name(fx)) }.to_str().unwrap().to_string();
+        unsafe { gpufx_effect_free(fx) };
+        name
+    }
+
+    fn process_one(fx: *mut GpufxEffect) -> u8 {
+        let data = [10u8, 20, 30, 255].repeat(8);
+        let mut out = [0u8; 32];
+        let image = GpufxImage { data: data.as_ptr(), width: 4, height: 2, stride: 16 };
+        let target = GpufxOutput { data: out.as_mut_ptr(), width: 4, height: 2, stride: 16 };
+        let info = GpufxFrameInfo { time: 0.0, frame: 0, pixel_aspect: 1.0 };
+        let rc = unsafe { gpufx_effect_process(fx, &image, 1, &target, &info) };
+        assert_eq!(rc, 0, "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        out[0]
+    }
+
+    #[test]
+    fn a_loaded_package_needs_its_file_no_more() {
+        let _serial = serial();
+        let zip = packed("invert", "path");
+        let path = CString::new(zip.to_str().unwrap()).unwrap();
+        let package = unsafe { gpufx_package_load(path.as_ptr()) };
+        assert!(!package.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        std::fs::remove_file(&zip).unwrap();
+        assert_eq!(effect_name(package), "Invert");
+        if GpuContext::new(Backend::Auto).is_ok() {
+            let fx = open_loaded("fx", &["fx"], &[package]);
+            assert_eq!(process_one(fx), 245, "moving to the device reads no file");
+            unsafe { gpufx_effect_free(fx) };
+        }
+        unsafe { gpufx_package_free(package) };
+    }
+
+    /// The effect keeps the handle it got from the default cache for its move to the device.
+    #[test]
+    fn a_path_effect_reads_no_file_when_it_moves() {
+        let _serial = serial();
+        if GpuContext::new(Backend::Auto).is_err() {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        }
+        let zip = packed("invert", "move");
+        let fx = open(&zip);
+        assert!(!fx.is_null(), "{:?}", unsafe { CStr::from_ptr(gpufx_last_error()) });
+        std::fs::remove_file(&zip).unwrap();
+        assert_eq!(process_one(fx), 245);
+        unsafe { gpufx_effect_free(fx) };
+    }
+
+    #[test]
+    fn a_handle_compiles_once_per_device_and_only_for_itself() {
+        let _serial = serial();
+        if GpuContext::new(Backend::Auto).is_err() {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        }
+        let loads = || PROGRAM_LOADS.load(Ordering::Relaxed);
+        let start = loads();
+        let package = load("invert", "once");
+        assert_eq!(loads(), start, "loading compiles nothing");
+        let a = open_loaded("fx", &["fx"], &[package]);
+        assert_eq!(loads(), start + 1);
+        assert_eq!(process_one(a), 245);
+        assert_eq!(loads(), start + 2, "the real device");
+        // The noop program stays in the handle after a has moved.
+        let b = open_loaded("fx", &["fx"], &[package]);
+        assert_eq!(process_one(b), 245);
+        assert_eq!(loads(), start + 2, "both devices reused");
+        let other = load("invert", "once2");
+        let c = open_loaded("fx", &["fx"], &[other]);
+        assert_eq!(loads(), start + 3, "another handle compiles its own");
+        assert_eq!(process_one(c), 245);
+        assert_eq!(loads(), start + 4);
+        // c keeps the device alive; nothing uses the real program of `package` any more, and
+        // the handle must not have kept it.
+        unsafe {
+            gpufx_effect_free(a);
+            gpufx_effect_free(b);
+        }
+        let d = open_loaded("fx", &["fx"], &[package]);
+        assert_eq!(process_one(d), 245);
+        assert_eq!(loads(), start + 5, "a handle holds no program of a real device");
+        unsafe {
+            gpufx_effect_free(c);
+            gpufx_effect_free(d);
+            gpufx_package_free(package);
+            gpufx_package_free(other);
+        }
+    }
+
+    #[test]
+    fn a_cache_keeps_one_handle_per_file_until_cleared() {
+        let _serial = serial();
+        let zip = packed("invert", "cache");
+        let path = CString::new(zip.to_str().unwrap()).unwrap();
+        let cache = gpufx_package_cache_new();
+        unsafe {
+            let first = gpufx_package_cache_load(cache, path.as_ptr());
+            assert!(!first.is_null(), "{:?}", CStr::from_ptr(gpufx_last_error()));
+            assert_eq!(gpufx_package_cache_load(cache, path.as_ptr()), first);
+            gpufx_package_free(first);
+            gpufx_package_free(first);
+            // The caller holds nothing now: the cache does, and does not read the file again.
+            pack_to("vignette", &zip);
+            let kept = gpufx_package_cache_load(cache, path.as_ptr());
+            assert_eq!(kept, first);
+            assert_eq!(effect_name(kept), "Invert");
+
+            gpufx_package_cache_clear(cache);
+            let fresh = gpufx_package_cache_load(cache, path.as_ptr());
+            assert_ne!(fresh, kept);
+            assert_eq!(effect_name(fresh), "Vignette");
+            assert_eq!(effect_name(kept), "Invert", "a handle outlives the cache entry");
+
+            gpufx_package_free(kept);
+            gpufx_package_free(fresh);
+            gpufx_package_cache_free(cache);
+            assert!(gpufx_package_cache_load(ptr::null_mut(), path.as_ptr()).is_null());
+            gpufx_package_cache_clear(ptr::null_mut());
+            gpufx_package_cache_free(ptr::null_mut());
+        }
+        std::fs::remove_file(&zip).unwrap();
+    }
+
+    #[test]
+    fn a_graph_names_loaded_packages_and_bad_arguments_fail() {
+        let _serial = serial();
+        let (invert, vignette) = (load("invert", "names"), load("vignette", "names"));
+        let error = || unsafe { CStr::from_ptr(gpufx_last_error()) }.to_str().unwrap().to_string();
+        let fx = open_loaded("a=amount=0.5|b", &["a", "b"], &[invert, vignette]);
+        assert!(!fx.is_null(), "{}", error());
+        assert_eq!(unsafe { CStr::from_ptr(gpufx_effect_param_name(fx, 0)) }.to_str().unwrap(), "a.amount");
+        unsafe { gpufx_effect_free(fx) };
+
+        assert!(open_loaded("c", &["a"], &[invert]).is_null());
+        assert!(error().contains("no package named `c`"), "{}", error());
+        assert!(open_loaded("a", &["a", "a"], &[invert, vignette]).is_null());
+        assert!(error().contains("given twice"), "{}", error());
+        assert!(open_loaded("null", &["null"], &[invert]).is_null());
+        assert!(error().contains("built-in"), "{}", error());
+        assert!(open_loaded("a", &["a"], &[ptr::null_mut()]).is_null());
+        assert!(error().contains("is NULL"), "{}", error());
+        unsafe {
+            assert!(gpufx_package_load_memory(ptr::null(), 0).is_null());
+            assert!(gpufx_package_load_memory([1u8, 2, 3].as_ptr(), 3).is_null());
+            gpufx_package_free(ptr::null_mut());
+            gpufx_package_free(invert);
+            gpufx_package_free(vignette);
+        }
+    }
+
+    /// The effect needs the package again when it moves to its device at the first frame.
+    #[test]
+    fn an_effect_outlives_the_callers_handle() {
+        let _serial = serial();
+        if GpuContext::new(Backend::Auto).is_err() {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        }
+        let package = load("invert", "outlive");
+        let fx = open_loaded("fx", &["fx"], &[package]);
+        unsafe { gpufx_package_free(package) };
+        assert_eq!(process_one(fx), 245);
+        unsafe { gpufx_effect_free(fx) };
     }
 
     #[test]

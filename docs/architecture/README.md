@@ -336,8 +336,8 @@ where `runtime.rs` creates a device and by `vulkan.rs` for FFmpeg's shared `VkDe
 same limits (16 sampled and 4 storage textures per pass...) on every GPU, so it is portable. Raising them later means asking for
 the adapter limits under a common cap and checking each pass against the device.
 
-Loaded packages are shared too. Each package (keyed by absolute path and GPU device) is read and compiled
-only once per process: a `Program` holds the manifest, pipelines, PNG textures and
+Loaded packages are shared too. Each package (keyed by absolute path) is read once per process and compiled
+once per GPU device (see "Loaded packages" below): a `Program` holds the manifest, pipelines, PNG textures and
 samplers. Each filter keeps its own `Effect` with parameter values, uniform buffers and frame
 textures. When no filter uses the package any more, the `Program` is freed and the next open reads the
 file again. Editing a zip file while a filter still uses that package has no effect, even for a filter
@@ -641,7 +641,17 @@ The single quotes protect `;` and `[]` from the outer filter graph. Rules:
   converted to the output format.
 - Paths in a graph must not contain `[`, `]`, `;` or `|`.
 
-C API (v5, additive): `gpufx_effect_open_graph` (the only open function), `gpufx_effect_output_count`, `gpufx_effect_output_name`,
+Loaded packages: package -> load -> handle -> cache -> GPU. A `GpufxPackage` (`gpufx_package_load[_memory]`) holds the
+data of a package and what it compiled per device: the noop program strongly, because every open compiles there first
+and it holds no GPU memory, and real device programs weakly, so that a handle cannot keep them after the host has
+destroyed its device. `GpufxPackageCache` maps a file to its handle. `gpufx_effect_open_graph` (the FFmpeg filters) looks
+each path up in one process-wide cache, loads and adds it when missing, then compiles through the handle; that cache
+holds handles weakly, so a package leaves with its last effect. A cache from `gpufx_package_cache_new` holds them until
+cleared. Other hosts keep handles themselves or use such a cache, and `gpufx_effect_open_packages` resolves the names of
+a graph to handles through the `open` callback of `EffectGraph::parse`, so the graph syntax is unchanged. An effect keeps
+its handles in `Spec`, so moving to its real device reads no file.
+
+C API (v5, additive): `gpufx_effect_open_graph`, `gpufx_effect_output_count`, `gpufx_effect_output_name`,
 `gpufx_effect_output_source`, `gpufx_effect_output_pad_format[_count]`, `gpufx_effect_process_graph`,
 `gpufx_effect_convert_graph`, `gpufx_effect_output_size(fx, output, streams, count, &w, &h)` (the size of an output
 for given input sizes; `vf_gpufx` `config_output` sets the outlink size from it); see `gpufx.h`.

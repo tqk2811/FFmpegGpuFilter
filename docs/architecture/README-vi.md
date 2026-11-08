@@ -347,8 +347,8 @@ chỗ `runtime.rs` tạo device và ở `vulkan.rs` cho `VkDevice` dùng chung c
 (16 texture đọc và 4 texture ghi mỗi pass...) trên mọi GPU nên chạy được ở mọi nơi. Muốn nâng sau này thì phải xin giới hạn của
 adapter dưới một mức trần chung và kiểm từng pass theo device.
 
-Gói đã nạp cũng được dùng chung. Mỗi gói (khoá theo đường dẫn tuyệt đối và GPU device) chỉ
-được đọc và biên dịch một lần trong process: `Program` gồm manifest, pipeline, texture PNG,
+Gói đã nạp cũng được dùng chung. Mỗi gói (khoá theo đường dẫn tuyệt đối) chỉ được đọc một lần
+trong process và biên dịch một lần cho mỗi GPU device (xem "Gói đã nạp" bên dưới): `Program` gồm manifest, pipeline, texture PNG,
 sampler. Mỗi filter giữ một `Effect` riêng gồm giá trị tham số, uniform buffer và texture
 frame. Khi không còn filter nào dùng gói thì `Program` được giải phóng, lần mở sau đọc lại
 file. Sửa file zip khi vẫn còn filter dùng gói đó thì không có tác dụng, kể cả với filter
@@ -646,7 +646,16 @@ Dấu nháy đơn che `;` và `[]` khỏi filter graph bên ngoài. Quy tắc:
   chuyển sang format của output.
 - Đường dẫn trong đồ thị không được chứa `[`, `]`, `;` hoặc `|`.
 
-C API (v5, chỉ thêm): `gpufx_effect_open_graph` (hàm open duy nhất), `gpufx_effect_output_count`, `gpufx_effect_output_name`,
+Gói đã nạp: gói -> load -> handle -> cache -> GPU. Một `GpufxPackage` (`gpufx_package_load[_memory]`) giữ dữ liệu của gói và
+bản đã biên dịch theo từng device: program noop giữ mạnh, vì mỗi lần mở đều biên dịch ở đó trước và nó không chiếm bộ nhớ GPU;
+program trên device thật giữ yếu, để handle không giữ chúng sau khi host đã huỷ device. `GpufxPackageCache` ánh xạ file sang
+handle. `gpufx_effect_open_graph` (các filter FFmpeg) tra từng đường dẫn trong một cache chung cả process, chưa có thì load và
+thêm vào, rồi biên dịch qua handle; cache này giữ handle ở dạng yếu nên gói mất cùng effect cuối cùng dùng nó. Cache tạo bằng
+`gpufx_package_cache_new` giữ handle tới khi clear. Host khác tự giữ handle hoặc dùng cache như vậy, và
+`gpufx_effect_open_packages` đổi tên gói trong graph thành handle qua callback `open` của `EffectGraph::parse`, nên cú pháp
+graph không đổi. Effect giữ handle trong `Spec`, nên chuyển sang device thật không đọc file.
+
+C API (v5, chỉ thêm): `gpufx_effect_open_graph`, `gpufx_effect_output_count`, `gpufx_effect_output_name`,
 `gpufx_effect_output_source`, `gpufx_effect_output_pad_format[_count]`, `gpufx_effect_process_graph`,
 `gpufx_effect_convert_graph`, `gpufx_effect_output_size(fx, output, streams, count, &w, &h)` (size của một output
 theo size các input; `config_output` của `vf_gpufx` đặt size outlink từ nó); xem `gpufx.h`.

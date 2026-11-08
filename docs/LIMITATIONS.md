@@ -129,7 +129,8 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
   frame properties of every output come from input 0; a mistyped label becomes an extra output; package paths in
   `graph=` cannot contain `[ ] ; |`; each `gpufx` filter has its own texture pool (several filters use more VRAM
   than one `graph=`).
-- **Limitation:** the package cache holds a global lock while loading and does not notice changed package files.
+- **Limitation:** the package cache of the FFmpeg filters holds a global lock while reading a package and does not notice
+  changed package files. Other callers of the library load packages themselves (`gpufx_package_load`) and manage this.
 
 ## Shader cache, packages, security
 

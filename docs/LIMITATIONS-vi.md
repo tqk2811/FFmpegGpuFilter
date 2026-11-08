@@ -123,7 +123,8 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 - **Hạn chế (graph):** framesync bám theo output 0, output 0 đóng trước thì mọi output dừng; pts và thuộc tính frame
   của mọi output lấy từ input 0; nhãn gõ sai thành output thừa; đường dẫn gói trong `graph=` không được chứa
   `[ ] ; |`; mỗi filter `gpufx` có pool texture riêng (nhiều filter tốn VRAM hơn một `graph=`).
-- **Hạn chế:** cache gói giữ lock toàn cục lúc nạp và không phát hiện file gói đổi.
+- **Hạn chế:** cache gói của các filter FFmpeg giữ lock toàn cục lúc đọc gói và không phát hiện file gói đổi. Bên khác gọi
+  thư viện tự nạp gói (`gpufx_package_load`) và tự quản việc này.
 
 ## Shader cache, gói, an toàn
 

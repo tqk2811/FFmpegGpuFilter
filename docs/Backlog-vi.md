@@ -277,10 +277,16 @@
 - **Vì sao**: phạm vi B-chung chỉ cần các format thông dụng; phần còn lại thêm dần khi có nhu cầu.
 - **Ngày ghi**: 2026-10-12
 
-### [Thấp] C API chưa cho app ngoài FFmpeg tự quản gói đã nạp
-- **Vấn đề**: định hướng là cho bên khác dùng DLL, nhưng `gpufx_effect_open_graph` luôn đi qua cache gói toàn cục và chỉ nhận chuỗi đường dẫn. App không có handle để tự giữ và dùng chung gói đã nạp, không tắt được cache, và các thread mở gói song song phải chờ một khoá chung kể cả khi mở gói khác nhau.
-- **Vị trí**: [crates/gpufx-ffi/src/lib.rs](../crates/gpufx-ffi/src/lib.rs) (`program`), [crates/gpufx-ffi/include/gpufx.h](../crates/gpufx-ffi/include/gpufx.h) (`gpufx_effect_open_graph`).
-- **Vì sao**: FFmpeg chưa cần nên giữ nguyên; khi mở DLL cho bên khác thì cần API nạp gói riêng (hoặc cách mở không qua cache) để họ tự quản việc nạp song song và nạp lại file đã đổi.
+### [Vừa] Test cache DXIL đỏ: FXC từ chối shader `draw.wgsl`
+- **Vấn đề**: `d3d12_dxil_cache_gives_the_pixels_of_the_normal_path` đỏ trên Windows, cả ở commit trước đợt thêm handle. Đường D3D12 không dùng DXC rơi về FXC, và FXC báo `error X3500: array reference cannot be used as an l-value` ở `shaders/draw.wgsl` dòng 147 của WGSL đã dịch, nên hiệu ứng đó không mở được trên D3D12 khi thiếu `dxcompiler.dll`.
+- **Vị trí**: [crates/gpufx-core/tests/shader_cache.rs:184](../crates/gpufx-core/tests/shader_cache.rs#L184).
+- **Vì sao**: `cargo test -p gpufx-core` đang đỏ và chặn các bài phía sau nếu không có `--no-fail-fast`; cần sửa shader để tránh ghi vào phần tử mảng theo chỉ số động, hoặc khai báo gói cần DXC.
+- **Ngày ghi**: 2026-11-08
+
+### [Thấp] Handle không giữ được bản biên dịch trên device thật
+- **Vấn đề**: `GpufxPackage` chỉ giữ yếu `Program` của device thật, nên host mở, chạy rồi free effect lặp lại thì mỗi vòng biên dịch lại pipeline; muốn giữ thì phải để một effect sống.
+- **Vị trí**: [crates/gpufx-ffi/src/lib.rs](../crates/gpufx-ffi/src/lib.rs) (`GpufxPackage::program`).
+- **Vì sao**: giữ mạnh sẽ làm handle giữ device của host sau khi host đã huỷ; nếu có app cần thì thêm API tường minh để giữ và nhả program theo device.
 - **Ngày ghi**: 2026-11-08
 
 ### Hiệu ứng thu nhỏ ảnh chưa dùng mipmap của input

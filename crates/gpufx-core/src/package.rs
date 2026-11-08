@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::manifest::Manifest;
 use crate::used_for;
@@ -26,7 +27,8 @@ pub struct Package {
     output_copies: u32,
     /// Optional outputs switched off (see [`Package::with_outputs`]).
     outputs_off: Vec<String>,
-    files: HashMap<String, Vec<u8>>,
+    /// Shared: a package is cloned per device and per group, and may be hundreds of MB.
+    files: Arc<HashMap<String, Vec<u8>>>,
 }
 
 impl Package {
@@ -53,7 +55,7 @@ impl Package {
         let output_copies = parsed.output_repeat().map_or(0, |r| r.default);
         let template = (parsed.repeat().is_some() || parsed.output_repeat().is_some() || parsed.outputs.iter().any(|o| o.optional))
             .then(|| Box::new(parsed));
-        let pkg = Package { manifest, template, input_copies, output_copies, outputs_off: Vec::new(), files };
+        let pkg = Package { manifest, template, input_copies, output_copies, outputs_off: Vec::new(), files: Arc::new(files) };
         for pass in pkg.manifest.groups.iter().flat_map(|g| &g.passes) {
             pkg.file(&pass.shader)?;
         }

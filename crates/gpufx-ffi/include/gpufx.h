@@ -12,6 +12,7 @@
 #ifndef GPUFX_H
 #define GPUFX_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,6 +29,8 @@ extern "C" {
 #define GPUFX_AI_FRAMERATE_FILTER_NAME "gpufx_ai_framerate"
 
 typedef struct GpufxEffect GpufxEffect;
+typedef struct GpufxPackage GpufxPackage;
+typedef struct GpufxPackageCache GpufxPackageCache;
 
 /* An RGBA8 image in CPU memory. stride is bytes per row, >= width * 4. */
 typedef struct GpufxImage {
@@ -209,13 +212,62 @@ int gpufx_format_supported(const char *format);
  * the WebGPU default formats. The device comes from gpufx_effect_use_* or the first
  * frame, so a missing GPU is reported there, not by open.
  *
- * Packages are cached for the FFmpeg filters; other callers manage these limits themselves:
- * - One process-wide lock is held while a package is read and compiled, so threads opening
- *   packages at the same time wait for each other, even for different packages.
- * - A package stays cached while an effect using it is open, and changes to its file are
- *   not detected. To load a changed file, free every effect using it, then open it again.
+ * Paths go through one process-wide package cache, made for the FFmpeg filters: a package
+ * stays in it while an effect using it is open, and a change to its file is not detected
+ * until then. Other callers manage this themselves with gpufx_package_load() or their own
+ * gpufx_package_cache_new(), then gpufx_effect_open_packages().
  */
 GpufxEffect *gpufx_effect_open_graph(const char *graph, const char *backend);
+
+/*
+ * A package in memory: load -> handle -> open effects from it. Loading reads the package
+ * (a .zip or a directory; from memory, a .zip) and checks its manifest, and touches no
+ * GPU. The handle does not change and needs its source no more: to take a changed file,
+ * load it again. A handle may be used from several threads.
+ *
+ * The handle compiles what effects need, once per device, and effects opened from it share
+ * that. A node that changes the shape of its package (a repeated input, outputs=N or
+ * <name>=off) compiles its own variant at each open and is not shared.
+ * One lock per handle is held while compiling, so different packages do not wait
+ * for each other (making a GPU device is still under one process-wide lock). What was
+ * compiled on a real device stays while an effect using it is open, so a handle never
+ * keeps a device of the caller alive: keep an effect open to keep it compiled.
+ *
+ * gpufx_package_free() releases the caller's reference; effects and caches using the
+ * package keep it alive. Freeing NULL does nothing.
+ */
+GpufxPackage *gpufx_package_load(const char *path);
+GpufxPackage *gpufx_package_load_memory(const uint8_t *data, size_t size);
+void gpufx_package_free(GpufxPackage *package);
+
+/*
+ * Optional: handles kept by file, for a caller that does not want to keep them itself.
+ * gpufx_package_cache_load() returns the handle of a file, loading and adding it when the
+ * cache does not have it yet; free it with gpufx_package_free(). The cache keeps its
+ * handles until gpufx_package_cache_clear() or gpufx_package_cache_free(); effects and
+ * handles taken from it stay valid after that. A file is read once: to take a changed file,
+ * clear the cache and load it again. One lock per cache is held while a file is read.
+ * A cache may be used from several threads, but not freed while another call is using it.
+ * NULL does nothing for clear and free.
+ */
+GpufxPackageCache *gpufx_package_cache_new(void);
+GpufxPackage *gpufx_package_cache_load(GpufxPackageCache *cache, const char *path);
+void gpufx_package_cache_clear(GpufxPackageCache *cache);
+void gpufx_package_cache_free(GpufxPackageCache *cache);
+
+/*
+ * gpufx_effect_open_graph() from loaded packages: a package in the graph text is one of
+ * names, and packages[i] is what names[i] stands for. Names are also the labels in
+ * parameter names ("name.param"). The effect takes its own reference to the packages, so
+ * the caller may free them at once. A name is written in the graph text like a path: the
+ * characters the syntax uses must be escaped there. An unknown or repeated name, and the
+ * names "split" and "null" (built-ins of the graph syntax), fail here. A package the graph
+ * does not name is accepted and kept with the effect. names and packages may be NULL
+ * when count is 0.
+ */
+GpufxEffect *gpufx_effect_open_packages(const char *graph, const char *backend,
+                                        const char *const *names,
+                                        GpufxPackage *const *packages, uint32_t count);
 
 /*
  * Inline options of the effects, in the order they were written: effect gets the index
