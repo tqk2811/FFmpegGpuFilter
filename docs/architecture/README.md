@@ -1064,7 +1064,7 @@ crates/gpufx-core   Rust engine: package, manifest, params, runtime (wgpu)
 crates/gpufx-ffi    libgpufx (.so/.dll/.dylib + .a) and include/gpufx.h
 crates/gpufx-cli    the `gpufx` command: info, check, pack, run (test effects without FFmpeg)
 ffmpeg/             vf_gpufx.c and integrate.sh (adds the filter to the FFmpeg source tree)
-external/FFmpeg     FFmpeg submodule, pinned to n9.0-2-g03d9533176 (release/9.0) = the prebuilt's commit
+external/FFmpeg     FFmpeg submodule, pinned to N-128691-gcc583787bb (upstream master) = the prebuilt's commit
 docker/, build.sh   build FFmpeg + gpufx with one command in Docker (linux64, win64)
 packages/gpufx    38 effects (groups ffmpeg, slideshow, standalone): color adjustment, blur, sharpen, chroma key, overlay, transitions, hstack/vstack (variable input count, larger output)...
 scripts/            build-prebuilt.sh (builds only libavfilter, swaps it into the prebuilt FFmpeg),
@@ -1076,12 +1076,12 @@ scripts/            build-prebuilt.sh (builds only libavfilter, swaps it into th
 ## 9. Distribution builds
 
 **Fast way (what CI uses):** `scripts/build-prebuilt.sh [linux64|win64]` downloads the prebuilt FFmpeg
-9.0 shared build (tqk2811/FFmpegBuild), builds `libgpufx` and **only `libavfilter`** from the
+master shared build (a pinned FFmpeg-Builds autobuild, backed up in this repository's releases), builds `libgpufx` and **only `libavfilter`** from the
 submodule with `--disable-everything` + every filter (`FFMPEG_FILTERS=all`, the default; `keep` limits it to
 `docker/keep-filters.txt`) + gpufx, then swaps
 `libavfilter.so.12` / `avfilter-12.dll` in the package. Conditions for sharing the same ABI:
 
-- the same FFmpeg commit as the prebuilt (the submodule pins `03d9533176`, and the script checks it);
+- the same FFmpeg commit as the prebuilt (the submodule pins `cc583787bb`, and the script checks it);
 - the same major name (`libavfilter.so.12`, `avfilter-12.dll`); the script stops if the prebuilt
   has no file with that name;
 - the ffmpeg CLI uses only the public API and looks up filters by name at run time, so removing filters does not

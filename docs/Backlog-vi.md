@@ -221,30 +221,24 @@
 - **Vì sao**: gửi báo lỗi để FFmpeg/Intel sửa; khi driver hoặc FFmpeg đã sửa thì bỏ lệnh từ chối (đang chặn cả người dùng driver mới) và nhánh `INTEL_HIC` trong test.
 - **Ngày ghi**: 2026-10-14
 
-### [Thấp] Build lại libavutil trong image BtbN: các finding review để sau
+### [Thấp] Build lại libavutil trong image FFmpeg-Builds: các finding review để sau
 - **Vấn đề**:
-  - `build-avutil.sh` lấy dòng configure từ chuỗi trong avutil dựng sẵn rồi chạy bằng `eval`. Hiện chạy được vì dòng của BtbN không có khoảng trắng trong giá trị hay ký tự đặc biệt của shell. Đổi sang image khác mà dòng configure có những thứ đó thì configure có thể sai mà không báo, hoặc chạy lệnh lạ.
+  - `build-avutil.sh` lấy dòng configure từ chuỗi trong avutil dựng sẵn rồi chạy bằng `eval`. Hiện chạy được vì dòng của image FFmpeg-Builds không có khoảng trắng trong giá trị hay ký tự đặc biệt của shell. Đổi sang image khác mà dòng configure có những thứ đó thì configure có thể sai mà không báo, hoặc chạy lệnh lạ.
   - `AVUTIL_LIB` chép thẳng thư viện vào bundle, không kiểm export, import và tên loại thiết bị như đường build, cũng không kiểm major version có khớp file cũ không.
   - Phép bỏ qua format trong test D3D dựa vào đúng câu log "Invalid output format … for hwframe download". FFmpeg đổi câu chữ thì bài skip thành FAIL.
-  - Mỗi lần chạy, mỗi job CI kéo image BtbN vài GB, không có cache, tốn thêm khoảng 1–3 phút.
+  - Mỗi lần chạy, mỗi job CI kéo image FFmpeg-Builds vài GB, không có cache, tốn thêm khoảng 1–3 phút.
 - **Vị trí**: [build-avutil.sh:55](../scripts/build-avutil.sh#L55), [build-prebuilt.sh:109-111](../scripts/build-prebuilt.sh#L109-L111), [test-bundle.sh:874](../scripts/test-bundle.sh#L874), [ci.yml](../.github/workflows/ci.yml).
-- **Vì sao**: hướng gọn hơn là áp `ffmpeg/patches` ngay trong repo tqk2811/FFmpegBuild, hoặc đăng libavutil đã vá một lần làm asset của release rồi tải về bằng `AVUTIL_LIB` kèm checksum. Như vậy CI bỏ được bước build trong docker, và không còn phụ thuộc dòng configure lẫn digest image phải giữ khớp với version.
+- **Vì sao**: hướng gọn hơn là đăng libavutil đã vá một lần làm asset của release sao lưu (`ffmpeg-<version>`) trong repo này rồi tải về bằng `AVUTIL_LIB` kèm checksum. Như vậy CI bỏ được bước build trong docker, và không còn phụ thuộc dòng configure lẫn digest image phải giữ khớp với version.
 - **Ngày ghi**: 2026-10-19
 
-### Build Docker đầy đủ chưa chạy lại trên FFmpeg 9.0
-- **Vấn đề**: submodule `external/FFmpeg` đã chuyển từ master (9.1-dev) về `n9.0-2-g03d9533176`. `build.sh` và job CI `ffmpeg-docker` (chỉ chạy khi bấm tay `workflow_dispatch`) chưa được chạy lại trên commit này.
-- **Vị trí**: [build.sh](../build.sh), [docker/build-in-container.sh](../docker/build-in-container.sh), [.github/workflows/ci.yml](../.github/workflows/ci.yml).
-- **Vì sao**: `integrate.sh` và `vf_gpufx.c` đã chạy được trên 9.0 qua `scripts/build-prebuilt.sh`, nhưng build đầy đủ (mọi codec, mọi filter audio) chưa ai kiểm lại.
-- **Ngày ghi**: 2026-10-12
-
 ### win64: lệch CRT giữa `avfilter-12.dll` và bản build sẵn
-- **Vấn đề**: `avfilter-12.dll` (mingw-w64 của Ubuntu) và `gpufx.dll` (Rust `x86_64-pc-windows-gnu`) dùng `msvcrt.dll`, còn DLL build sẵn của FFmpegBuild dùng UCRT (`api-ms-win-crt-*`). Chạy được vì FFmpeg cấp phát/giải phóng bộ nhớ qua `avutil` và không truyền `FILE*`/`errno`/locale qua ranh giới DLL. Đây vẫn là giả định, và runner Windows có tìm được adapter phần mềm (WARP) hay không cũng chưa kiểm chứng.
+- **Vấn đề**: `avfilter-12.dll` (mingw-w64 của Ubuntu) và `gpufx.dll` (Rust `x86_64-pc-windows-gnu`) dùng `msvcrt.dll`, còn DLL build sẵn của FFmpeg-Builds dùng UCRT (`api-ms-win-crt-*`). Chạy được vì FFmpeg cấp phát/giải phóng bộ nhớ qua `avutil` và không truyền `FILE*`/`errno`/locale qua ranh giới DLL. Đây vẫn là giả định, và runner Windows có tìm được adapter phần mềm (WARP) hay không cũng chưa kiểm chứng.
 - **Vị trí**: [scripts/build-prebuilt.sh](../scripts/build-prebuilt.sh) (biến `CROSS`), job `ffmpeg-windows` trong [.github/workflows/ci.yml](../.github/workflows/ci.yml).
-- **Vì sao**: muốn khớp hẳn thì phải build bằng toolchain mingw UCRT, giống toolchain image BtbN mà FFmpegBuild dùng. Ubuntu noble chưa có gói mingw UCRT.
+- **Vì sao**: muốn khớp hẳn thì phải build bằng toolchain mingw UCRT, giống toolchain image FFmpeg-Builds. Ubuntu noble chưa có gói mingw UCRT.
 - **Ngày ghi**: 2026-10-12
 
 ### Kiểm checksum bản build sẵn, định dạng version khác
-- **Vấn đề**: `build-prebuilt.sh` tải file không kiểm sha256, và dùng lại file trong cache mãi mãi (file hỏng hay bị cắt cụt cũng không phát hiện). Tên file được ghép theo mẫu `ffmpeg-nX.Y-N-g<sha>-<target>-<license>-shared-X.Y`. Tên của các bản `lgpl2`/`gpl2` và bản đặt theo tag trơn chưa được kiểm.
+- **Vấn đề**: `build-prebuilt.sh` tải file không kiểm sha256, và dùng lại file trong cache mãi mãi (file hỏng hay bị cắt cụt cũng không phát hiện). Tên file được ghép theo mẫu `ffmpeg-<version>-<target>-<license>-shared` từ release `ffmpeg-<version>` của repo này (release có kèm `sums.txt`, script chưa dùng). Release sao lưu chỉ có bản `lgpl`; các bản `gpl`/`lgpl2`/`gpl2` và bản đặt theo tag trơn chưa được kiểm.
 - **Vị trí**: [scripts/build-prebuilt.sh](../scripts/build-prebuilt.sh) (đoạn tải, biến `NAME`).
 - **Vì sao**: ghim sha256 theo từng target/license, hoặc đọc file checksum nếu release có, để tránh build trên bản tải lỗi.
 - **Ngày ghi**: 2026-10-12

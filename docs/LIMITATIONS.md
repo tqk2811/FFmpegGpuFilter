@@ -141,9 +141,9 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
 
 ## Build and bundles
 
-- **Limitation:** no macOS bundle yet. The prebuilt bundle uses FFmpegBuild's prebuilt FFmpeg; libavutil is rebuilt
-  (with the patches) in BtbN's docker image (`ghcr.io/btbn/ffmpeg-builds/<target>-lgpl-9.0`, pinned by digest), so
-  the build needs docker. That image only has a `latest` tag: when BtbN removes the old one the digest must change.
+- **Limitation:** no macOS bundle yet. The prebuilt bundle uses a pinned FFmpeg-Builds prebuilt FFmpeg (backed up in this repository's releases); libavutil is rebuilt
+  (with the patches) in the FFmpeg-Builds docker image (`ghcr.io/ffmpeg-builds/ffmpeg-builds/<target>-lgpl`, pinned by digest), so
+  the build needs docker. That image only has a `latest` tag: when FFmpeg-Builds removes the old one the digest must change.
   `avfilter-12.dll`/`gpufx.dll` use msvcrt while the other DLLs use UCRT.
 - **Limitation:** `build-prebuilt.sh` downloads the prebuilt FFmpeg without a sha256 check.
 - **Limitation:** the default `FFMPEG_FILTERS=all` build includes GPL filters; `FFMPEG_FILTERS=keep` gives a small
@@ -208,10 +208,10 @@ run); `-init_hw_device list` still has all 9 device types.
   `yuva444p` fails (`Unsupported pixel format: rgba`). Vulkan keeps alpha with `out_format=rgba`. On D3D, split
   the result and send one copy through [alpha-extract](../packages/gpufx/ffmpeg/alpha-extract/README.md) to get
   the alpha as a gray picture, then join both on the CPU with `alphamerge`.
-- **The prebuilt bundle's libavutil is a rebuild.** `scripts/build-avutil.sh` rebuilds libavutil in BtbN's image
+- **The prebuilt bundle's libavutil is a rebuild.** `scripts/build-avutil.sh` rebuilds libavutil in the FFmpeg-Builds image
   with the configure line stored in the prebuilt library, then checks that the exports, the libraries loaded at
   start and the hardware device types do not change. The libraries in the image may be newer than the ones
-  FFmpegBuild used (they are linked statically into libavutil). The full Docker build (`build.sh`) has the patches
+  the prebuilt used (they are linked statically into libavutil). The full Docker build (`build.sh`) has the patches
   but no D3D12 (Ubuntu's mingw lacks `d3d12video.h`).
 - **A format the GPU does not support is left out.** The format list is filtered through
   `CheckFormatSupport`/`CheckFeatureSupport`. A format left out gives no error: FFmpeg converts to another one

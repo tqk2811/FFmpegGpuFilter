@@ -2,14 +2,14 @@
 
 [English](REQUIREMENTS.md) · [README](../README-vi.md)
 
-Các mức tối thiểu lấy từ code (gpufx, wgpu-hal 30.0.1, FFmpeg 9), trừ chỗ ghi *chưa kiểm chứng*. Dòng GPU ví dụ
+Các mức tối thiểu lấy từ code (gpufx, wgpu-hal 30.0.1, FFmpeg master), trừ chỗ ghi *chưa kiểm chứng*. Dòng GPU ví dụ
 lấy từ bảng công khai của hãng/Microsoft, không phải từ test ở đây.
 
 ## Windows
 
 | Yêu cầu | Tối thiểu | Nguồn |
 | --- | --- | --- |
-| OS | Windows 10 64-bit | Target `x86_64-pc-windows-*` của Rust 1.78+ cần Windows 10 (tài liệu platform support của Rust); crate cần Rust 1.88 (`rust-version` trong `crates/*/Cargo.toml`). Mức tối thiểu của FFmpeg 9: *chưa kiểm chứng* |
+| OS | Windows 10 64-bit | Target `x86_64-pc-windows-*` của Rust 1.78+ cần Windows 10 (tài liệu platform support của Rust); crate cần Rust 1.88 (`rust-version` trong `crates/*/Cargo.toml`). Mức tối thiểu của FFmpeg: *chưa kiểm chứng* |
 | D3D12 feature level | 11_0 | `wgpu-hal-30.0.1/src/dx12/adapter.rs:93` (tạo device ở FL 11_0) |
 | Resource binding tier | Tier 2 (adapter tier 1 bị bỏ qua) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:243-251` |
 | Shader model | 5.1 (có cao hơn thì dùng) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:345-385` |
@@ -29,7 +29,7 @@ Windows 11. CI trên Windows chỉ build (fmt, clippy): xem `.github/workflows/c
 | Yêu cầu | Tối thiểu | Nguồn |
 | --- | --- | --- |
 | Vulkan API (frame từ FFmpeg) | 1.1 | `crates/gpufx-core/src/vulkan.rs:418-420` |
-| Vulkan API FFmpeg 9 xin | 1.3 | `external/FFmpeg/libavutil/hwcontext_vulkan.c:1203` |
+| Vulkan API FFmpeg xin | 1.3 | `external/FFmpeg/libavutil/hwcontext_vulkan.c:1277` |
 | Họ queue | graphics + compute | `crates/gpufx-core/src/vulkan.rs:458-465` |
 | Timeline semaphore | bắt buộc | `crates/gpufx-core/src/vulkan.rs:829-836`, `hwcontext_vulkan.c:327,357` |
 | wgpu Vulkan | 1.0 + `VK_KHR_maintenance1` (có sẵn trong 1.1) | `wgpu-hal-30.0.1/src/vulkan/adapter.rs:1227-1229` |

@@ -2,14 +2,14 @@
 
 [Tiếng Việt](REQUIREMENTS-vi.md) · [README](../README.md)
 
-Minimums come from the code (gpufx, wgpu-hal 30.0.1, FFmpeg 9) unless marked *not verified*. Example GPU
+Minimums come from the code (gpufx, wgpu-hal 30.0.1, FFmpeg master) unless marked *not verified*. Example GPU
 families come from public vendor/Microsoft tables, not from tests here.
 
 ## Windows
 
 | Requirement | Minimum | Source |
 | --- | --- | --- |
-| OS | Windows 10 64-bit | Rust 1.78+ `x86_64-pc-windows-*` targets need Windows 10 (Rust platform support doc); crates need Rust 1.88 (`crates/*/Cargo.toml` `rust-version`). FFmpeg 9 minimum: *not verified* |
+| OS | Windows 10 64-bit | Rust 1.78+ `x86_64-pc-windows-*` targets need Windows 10 (Rust platform support doc); crates need Rust 1.88 (`crates/*/Cargo.toml` `rust-version`). FFmpeg minimum: *not verified* |
 | D3D12 feature level | 11_0 | `wgpu-hal-30.0.1/src/dx12/adapter.rs:93` (device created at FL 11_0) |
 | Resource binding tier | Tier 2 (Tier 1 adapters are skipped) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:243-251` |
 | Shader model | 5.1 (higher used when present) | `wgpu-hal-30.0.1/src/dx12/adapter.rs:345-385` |
@@ -30,7 +30,7 @@ Tested: D3D12 and D3D11 frames on NVIDIA RTX 4060 Laptop and Intel UHD Graphics 
 | Requirement | Minimum | Source |
 | --- | --- | --- |
 | Vulkan API (frames from FFmpeg) | 1.1 | `crates/gpufx-core/src/vulkan.rs:418-420` |
-| Vulkan API asked by FFmpeg 9 | 1.3 | `external/FFmpeg/libavutil/hwcontext_vulkan.c:1203` |
+| Vulkan API asked by FFmpeg | 1.3 | `external/FFmpeg/libavutil/hwcontext_vulkan.c:1277` |
 | Queue family | graphics + compute | `crates/gpufx-core/src/vulkan.rs:458-465` |
 | Timeline semaphores | required | `crates/gpufx-core/src/vulkan.rs:829-836`, `hwcontext_vulkan.c:327,357` |
 | wgpu Vulkan | 1.0 + `VK_KHR_maintenance1` (core in 1.1) | `wgpu-hal-30.0.1/src/vulkan/adapter.rs:1227-1229` |

@@ -237,7 +237,7 @@ encodes. The VideoToolbox path has never run on a Mac.
 
 - **Windows**: Windows 10 64-bit or later. D3D12: feature level 11_0, resource binding tier 2 (NVIDIA Kepler+,
   AMD GCN+, Intel Skylake+). D3D11 frames: Windows 10 1703+ (D3D11.4 shared fences).
-- **Linux**: Vulkan 1.1+ with a graphics + compute queue and timeline semaphores (FFmpeg 9 asks for 1.3);
+- **Linux**: Vulkan 1.1+ with a graphics + compute queue and timeline semaphores (FFmpeg asks for 1.3);
   NVIDIA proprietary, Mesa RADV/ANV, lavapipe (CPU). The linux64 bundle needs glibc 2.35+ (Ubuntu 22.04).
 - **macOS**: Metal; VideoToolbox frames need Apple silicon (nv12/p010le). Untested on a Mac.
 - Intel GPU on Windows with FFmpeg 9 Vulkan frames: see [Intel Vulkan](docs/INTEL_VULKAN.md).
@@ -284,8 +284,9 @@ skipped checks: add `-- --nocapture` to see them.
 
 ### Fast build on a prebuilt FFmpeg (recommended)
 
-Take the prebuilt FFmpeg 9.0 shared build from
-[tqk2811/FFmpegBuild](https://github.com/tqk2811/FFmpegBuild/releases), rebuild only
+Take the prebuilt FFmpeg master shared build (a pinned
+[FFmpeg-Builds](https://github.com/FFmpeg-Builds/FFmpeg-Builds) autobuild, backed up in this repository's
+[releases](https://github.com/tqk2811/FFmpegGpuFilter/releases) because upstream deletes old builds), rebuild only
 `libavfilter` (gpufx + every FFmpeg filter that builds without extra libraries) and swap it into the package. `ffmpeg`, `ffprobe` and
 the remaining libraries (`avcodec`, `avformat`...) stay as they are in the prebuilt. It takes a few minutes:
 
@@ -301,8 +302,8 @@ target `x86_64-pc-windows-gnu`). Change the prebuilt with the variables `FFBUILD
 `FFBUILD_VERSION` and `FFBUILD_LICENSE` (`lgpl`, `gpl`, `lgpl2`, `gpl2`).
 
 `libavfilter` must be built from **exactly the same commit** as the prebuilt so the ABI matches the other
-libraries. The `external/FFmpeg` submodule is pinned to that commit (`n9.0-2-g03d9533176`, branch
-`release/9.0`); the script stops if the two differ. `ffmpeg` looks up filters by name at run time,
+libraries. The `external/FFmpeg` submodule is pinned to that commit (`N-128691-gcc583787bb`, upstream
+`master`); the script stops if the two differ. `ffmpeg` looks up filters by name at run time,
 so it does not care how many filters `libavfilter` contains. A command that uses a missing filter is the
 only one that reports `No such filter`.
 
@@ -317,10 +318,10 @@ Notes for this build:
   `trim`, `split`, `sendcmd`; input normalisers such as `fps`, `setpts`, `pad`, `concat`, `yadif`, `colorspace`;
   basic audio; `hwupload`, `hwdownload`, `hwmap`). To keep another filter there, add its name to that file and
   rebuild.
-- Vulkan frames need Vulkan in the prebuilt `libavutil` (the FFmpegBuild releases have it) and the Khronos
+- Vulkan frames need Vulkan in the prebuilt `libavutil` (the prebuilt has it) and the Khronos
   Vulkan-Headers, which the script clones (tag `v1.4.321`, or `VULKAN_HEADERS=<dir>`); without them the filter is
   built without Vulkan frames and says so.
-- win64: D3D12/D3D11 frames need d3d12va/d3d11va in the prebuilt `libavutil` (the FFmpegBuild releases have them);
+- win64: D3D12/D3D11 frames need d3d12va/d3d11va in the prebuilt `libavutil` (the prebuilt has them);
   libavfilter is configured with `--enable-d3d11va --enable-d3d12va`, with `d3d12video.h` of mingw-w64 v12.0.0
   fetched when the installed mingw-w64 lacks it.
 - `ffmpeg` prints `WARNING: library configuration mismatch` in the banner (or when you drop
@@ -332,7 +333,7 @@ Notes for this build:
 
 ### Full FFmpeg build from source (Docker)
 
-Builds all of FFmpeg from the `external/FFmpeg` submodule (the same 9.0 commit as above), which is much slower.
+Builds all of FFmpeg from the `external/FFmpeg` submodule (the same master commit as above), which is much slower.
 The script builds in Docker in the style of
 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); you only need Docker and git:
 

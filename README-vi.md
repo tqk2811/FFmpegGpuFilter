@@ -233,7 +233,7 @@ offline. Đường VideoToolbox chưa từng chạy trên máy Mac.
 
 - **Windows**: Windows 10 64-bit trở lên. D3D12: feature level 11_0, resource binding tier 2 (NVIDIA Kepler+,
   AMD GCN+, Intel Skylake+). Frame D3D11: Windows 10 1703+ (shared fence D3D11.4).
-- **Linux**: Vulkan 1.1+ có queue graphics + compute và timeline semaphore (FFmpeg 9 xin 1.3);
+- **Linux**: Vulkan 1.1+ có queue graphics + compute và timeline semaphore (FFmpeg xin 1.3);
   NVIDIA proprietary, Mesa RADV/ANV, lavapipe (CPU). Bundle linux64 cần glibc 2.35+ (Ubuntu 22.04).
 - **macOS**: Metal; frame VideoToolbox cần Apple silicon (nv12/p010le). Chưa chạy trên Mac.
 - GPU Intel trên Windows với frame Vulkan của FFmpeg 9: xem [Intel Vulkan](docs/INTEL_VULKAN-vi.md).
@@ -280,8 +280,9 @@ phần chưa kiểm: thêm `-- --nocapture` để thấy các dòng đó.
 
 ### Build nhanh trên bản FFmpeg build sẵn (khuyên dùng)
 
-Lấy bản FFmpeg 9.0 shared build sẵn từ
-[tqk2811/FFmpegBuild](https://github.com/tqk2811/FFmpegBuild/releases), chỉ build lại
+Lấy bản FFmpeg master shared build sẵn (một autobuild của
+[FFmpeg-Builds](https://github.com/FFmpeg-Builds/FFmpeg-Builds) được ghim, sao lưu ở
+[releases](https://github.com/tqk2811/FFmpegGpuFilter/releases) của repo này vì upstream xoá bản cũ), chỉ build lại
 `libavfilter` (gpufx + mọi filter của FFmpeg build được mà không cần thư viện ngoài) rồi thay vào gói. `ffmpeg`, `ffprobe` và
 các thư viện còn lại (`avcodec`, `avformat`…) giữ nguyên bản build sẵn. Mất vài phút:
 
@@ -297,8 +298,8 @@ target `x86_64-pc-windows-gnu`). Đổi bản build sẵn bằng biến `FFBUILD
 `FFBUILD_VERSION`, `FFBUILD_LICENSE` (`lgpl`, `gpl`, `lgpl2`, `gpl2`).
 
 `libavfilter` phải build từ **đúng commit** của bản build sẵn để khớp ABI với các thư viện
-kia. Submodule `external/FFmpeg` được ghim vào commit đó (`n9.0-2-g03d9533176`, nhánh
-`release/9.0`); script dừng lại nếu hai bên lệch nhau. `ffmpeg` tìm filter theo tên lúc chạy
+kia. Submodule `external/FFmpeg` được ghim vào commit đó (`N-128691-gcc583787bb`, `master`
+của upstream); script dừng lại nếu hai bên lệch nhau. `ffmpeg` tìm filter theo tên lúc chạy
 nên không quan tâm `libavfilter` có bao nhiêu filter. Lệnh nào gọi filter không có thì chỉ lệnh
 đó báo `No such filter`.
 
@@ -312,10 +313,10 @@ Lưu ý với bản này:
   (filter nối graph như `scale`, `format`, `trim`, `split`, `sendcmd`; filter chuẩn hoá đầu vào như `fps`,
   `setpts`, `pad`, `concat`, `yadif`, `colorspace`; audio cơ bản; `hwupload`, `hwdownload`, `hwmap`). Muốn giữ
   thêm filter ở chế độ này thì thêm tên vào file đó rồi build lại.
-- Frame Vulkan cần `libavutil` build sẵn có Vulkan (bản phát hành FFmpegBuild có) và Vulkan-Headers của Khronos,
+- Frame Vulkan cần `libavutil` build sẵn có Vulkan (bản build sẵn có) và Vulkan-Headers của Khronos,
   script tự clone (tag `v1.4.321`, hoặc `VULKAN_HEADERS=<thư mục>`); thiếu thì filter được build không có frame
   Vulkan và script báo điều đó.
-- win64: frame D3D12/D3D11 cần d3d12va/d3d11va trong `libavutil` build sẵn (bản FFmpegBuild có); libavfilter
+- win64: frame D3D12/D3D11 cần d3d12va/d3d11va trong `libavutil` build sẵn (bản build sẵn có); libavfilter
   được configure với `--enable-d3d11va --enable-d3d12va`, tải `d3d12video.h` của mingw-w64 v12.0.0 khi mingw-w64
   đã cài không có.
 - `ffmpeg` in `WARNING: library configuration mismatch` ở banner (hoặc khi bỏ
@@ -327,7 +328,7 @@ Lưu ý với bản này:
 
 ### Build FFmpeg đầy đủ từ mã nguồn (Docker)
 
-Build cả FFmpeg từ submodule `external/FFmpeg` (cùng commit 9.0 ở trên), chậm hơn nhiều.
+Build cả FFmpeg từ submodule `external/FFmpeg` (cùng commit master ở trên), chậm hơn nhiều.
 Script build trong Docker theo kiểu
 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), chỉ cần Docker và git:
 

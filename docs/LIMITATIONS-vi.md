@@ -135,9 +135,9 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
 
 ## Build và bundle
 
-- **Hạn chế:** chưa có bundle macOS. Bundle prebuilt dùng FFmpeg dựng sẵn của FFmpegBuild; libavutil được build lại
-  (có bản vá) trong docker image của BtbN (`ghcr.io/btbn/ffmpeg-builds/<target>-lgpl-9.0`, ghim theo digest), nên
-  build cần docker. Image đó chỉ có tag `latest`: BtbN xoá bản cũ thì phải đổi digest.
+- **Hạn chế:** chưa có bundle macOS. Bundle prebuilt dùng FFmpeg dựng sẵn của FFmpeg-Builds được ghim (sao lưu ở releases của repo này); libavutil được build lại
+  (có bản vá) trong docker image của FFmpeg-Builds (`ghcr.io/ffmpeg-builds/ffmpeg-builds/<target>-lgpl`, ghim theo digest), nên
+  build cần docker. Image đó chỉ có tag `latest`: FFmpeg-Builds xoá bản cũ thì phải đổi digest.
   `avfilter-12.dll`/`gpufx.dll` dùng msvcrt trong khi các DLL khác dùng UCRT.
 - **Hạn chế:** `build-prebuilt.sh` tải bản FFmpeg dựng sẵn không kiểm sha256.
 - **Hạn chế:** build mặc định `FFMPEG_FILTERS=all` có filter GPL; `FFMPEG_FILTERS=keep` cho bản nhỏ.
@@ -201,8 +201,8 @@ D3D11 và D3D12 (giữ alpha, giống kết quả Vulkan); `-init_hw_device list
   quả làm hai và cho một bản đi qua [alpha-extract](../packages/gpufx/ffmpeg/alpha-extract/README.md) để lấy alpha
   thành ảnh xám, rồi ghép hai bản trên CPU bằng `alphamerge`.
 - **libavutil của bundle prebuilt là bản build lại.** `scripts/build-avutil.sh` build lại libavutil trong image
-  của BtbN với đúng dòng configure lưu trong bản dựng sẵn, rồi kiểm export, thư viện nạp lúc chạy và các loại thiết
-  bị phần cứng không đổi. Thư viện phụ thuộc trong image có thể mới hơn bản FFmpegBuild đã dùng (được link tĩnh
+  của FFmpeg-Builds với đúng dòng configure lưu trong bản dựng sẵn, rồi kiểm export, thư viện nạp lúc chạy và các loại thiết
+  bị phần cứng không đổi. Thư viện phụ thuộc trong image có thể mới hơn bản dựng sẵn đã dùng (được link tĩnh
   vào libavutil). Bản build Docker đầy đủ (`build.sh`) có bản vá nhưng không có D3D12 (mingw của Ubuntu thiếu
   `d3d12video.h`).
 - **GPU không hỗ trợ định dạng thì định dạng đó bị loại.** Danh sách định dạng được lọc qua
