@@ -12,6 +12,12 @@
 - **Vì sao**: nên chia slot theo tensor hoặc chia ảnh thành tile; hoặc báo lỗi kèm gợi ý hạ `scale`.
 - **Ngày ghi**: 2026-10-19
 
+### [Vừa] Test `d3d12_dxil_cache_gives_the_pixels_of_the_normal_path` đỏ vì FXC không biên dịch được một shader
+- **Vấn đề**: khi không dùng cache, FXC báo `error X3500: array reference cannot be used as an l-value` ở `shaders/draw.wgsl`, pass 1, dòng HLSL 147, và test panic. Lỗi có sẵn trên 9f751c8, không do đổi submit lock.
+- **Vị trí**: [shader_cache.rs:184](../crates/gpufx-core/tests/shader_cache.rs#L184)
+- **Vì sao**: effect dùng shader này không mở được trên D3D12 khi đi đường FXC, và bộ test của gpufx-core không xanh.
+- **Ngày ghi**: 2026-11-09
+
 ### [Thấp] Runtime nn: các `poll(wait_indefinitely)` không có timeout
 - **Vấn đề**: GPU treo (TDR, driver lỗi) thì filter nn đứng chờ mãi thay vì báo lỗi. Cần chọn mức timeout đủ rộng cho GPU yếu xử lý frame 4K.
 - **Vị trí**: [plan.rs](../crates/gpufx-core/src/nn/plan.rs) (`poll` trong `NnPlan`), [interp.rs](../crates/gpufx-core/src/nn/interp.rs) (`bench`), [upscale.rs](../crates/gpufx-core/src/nn/upscale.rs)
@@ -489,12 +495,6 @@ Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423
 - **Vị trí**: [frames.rs:72](../crates/gpufx-core/src/nn/frames.rs#L72)
 - **Vì sao**: nên để model.json khai bảng auto (vd ngưỡng số pixel → giá trị), runtime chỉ đọc bảng và không cần quy ước tên param.
 - **Ngày ghi**: 2026-11-02
-
-### [Vừa] Fence của queue dùng chung cần một submit lock mà ứng dụng cũng dùng được
-- **Vấn đề**: `process_d3d12` đặt fence lên queue và để lần submit kế tiếp của bất kỳ ai tiêu thụ; ứng dụng phải tự khoá mọi `queue.submit` của nó với `process_d3d12`, mà không có khoá nào để chia sẻ (mỗi `GpuContext` có khoá riêng).
-- **Vị trí**: [d3d12.rs:816](../crates/gpufx-core/src/d3d12.rs#L816) (đoạn đặt fence và submit, đến dòng 824)
-- **Vì sao**: một editor có thread preview không thể làm đúng hợp đồng của `from_device` nếu không có khoá chung; vi phạm gây khung sai mà không báo lỗi. Nên đưa ra một khoá (hoặc hàm submit) mà ứng dụng dùng chung với context.
-- **Ngày ghi**: 2026-11-09
 
 ### [Thấp] `GpuFrame::check` nhận mọi input lớn hơn khung trên mọi backend
 - **Vấn đề**: kiểm kích thước chấp nhận texture lớn hơn khung, nên truyền sai width/height giờ âm thầm cắt thay vì báo lỗi.
