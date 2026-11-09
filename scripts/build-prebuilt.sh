@@ -12,6 +12,8 @@
 #   FFBUILD_VERSION  FFmpeg version string   N-128691-gcc583787bb
 #   FFBUILD_TAG      release tag             ffmpeg-$FFBUILD_VERSION
 #   FFBUILD_LICENSE  lgpl | gpl | lgpl2 | gpl2   lgpl (the backup release only has lgpl)
+#   FFBUILD_SHA256   sha256 of the prebuilt archive; pinned for the default release,
+#                    otherwise read from the release asset's digest on GitHub.
 #   VULKAN_HEADERS   directory with include/vulkan/vulkan.h (Khronos Vulkan-Headers); by
 #                    default tag VULKAN_HEADERS_TAG (v1.4.321) is cloned into build/downloads.
 #                    gpufx takes Vulkan frames (hwupload, -hwaccel vulkan) only when the
@@ -80,8 +82,32 @@ fi
 
 mkdir -p "$WORK" "$ROOT/build/downloads"
 echo "==> prebuilt FFmpeg: $NAME"
+# sha256 of the archive, checked on every run so a cut or damaged cached file is fetched again.
+prebuilt_sum() {
+    if [ -n "${FFBUILD_SHA256:-}" ]; then echo "$FFBUILD_SHA256"; return; fi
+    case $TAG/$NAME in
+        ffmpeg-N-128691-gcc583787bb/ffmpeg-N-128691-gcc583787bb-linux64-lgpl-shared) echo 2349212348bda0518ff7ba3d56ecb239db8ccb144dca23b6b3644f9fceb9ad78 ;;
+        ffmpeg-N-128691-gcc583787bb/ffmpeg-N-128691-gcc583787bb-win64-lgpl-shared) echo 210291dd4ceef61da5f79d5db5fc89d7beed3c8bf7a4af7d3e90822a946a5b9e ;;
+        *)  # GitHub keeps a sha256 digest for every release asset.
+            curl -fsSL --retry 3 "https://api.github.com/repos/tqk2811/FFmpegGpuFilter/releases/tags/$TAG" |
+                tr ',{}' '\n\n\n' |
+                awk -v n="\"$NAME.$EXT\"" '/"name":/ { f = index($0, n) > 0 } f && /"digest":/ { print; exit }' |
+                sed -n 's/.*"sha256:\([0-9a-f]\{64\}\)".*/\1/p' ;;
+    esac
+}
+SUM=$(prebuilt_sum)
+[ -n "$SUM" ] || { echo "no sha256 for $TAG/$NAME.$EXT; set FFBUILD_SHA256" >&2; exit 1; }
+file_sum() { sha256sum "$1" | cut -d' ' -f1; }
+if [ -f "$WORK/$NAME.$EXT" ] && [ "$(file_sum "$WORK/$NAME.$EXT")" != "$SUM" ]; then
+    echo "    cached $NAME.$EXT: sha256 mismatch, fetching again"
+    rm -f "$WORK/$NAME.$EXT"
+fi
 if [ ! -f "$WORK/$NAME.$EXT" ]; then
     curl -fL --retry 3 -o "$WORK/$NAME.$EXT.part" "$URL"
+    GOT=$(file_sum "$WORK/$NAME.$EXT.part")
+    [ "$GOT" = "$SUM" ] || {
+        rm -f "$WORK/$NAME.$EXT.part"
+        echo "$NAME.$EXT: sha256 $GOT, expected $SUM" >&2; exit 1; }
     mv "$WORK/$NAME.$EXT.part" "$WORK/$NAME.$EXT"
 fi
 rm -rf "$OUT" "${WORK:?}/$NAME"

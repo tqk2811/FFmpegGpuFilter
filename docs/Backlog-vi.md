@@ -221,7 +221,7 @@
   - `AVUTIL_LIB` chép thẳng thư viện vào bundle, không kiểm export, import và tên loại thiết bị như đường build, cũng không kiểm major version có khớp file cũ không.
   - Phép bỏ qua format trong test D3D dựa vào đúng câu log "Invalid output format … for hwframe download". FFmpeg đổi câu chữ thì bài skip thành FAIL.
   - Mỗi lần chạy, mỗi job CI kéo image FFmpeg-Builds vài GB, không có cache, tốn thêm khoảng 1–3 phút.
-- **Vị trí**: [build-avutil.sh:55](../scripts/build-avutil.sh#L55), [build-prebuilt.sh:109-111](../scripts/build-prebuilt.sh#L109-L111), [test-bundle.sh:874](../scripts/test-bundle.sh#L874), [ci.yml](../.github/workflows/ci.yml).
+- **Vị trí**: [build-avutil.sh:55](../scripts/build-avutil.sh#L55), [build-prebuilt.sh:131-133](../scripts/build-prebuilt.sh#L131-L133), [test-bundle.sh:874](../scripts/test-bundle.sh#L874), [ci.yml](../.github/workflows/ci.yml).
 - **Vì sao**: hướng gọn hơn là đăng libavutil đã vá một lần làm asset của release sao lưu (`ffmpeg-<version>`) trong repo này rồi tải về bằng `AVUTIL_LIB` kèm checksum. Như vậy CI bỏ được bước build trong docker, và không còn phụ thuộc dòng configure lẫn digest image phải giữ khớp với version.
 - **Ngày ghi**: 2026-10-19
 
@@ -229,12 +229,6 @@
 - **Vấn đề**: `avfilter-12.dll` (mingw-w64 của Ubuntu) và `gpufx.dll` (Rust `x86_64-pc-windows-gnu`) dùng `msvcrt.dll`, còn DLL build sẵn của FFmpeg-Builds dùng UCRT (`api-ms-win-crt-*`). Chạy được vì FFmpeg cấp phát/giải phóng bộ nhớ qua `avutil` và không truyền `FILE*`/`errno`/locale qua ranh giới DLL. Đây vẫn là giả định, và runner Windows có tìm được adapter phần mềm (WARP) hay không cũng chưa kiểm chứng.
 - **Vị trí**: [scripts/build-prebuilt.sh](../scripts/build-prebuilt.sh) (biến `CROSS`), job `ffmpeg-windows` trong [.github/workflows/ci.yml](../.github/workflows/ci.yml).
 - **Vì sao**: muốn khớp hẳn thì phải build bằng toolchain mingw UCRT, giống toolchain image FFmpeg-Builds. Ubuntu noble chưa có gói mingw UCRT.
-- **Ngày ghi**: 2026-10-12
-
-### Kiểm checksum bản build sẵn, định dạng version khác
-- **Vấn đề**: `build-prebuilt.sh` tải file không kiểm sha256, và dùng lại file trong cache mãi mãi (file hỏng hay bị cắt cụt cũng không phát hiện). Tên file được ghép theo mẫu `ffmpeg-<version>-<target>-<license>-shared` từ release `ffmpeg-<version>` của repo này (release có kèm `sums.txt`, script chưa dùng). Release sao lưu chỉ có bản `lgpl`; các bản `gpl`/`lgpl2`/`gpl2` và bản đặt theo tag trơn chưa được kiểm.
-- **Vị trí**: [scripts/build-prebuilt.sh](../scripts/build-prebuilt.sh) (đoạn tải, biến `NAME`).
-- **Vì sao**: ghim sha256 theo từng target/license, hoặc đọc file checksum nếu release có, để tránh build trên bản tải lỗi.
 - **Ngày ghi**: 2026-10-12
 
 ### Commit `76a729f` chưa qua review
