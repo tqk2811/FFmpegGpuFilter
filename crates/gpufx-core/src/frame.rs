@@ -319,6 +319,11 @@ impl<'a> From<ImageMut<'a>> for FrameMut<'a> {
 /// one texture per plane, in the FFmpeg plane order, each of
 /// [`PixelFormat::plane_texture_format`] and [`PixelFormat::plane_texture_size`].
 /// Inputs need `TEXTURE_BINDING` usage, outputs `STORAGE_BINDING`.
+///
+/// The textures of an input may be larger than its planes (hardware decoders align the height,
+/// 1920x1088 for 1080p): `width` and `height` stay the frame's, only the top-left region is
+/// read, and such an input always goes through the conversion pass, which loads texels by
+/// the frame's size. The textures of an output have exactly the size of its planes.
 #[derive(Debug, Clone)]
 pub struct GpuFrame {
     pub format: PixelFormat,
@@ -372,10 +377,12 @@ impl GpuFrame {
         for (p, t) in self.planes.iter().enumerate() {
             let (pw, ph) = self.format.plane_texture_size(p, w, h);
             let format = self.format.plane_texture_format(p);
-            if t.width() != pw || t.height() != ph || t.format() != format || !t.usage().contains(usage) {
+            let fits = if output { (t.width(), t.height()) == (pw, ph) } else { t.width() >= pw && t.height() >= ph };
+            if !fits || t.format() != format || !t.usage().contains(usage) {
                 return Err(Error::Frame(format!(
-                    "{what}: plane {p} of a {w}x{h} {} frame must be a {pw}x{ph} {format:?} texture with {usage:?} usage, got {}x{} {:?} with {:?}",
+                    "{what}: plane {p} of a {w}x{h} {} frame must be a {pw}x{ph}{} {format:?} texture with {usage:?} usage, got {}x{} {:?} with {:?}",
                     self.format.name(),
+                    if output { "" } else { " or larger" },
                     t.width(),
                     t.height(),
                     t.format(),

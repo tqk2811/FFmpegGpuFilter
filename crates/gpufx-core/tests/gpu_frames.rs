@@ -346,6 +346,107 @@ fn gpu_frames_are_checked() {
     assert!(err.to_string().contains("2 plane(s)"), "{err}");
 }
 
+/// [`upload`] with plane textures for a `tw` x `th` frame holding the frame at the top
+/// left, the rest set to bytes that would show: what a hardware decoder's aligned surfaces look like.
+fn upload_padded(ctx: &GpuContext, format: PixelFormat, planes: &[Vec<u8>], (w, h): (u32, u32), (tw, th): (u32, u32)) -> GpuFrame {
+    let color = ColorInfo { matrix: Matrix::Bt709, range: Range::Limited, ..Default::default() };
+    let textures = planes
+        .iter()
+        .enumerate()
+        .map(|(p, data)| {
+            let (pw, ph) = format.plane_texture_size(p, tw, th);
+            let (fw, fh) = format.plane_texture_size(p, w, h);
+            let tf = format.plane_texture_format(p);
+            let texel = tf.block_copy_size(None).unwrap();
+            let row = pw * texel;
+            let frame_row = format.plane_size(p, w, h).0;
+            let mut full = vec![0xffu8; (row * ph) as usize];
+            for y in 0..fh {
+                let (from, to) = ((y * frame_row) as usize, (y * row) as usize);
+                full[to..to + (fw * texel) as usize].copy_from_slice(&data[from..from + (fw * texel) as usize]);
+            }
+            let tex = ctx.device().create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d { width: pw, height: ph, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: tf,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            ctx.queue().write_texture(
+                tex.as_image_copy(),
+                &full,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(ph) },
+                tex.size(),
+            );
+            tex
+        })
+        .collect();
+    GpuFrame { format, width: w, height: h, planes: textures, color }
+}
+
+#[test]
+fn inputs_in_larger_textures_read_only_the_frame() {
+    use PixelFormat::*;
+    let Some(ctx) = own_gpu() else { return };
+    let (w, h) = (37, 22);
+    let info = FrameInfo::new(0.5, 3);
+    for format in [Nv12, P010, Rgba, Gray, Yuv420p] {
+        if !supported(&ctx, format) {
+            continue;
+        }
+        for pad in [(48, 22), (37, 32), (48, 32)] {
+            let data = pattern(format, w, h, 2);
+            for (direct, text, info) in [
+                (false, "[0]grayscale.zip[out]", None),
+                (false, "[0]grayscale.zip[out]", Some(&info)),
+                (true, "[0]grayscale.zip[out]", None),
+                (true, "[0]grayscale.zip[out]", Some(&info)),
+                (true, "[0]gaussian-blur.zip[out]", Some(&info)),
+            ] {
+                let mut exact = graph(&ctx, text);
+                let mut padded = graph(&ctx, text);
+                if direct {
+                    exact.allow_direct_gpu();
+                    padded.allow_direct_gpu();
+                }
+                let out = |c: &GpuContext| target(c, Rgba, w, h);
+                let want = gpu_run(&ctx, &mut exact, &[upload(&ctx, format, &data, w, h)], &[out(&ctx)], info);
+                let got = gpu_run(&ctx, &mut padded, &[upload_padded(&ctx, format, &data, (w, h), pad)], &[out(&ctx)], info);
+                assert_eq!(got, want, "{}, {pad:?}, direct {direct}, `{text}`", format.name());
+                // The same graph then goes back to frames of the exact size.
+                let again = gpu_run(&ctx, &mut padded, &[upload(&ctx, format, &data, w, h)], &[out(&ctx)], info);
+                assert_eq!(again, want, "{}, {pad:?}: back to the exact size", format.name());
+            }
+        }
+    }
+}
+
+#[test]
+fn larger_textures_are_for_inputs_only() {
+    use PixelFormat::*;
+    let Some(ctx) = gpu() else { return };
+    let (w, h) = (16, 16);
+    let info = FrameInfo::new(0.0, 0);
+    let data = pattern(Nv12, w, h, 0);
+    // An input smaller than the frame stays an error.
+    let mut small = upload(&ctx, Nv12, &pattern(Nv12, 8, 8, 0), 8, 8);
+    small.width = w;
+    small.height = h;
+    let mut g = graph(&ctx, "[0]grayscale.zip[out]");
+    let mut enc = ctx.device().create_command_encoder(&Default::default());
+    let err = g.encode_gpu(&[small], &[target(&ctx, Rgba, w, h)], Some(&info), &mut enc).unwrap_err().to_string();
+    assert!(err.contains("or larger"), "{err}");
+    // So does an output larger than the frame.
+    let mut big = target(&ctx, Rgba, w + 8, h);
+    big.width = w;
+    let input = upload_padded(&ctx, Nv12, &data, (w, h), (w, h + 8));
+    let err = g.encode_gpu(&[input], &[big], Some(&info), &mut enc).unwrap_err().to_string();
+    assert!(err.contains("must be a 16x16 ") && !err.contains("or larger"), "{err}");
+}
+
 /// The adapter of the test backend, and a device on it with `features` and `limits`.
 fn app_device(
     features: impl Fn(&wgpu::Adapter) -> wgpu::Features,
@@ -359,11 +460,12 @@ fn app_device(
         gpufx_core::Backend::Metal => wgpu::Backends::METAL,
     };
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() });
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .ok()?;
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))
+        .ok()?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         required_features: features(&adapter),
         required_limits: limits(&adapter),

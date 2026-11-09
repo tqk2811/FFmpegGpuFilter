@@ -12,10 +12,11 @@
 //! whole resource once per plane wrapper).
 //!
 //! What cannot be used in place costs one GPU copy into a texture of gpufx (kept for the
-//! next frame): an input that is a slice of a texture array (decoders), is larger than
-//! the frame or cannot be read by shaders, and an output without
+//! next frame): an input that is a slice of a texture array (decoders) or cannot be read
+//! by shaders, an output larger than the frame, and an output without
 //! `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS` (written into a texture of gpufx, then
-//! copied into the planes).
+//! copied into the planes). An input larger than the frame (D3D12VA: 1920x1088 for 1080p)
+//! is read in place, its top-left `width` x `height` region only.
 //!
 //! **D3D11** (`AV_PIX_FMT_D3D11`): wgpu has no D3D11 backend. Textures created with
 //! `D3D11_RESOURCE_MISC_SHARED_NTHANDLE` (the output frames gpufx makes) are opened in
@@ -55,6 +56,8 @@ use crate::Error;
 #[derive(Debug, Clone)]
 pub struct D3d12Frame {
     pub format: PixelFormat,
+    /// Size of the frame; the resource of an input may be larger (the frame is its
+    /// top-left region).
     pub width: u32,
     pub height: u32,
     /// `ID3D12Resource *`: NV12 or P010 (the planes are its plane slices), or RGBA8 /
@@ -370,11 +373,11 @@ unsafe fn check(
             size.0, size.1, size.2
         )));
     }
-    let exact = size == (width, height, 1);
-    let direct = exact
+    let direct = size.2 == 1
         && if output {
-            d.Flags.contains(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
+            (size.0, size.1) == (width, height) && d.Flags.contains(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
         } else {
+            // A larger input is read in place: `GpuFrame` readers stop at the frame's size.
             !d.Flags.contains(D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)
         };
     Ok(Res { format, width, height, resource, slice, color, size, direct })
@@ -864,5 +867,267 @@ impl D3d11 {
         }
         self.opened.push((key, Com(tex.clone()), Com(r.clone())));
         Ok(r)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ColorInfo, Effect, Package};
+    use windows::Win32::Graphics::Direct3D12::{
+        D3D12_FENCE_FLAG_NONE, D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_DESC,
+        D3D12_RESOURCE_FLAGS, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COMMON, D3D12_TEXTURE_LAYOUT_UNKNOWN,
+    };
+
+    /// A context on a D3D12 device the test owns, as an application makes it.
+    fn app_context() -> Option<Arc<GpuContext>> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::DX12,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            eprintln!("skipping: no D3D12 adapter");
+            return None;
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: GpuContext::wanted_features(&adapter),
+            required_limits: GpuContext::wanted_limits(&adapter),
+            ..Default::default()
+        }))
+        .ok()?;
+        Some(GpuContext::from_device(&adapter, device, queue, None).unwrap())
+    }
+
+    /// `None` when the device cannot make this texture (NV12 on some software adapters).
+    fn resource(dev: &ID3D12Device, format: DXGI_FORMAT, size: (u32, u32, u16), flags: D3D12_RESOURCE_FLAGS) -> Option<ID3D12Resource> {
+        let heap = D3D12_HEAP_PROPERTIES { Type: D3D12_HEAP_TYPE_DEFAULT, ..Default::default() };
+        let desc = D3D12_RESOURCE_DESC {
+            Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            Width: size.0 as u64,
+            Height: size.1,
+            DepthOrArraySize: size.2,
+            MipLevels: 1,
+            Format: format,
+            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            Layout: D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            Flags: flags,
+            ..Default::default()
+        };
+        let mut r: Option<ID3D12Resource> = None;
+        unsafe { dev.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, None, &mut r) }.ok()?;
+        r
+    }
+
+    fn checked(dev: &ID3D12Device, r: &ID3D12Resource, format: PixelFormat, size: (u32, u32), output: bool) -> Result<bool, Error> {
+        unsafe { check((format, size.0, size.1, r.clone(), 0, ColorInfo::default()), output, "t", dev) }.map(|r| r.direct)
+    }
+
+    #[test]
+    fn padded_inputs_are_read_in_place_and_outputs_stay_exact() {
+        let Some(ctx) = app_context() else { return };
+        let dev = raw_device(&ctx).unwrap();
+        let (nv12, rgba) = (PixelFormat::Nv12, PixelFormat::Rgba);
+        let none = D3D12_RESOURCE_FLAG_NONE;
+        let Some(padded) = resource(&dev, DXGI_FORMAT_NV12, (64, 40, 1), none) else { return };
+        assert!(checked(&dev, &padded, nv12, (64, 32), false).unwrap(), "taller than the frame: in place");
+        assert!(checked(&dev, &padded, nv12, (48, 32), false).unwrap(), "wider and taller: in place");
+        assert!(checked(&dev, &padded, nv12, (64, 40), false).unwrap(), "exact: in place");
+        assert!(checked(&dev, &padded, nv12, (64, 48), false).is_err(), "a frame taller than the texture");
+        assert!(checked(&dev, &padded, nv12, (72, 32), false).is_err(), "a frame wider than the texture");
+        let array = resource(&dev, DXGI_FORMAT_NV12, (64, 40, 2), none).unwrap();
+        assert!(!checked(&dev, &array, nv12, (64, 32), false).unwrap(), "texture arrays keep the copy");
+        let uav = resource(&dev, DXGI_FORMAT_R8G8B8A8_UNORM, (64, 40, 1), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS).unwrap();
+        assert!(checked(&dev, &uav, rgba, (64, 40), true).unwrap(), "exact output: in place");
+        assert!(!checked(&dev, &uav, rgba, (64, 32), true).unwrap(), "larger output: through a copy");
+        let denied = resource(
+            &dev,
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            (64, 40, 1),
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE,
+        );
+        if let Some(denied) = denied {
+            assert!(!checked(&dev, &denied, rgba, (64, 32), false).unwrap(), "denied to shaders: through a copy");
+        }
+    }
+
+    /// Records one state change of a whole resource and waits for it.
+    fn set_state(
+        ctx: &GpuContext,
+        r: &ID3D12Resource,
+        whole: wgpu::TextureFormat,
+        size: (u32, u32),
+        from: wgpu::TextureUses,
+        to: wgpu::TextureUses,
+    ) {
+        let extent = wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 };
+        let t = unsafe { hal::dx12::Device::texture_from_raw(r.clone(), whole, wgpu::TextureDimension::D2, extent, 1, 1) };
+        let mut enc = ctx.device.create_command_encoder(&Default::default());
+        unsafe {
+            enc.as_hal_mut::<Dx12, _, _>(|enc| {
+                enc.unwrap().transition_textures(std::iter::once(hal::TextureBarrier {
+                    texture: &t,
+                    range: wgpu::ImageSubresourceRange::default(),
+                    usage: hal::StateTransition { from, to },
+                }));
+            });
+        }
+        ctx.queue.submit([enc.finish()]);
+        ctx.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    /// A wrapper of plane `plane` in state `state`, with `usage`.
+    fn wrap(
+        ctx: &GpuContext,
+        r: &ID3D12Resource,
+        format: PixelFormat,
+        plane: usize,
+        size: (u32, u32),
+        usage: wgpu::TextureUsages,
+        state: wgpu::TextureUses,
+    ) -> wgpu::Texture {
+        let (w, h) = format.plane_texture_size(plane, size.0, size.1);
+        let extent = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+        let tf = format.plane_texture_format(plane);
+        unsafe {
+            let mut t = hal::dx12::Device::texture_from_raw(r.clone(), tf, wgpu::TextureDimension::D2, extent, 1, 1);
+            if format.plane_count() > 1 {
+                t = t.with_plane_slice(plane as u32);
+            }
+            ctx.device.create_texture_from_hal::<Dx12>(
+                t,
+                &wgpu::TextureDescriptor {
+                    label: None,
+                    size: extent,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: tf,
+                    usage,
+                    view_formats: &[],
+                },
+                state,
+            )
+        }
+    }
+
+    fn whole_format(format: PixelFormat) -> wgpu::TextureFormat {
+        match format {
+            PixelFormat::Nv12 => wgpu::TextureFormat::NV12,
+            PixelFormat::P010 => wgpu::TextureFormat::P010,
+            f => f.plane_texture_format(0),
+        }
+    }
+
+    /// Fills the resource: the `frame` region with a pattern, everything else with 0xff.
+    fn fill(ctx: &GpuContext, r: &ID3D12Resource, format: PixelFormat, size: (u32, u32), frame: (u32, u32)) {
+        use wgpu::TextureUses as S;
+        set_state(ctx, r, whole_format(format), size, S::UNINITIALIZED, S::COPY_DST);
+        for p in 0..format.plane_count() {
+            let t = wrap(ctx, r, format, p, size, wgpu::TextureUsages::COPY_DST, S::COPY_DST);
+            let (pw, ph) = format.plane_texture_size(p, size.0, size.1);
+            let (fw, fh) = format.plane_texture_size(p, frame.0, frame.1);
+            let texel = t.format().block_copy_size(None).unwrap();
+            let row = pw * texel;
+            let mut data = vec![0xffu8; (row * ph) as usize];
+            for y in 0..fh {
+                for x in 0..fw * texel {
+                    data[(y * row + x) as usize] = ((x * 3 + y * 11 + p as u32 * 40) % 200 + 16) as u8;
+                }
+            }
+            ctx.queue.write_texture(
+                t.as_image_copy(),
+                &data,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(ph) },
+                t.size(),
+            );
+        }
+        ctx.queue.submit([]);
+        ctx.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        set_state(ctx, r, whole_format(format), size, S::COPY_DST, S::UNINITIALIZED);
+    }
+
+    /// The bytes of an RGBA8 resource.
+    fn read_rgba(ctx: &GpuContext, r: &ID3D12Resource, size: (u32, u32)) -> Vec<u8> {
+        use wgpu::TextureUses as S;
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        set_state(ctx, r, format, size, S::UNINITIALIZED, S::COPY_SRC);
+        let t = wrap(ctx, r, PixelFormat::Rgba, 0, size, wgpu::TextureUsages::COPY_SRC, S::COPY_SRC);
+        let row = (size.0 * 4).next_multiple_of(256);
+        let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (row * size.1) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = ctx.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            t.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None },
+            },
+            t.size(),
+        );
+        ctx.queue.submit([enc.finish()]);
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        ctx.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let mapped = buffer.slice(..).get_mapped_range().unwrap();
+        let out = mapped.chunks(row as usize).flat_map(|l| l[..(size.0 * 4) as usize].to_vec()).collect();
+        drop(mapped);
+        set_state(ctx, r, format, size, S::COPY_SRC, S::UNINITIALIZED);
+        out
+    }
+
+    /// `format` frame of `frame` size in a resource of `size`, through a bypassed graph (the
+    /// conversion only, so chroma shows) and through an effect, into RGBA.
+    fn run(ctx: &Arc<GpuContext>, format: PixelFormat, dxgi: DXGI_FORMAT, size: (u32, u32), frame: (u32, u32)) -> Option<[Vec<u8>; 2]> {
+        let dev = raw_device(ctx).unwrap();
+        let input = resource(&dev, dxgi, (size.0, size.1, 1), D3D12_RESOURCE_FLAG_NONE)?;
+        fill(ctx, &input, format, size, frame);
+        let out = resource(&dev, DXGI_FORMAT_R8G8B8A8_UNORM, (frame.0, frame.1, 1), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)?;
+        let fence: ID3D12Fence = unsafe { dev.CreateFence(0, D3D12_FENCE_FLAG_NONE) }.unwrap();
+        let package = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx/ffmpeg/grayscale");
+        let mut graph = EffectGraph::parse("[0]grayscale.zip[out]", |_| {
+            Ok(("grayscale".to_string(), Effect::new(ctx.clone(), Package::open(&package)?)?))
+        })
+        .unwrap();
+        let color = ColorInfo::default();
+        let frame_of = |format, width, height, r: &ID3D12Resource| D3d12Frame {
+            format,
+            width,
+            height,
+            resource: r.as_raw(),
+            subresource: 0,
+            fence: fence.as_raw(),
+            fence_value: 0,
+            color,
+        };
+        let mut ins = [frame_of(format, frame.0, frame.1, &input)];
+        let mut outs = [frame_of(PixelFormat::Rgba, frame.0, frame.1, &out)];
+        let mut results: [Vec<u8>; 2] = Default::default();
+        for (i, info) in [None, Some(FrameInfo::new(0.0, 0))].iter().enumerate() {
+            unsafe { graph.process_d3d12(&mut ins, &mut outs, info.as_ref()) }.unwrap();
+            ctx.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            results[i] = read_rgba(ctx, &out, frame);
+            outs[0].fence_value = ins[0].fence_value;
+        }
+        Some(results)
+    }
+
+    #[test]
+    fn padded_d3d12_frames_read_only_the_frame() {
+        let Some(ctx) = app_context() else { return };
+        for (format, dxgi) in [(PixelFormat::Nv12, DXGI_FORMAT_NV12), (PixelFormat::P010, DXGI_FORMAT_P010)] {
+            if !ctx.device.features().contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM) && format == PixelFormat::P010 {
+                continue;
+            }
+            let Some(padded) = run(&ctx, format, dxgi, (64, 40), (64, 32)) else {
+                eprintln!("skipping {}: no such texture on this device", format.name());
+                continue;
+            };
+            let exact = run(&ctx, format, dxgi, (64, 32), (64, 32)).unwrap();
+            assert_eq!(padded[0], exact[0], "{}: bypassed, conversion only", format.name());
+            assert_eq!(padded[1], exact[1], "{}: through an effect", format.name());
+        }
     }
 }

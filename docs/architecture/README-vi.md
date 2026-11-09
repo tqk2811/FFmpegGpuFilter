@@ -854,7 +854,9 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   chờ trên CPU lần submit trước (một event đang chạy).
 - **Một lần copy trên GPU khi không dùng tại chỗ được**, vào texture libgpufx giữ theo pad và plane (VRAM: một
   frame cho mỗi pad như vậy): input là một slice của texture array (`AV_D3D12VA_FRAME_FLAG_TEXTURE_ARRAY`,
-  decoder), lớn hơn frame hoặc cấm shader đọc, và output không có `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS`.
+  decoder) hoặc cấm shader đọc, output lớn hơn frame, và output không có `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS`.
+  Input một texture lớn hơn frame được đọc tại chỗ: các pass chuyển đổi dừng ở kích thước frame, và input đó không bao
+  giờ được bind thẳng cho effect.
   Frames context output do gpufx tạo xin unordered access trước, không được thì dùng frame ghi bằng copy
   (có thông báo verbose); mỗi frames context thử được kiểm bằng một lần `av_hwframe_get_buffer`, vì device có thể
   nhận context nhưng không tạo được texture.

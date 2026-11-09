@@ -865,11 +865,18 @@ fn prepare(
     // gray frames read in their layout's planes: their unorm planes hold the codes / 255.
     let in_place = gpu && io.direct_gpu && !deep;
     if in_place {
+        // Effects see the size of the textures they read (`textureDimensions`, UVs of 0..1):
+        // planes larger than the frame go through the conversion pass, bound by the frame's size.
+        let padded = |i: usize, f: &Desc| {
+            let planes = io.frame_ins.get(i).map_or(&[][..], Vec::as_slice);
+            planes.iter().enumerate().any(|(p, t)| (t.width(), t.height()) != f.format.plane_texture_size(p, f.width, f.height))
+        };
         for (i, k) in keys.iter_mut().enumerate() {
-            k.direct = match k.layout {
-                PixelLayout::Rgba => k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i] && !converted[i],
-                _ => matches!(k.format, PixelFormat::Nv12 | PixelFormat::Gray) && !converted[i],
-            };
+            k.direct = !padded(i, &inputs[i])
+                && match k.layout {
+                    PixelLayout::Rgba => k.format == PixelFormat::Rgba && !inputs[i].premultiplied && !pad_mips[i] && !converted[i],
+                    _ => matches!(k.format, PixelFormat::Nv12 | PixelFormat::Gray) && !converted[i],
+                };
         }
     }
     let planar_out = planar_outputs(effects, topo, outs);

@@ -44,7 +44,7 @@ như vậy) hoặc **Chưa test** (có code nhưng chưa chạy trên phần c�
   fence của D3D11.4, `d3d12.dll` được giữ tới hết tiến trình; dùng Agility SDK hay runtime D3D12 khác thì bị từ chối.
 - **Hạn chế:** D3D12 chờ CPU tới khi lần submit trước xong ở mỗi frame (mất một frame chồng việc), vì upload D3D12 của
   FFmpeg không chờ fence.
-- **Hạn chế:** texture array, frame lớn hơn kích thước link, output không có UAV, và input D3D11 không share được
+- **Hạn chế:** input lớn hơn kích thước link (decoder căn 1080p lên 1088 dòng) được đọc tại chỗ, chỉ vùng frame ở góc trên trái. Texture array, output lớn hơn kích thước link, output không có UAV, và input D3D11 không share được
   (`hwupload`, decoder) phải chép thêm trên GPU.
 - **Đã test (RTX 4060 Laptop, Intel UHD):** decode `-hwaccel d3d12va` -> gpufx -> `h264_d3d12va`/`hevc_d3d12va` (nv12,
   p010 main10) không cần `hwdownload`; encoder nhận nguyên frame của gpufx (có UAV). Trên NVIDIA thêm `-bf 0`:

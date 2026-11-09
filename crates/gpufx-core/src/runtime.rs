@@ -177,7 +177,8 @@ fn check_app_device(adapter: wgpu::Features, device: wgpu::Features, limits: &wg
         return Err(Error::Gpu(format!("the device lacks features gpufx needs and the adapter has: {missing:?}")));
     }
     let mut low = Vec::new();
-    wgpu::Limits::default().check_limits_with_fail_fn(limits, false, |name, need, has| low.push(format!("{name} (needs {need}, has {has})")));
+    wgpu::Limits::default()
+        .check_limits_with_fail_fn(limits, false, |name, need, has| low.push(format!("{name} (needs {need}, has {has})")));
     if !low.is_empty() {
         return Err(Error::Gpu(format!("the device's limits are below the WebGPU defaults gpufx needs: {}", low.join(", "))));
     }

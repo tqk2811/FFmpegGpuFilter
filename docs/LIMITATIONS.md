@@ -45,8 +45,9 @@ now) or **Untested** (there is code, but it has not run on that hardware or envi
   or another D3D12 runtime is refused.
 - **Limitation:** D3D12 waits on the CPU for the previous submit at each frame (one frame of overlap lost), because
   FFmpeg's D3D12 upload does not wait for its fence.
-- **Limitation:** texture arrays, frames larger than the link size, outputs without UAV and D3D11 inputs that
-  cannot be shared (`hwupload`, decoders) cost an extra GPU copy.
+- **Limitation:** texture arrays, outputs larger than the link size, outputs without UAV and D3D11 inputs that
+  cannot be shared (`hwupload`, decoders) cost an extra GPU copy. Inputs larger than the link size (decoders align
+  1080p to 1088 rows) are read in place, the top-left frame region only.
 - **Tested (RTX 4060 Laptop, Intel UHD):** `-hwaccel d3d12va` decoding -> gpufx -> `h264_d3d12va`/`hevc_d3d12va` (nv12,
   p010 main10) with no `hwdownload`; the encoders take gpufx frames (with UAV) as they are. Add `-bf 0` on NVIDIA:
   its D3D12 encoder fails on B-frames (driver 617.42, also without gpufx). `av1_d3d12va` is not supported by the

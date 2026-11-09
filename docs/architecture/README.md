@@ -862,8 +862,9 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   submission (one event in flight).
 - **One GPU copy when in place is impossible**, into a texture libgpufx keeps per pad and plane (VRAM: one
   frame per such pad): an input that is a slice of a texture array (`AV_D3D12VA_FRAME_FLAG_TEXTURE_ARRAY`,
-  decoders) or larger than the frame or denied to shaders, and an output without
-  `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS`. The output frames contexts gpufx makes ask for unordered
+  decoders) or denied to shaders, an output larger than the frame, and an output without
+  `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS`. A single-texture input larger than the frame is read in place:
+  the conversion passes stop at the frame's size, and such an input is never bound to effects directly. The output frames contexts gpufx makes ask for unordered
   access first and fall back to frames written by a copy (verbose message); each candidate context is probed
   with one `av_hwframe_get_buffer`, since a device may accept the context but fail to create its textures.
 - **D3D11.** wgpu has no D3D11 backend: the effect runs on wgpu's D3D12 device of the D3D11 device's adapter
