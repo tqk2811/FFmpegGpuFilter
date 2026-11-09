@@ -307,7 +307,8 @@ impl GpuContext {
     /// call `queue.submit` on this queue: the application must serialize all its submits against
     /// `process_d3d12`, and create only one `GpuContext` per queue (each context has its own submit
     /// lock, so two contexts do not exclude each other). A violation can produce wrong frames with
-    /// no error.
+    /// no error. [`crate::EffectGraph::process_d3d12_with_submit_lock`] needs that exclusion only
+    /// around its submission.
     ///
     /// `process_d3d12` waits on the device (`device.poll`): it blocks the calling thread, and may
     /// run the application's `map_async` callbacks there. A failed submission poisons only this

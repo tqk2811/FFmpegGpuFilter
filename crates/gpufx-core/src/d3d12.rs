@@ -408,6 +408,26 @@ impl EffectGraph {
         process_d3d12(self, inputs, outs, info)
     }
 
+    /// [`EffectGraph::process_d3d12`] for an application that serializes its submits against this
+    /// call (see [`crate::GpuContext::from_device`]) and must not make them wait for pipeline
+    /// builds or the wait for the previous frame: `lock` is called once, after all of that, and
+    /// the value it returns is held from the first fence staged on the queue until the last one
+    /// is taken back. Not called when the call fails earlier. A graph whose effects compute an
+    /// output size in a shader also submits when its input sizes are new: run
+    /// [`EffectGraph::output_size`] for them under the same lock first.
+    ///
+    /// # Safety
+    /// As for `process_d3d12` in this module.
+    pub unsafe fn process_d3d12_with_submit_lock<G>(
+        &mut self,
+        inputs: &mut [D3d12Frame],
+        outs: &mut [D3d12Frame],
+        info: Option<&FrameInfo>,
+        lock: impl FnOnce() -> G,
+    ) -> Result<(), Error> {
+        process_d3d12_locked(self, inputs, outs, info, lock)
+    }
+
     /// Runs the graph on D3D11 frames (see `process_d3d11` in this module).
     ///
     /// # Safety
@@ -479,6 +499,18 @@ pub(crate) unsafe fn process_d3d12<S: GpuStage + ?Sized>(
     outs: &mut [D3d12Frame],
     info: Option<&FrameInfo>,
 ) -> Result<(), Error> {
+    process_d3d12_locked(stage, inputs, outs, info, || ())
+}
+
+/// `process_d3d12`, holding what `lock` returns only around the submission (see
+/// [`EffectGraph::process_d3d12_with_submit_lock`]).
+unsafe fn process_d3d12_locked<S: GpuStage + ?Sized, G>(
+    stage: &mut S,
+    inputs: &mut [D3d12Frame],
+    outs: &mut [D3d12Frame],
+    info: Option<&FrameInfo>,
+    lock: impl FnOnce() -> G,
+) -> Result<(), Error> {
     let ctx = stage.context().clone();
     let shared = ctx.d3d12.as_ref().ok_or_else(|| Error::Gpu("D3D12 frames need a graph opened on a shared D3D12 device".into()))?;
     if shared.to_d3d11 {
@@ -497,7 +529,7 @@ pub(crate) unsafe fn process_d3d12<S: GpuStage + ?Sized>(
     d3d12_res(false, inputs, dev, &mut ins, &mut fences)?;
     d3d12_res(true, outs, dev, &mut os, &mut fences)?;
     let sync: Vec<(ID3D12Fence, u64, u64)> = fences.into_iter().map(|(f, v)| (f, v, v + 1)).collect();
-    let index = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync)?;
+    let index = run_dx12(stage, &ctx, shared, &ins, &os, info, &sync, lock)?;
     stage.interop().dx.last = Some(index);
     store_fences(inputs.iter_mut().chain(outs.iter_mut()), &sync);
     Ok(())
@@ -593,7 +625,7 @@ unsafe fn run_dx12_d3d11<S: GpuStage + ?Sized>(
     d11.context.0.Flush();
     d11.value = v;
     sync.push((d11.fence12.0.clone(), v, v + 1));
-    run_dx12(stage, ctx, shared, ins, outs, info, &sync)?;
+    run_dx12(stage, ctx, shared, ins, outs, info, &sync, || ())?;
     d11.value = v + 1;
     // Wait on the CPU (null event): a wait queued on the immediate context is not seen
     // by readers outside it, e.g. NVENC encoded stale pool textures (h264_nvenc on an RTX 4060).
@@ -683,8 +715,9 @@ pub(crate) unsafe fn process_d3d12_to_d3d11<S: GpuStage + ?Sized>(
 
 /// One submission: barriers to the states needed, copies into gpufx textures, the
 /// graph, copies out, barriers back to COMMON; waits and signals `sync`
-/// (fence, wait value, signal value).
-unsafe fn run_dx12<S: GpuStage + ?Sized>(
+/// (fence, wait value, signal value). What `lock` returns is held while fences are staged.
+#[allow(clippy::too_many_arguments)]
+unsafe fn run_dx12<S: GpuStage + ?Sized, G>(
     stage: &mut S,
     ctx: &Arc<GpuContext>,
     shared: &Shared,
@@ -692,6 +725,7 @@ unsafe fn run_dx12<S: GpuStage + ?Sized>(
     outs: &[Res],
     info: Option<&FrameInfo>,
     sync: &[(ID3D12Fence, u64, u64)],
+    lock: impl FnOnce() -> G,
 ) -> Result<wgpu::SubmissionIndex, Error> {
     if *shared.submit.lock().unwrap_or_else(|p| p.into_inner()) {
         return Err(Error::Gpu("an earlier D3D12 submission failed; this context no longer uses the device".into()));
@@ -813,6 +847,7 @@ unsafe fn run_dx12<S: GpuStage + ?Sized>(
     transition(&mut post, true);
     let buffers = [pre.finish(), enc.finish(), post.finish()];
 
+    let gate = lock();
     let mut poisoned = shared.submit.lock().unwrap_or_else(|p| p.into_inner());
     {
         let queue = ctx.queue.as_hal::<Dx12>().ok_or_else(|| gpu_err("not a D3D12 queue"))?;
@@ -833,6 +868,7 @@ unsafe fn run_dx12<S: GpuStage + ?Sized>(
             left |= queue.remove_signal_fence(f);
         }
     }
+    drop(gate);
     let error = pollster::block_on(scope.pop());
     if left || error.is_some() {
         *poisoned = true;
@@ -1132,6 +1168,55 @@ mod tests {
             outs[0].fence_value = ins[0].fence_value;
         }
         Some(results)
+    }
+
+    #[test]
+    fn the_submit_lock_is_taken_after_the_pipelines_are_built_and_held_across_the_submit() {
+        let Some(ctx) = app_context() else { return };
+        let dev = raw_device(&ctx).unwrap();
+        let Some(input) = resource(&dev, DXGI_FORMAT_NV12, (64, 32, 1), D3D12_RESOURCE_FLAG_NONE) else {
+            eprintln!("skipping: no NV12 texture on this device");
+            return;
+        };
+        let out = resource(&dev, DXGI_FORMAT_R8G8B8A8_UNORM, (64, 32, 1), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS).unwrap();
+        let fence: ID3D12Fence = unsafe { dev.CreateFence(0, D3D12_FENCE_FLAG_NONE) }.unwrap();
+        let package = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx/ffmpeg/grayscale");
+        let mut graph = EffectGraph::parse("[0]grayscale.zip[out]", |_| {
+            Ok(("grayscale".to_string(), Effect::new(ctx.clone(), Package::open(&package)?)?))
+        })
+        .unwrap();
+        let frame_of = |format, r: &ID3D12Resource| D3d12Frame {
+            format,
+            width: 64,
+            height: 32,
+            resource: r.as_raw(),
+            subresource: 0,
+            fence: fence.as_raw(),
+            fence_value: 0,
+            color: ColorInfo::default(),
+        };
+        let mut ins = [frame_of(PixelFormat::Nv12, &input)];
+        let mut outs = [frame_of(PixelFormat::Rgba, &out)];
+
+        struct Guard<'a>(&'a std::cell::Cell<u32>);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 100);
+            }
+        }
+        let taken = std::cell::Cell::new(0);
+        assert!(!ctx.conv.gpu_frame_pipelines_built(), "a new context has not built them");
+        let info = FrameInfo::new(0.0, 0);
+        unsafe {
+            graph.process_d3d12_with_submit_lock(&mut ins, &mut outs, Some(&info), || {
+                assert!(ctx.conv.gpu_frame_pipelines_built(), "the pipelines must be built before the lock is taken");
+                taken.set(taken.get() + 1);
+                Guard(&taken)
+            })
+        }
+        .unwrap();
+        assert_eq!(taken.get(), 101, "the lock is taken once and dropped by the time the call returns");
+        assert_eq!((ins[0].fence_value, outs[0].fence_value), (1, 1), "the work was submitted");
     }
 
     #[test]

@@ -357,6 +357,12 @@ impl Converter {
         }
     }
 
+    /// Whether the conversion pipelines of GPU frames exist. For tests.
+    #[cfg(all(test, windows))]
+    pub(crate) fn gpu_frame_pipelines_built(&self) -> bool {
+        self.to_rgba_gpu.get().is_some()
+    }
+
     fn dummy(&self, gpu: bool) -> &wgpu::TextureView {
         if !gpu {
             return &self.dummy;
