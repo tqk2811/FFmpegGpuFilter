@@ -489,3 +489,33 @@ Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423
 - **Vị trí**: [frames.rs:72](../crates/gpufx-core/src/nn/frames.rs#L72)
 - **Vì sao**: nên để model.json khai bảng auto (vd ngưỡng số pixel → giá trị), runtime chỉ đọc bảng và không cần quy ước tên param.
 - **Ngày ghi**: 2026-11-02
+
+### [Vừa] Fence của queue dùng chung cần một submit lock mà ứng dụng cũng dùng được
+- **Vấn đề**: `process_d3d12` đặt fence lên queue và để lần submit kế tiếp của bất kỳ ai tiêu thụ; ứng dụng phải tự khoá mọi `queue.submit` của nó với `process_d3d12`, mà không có khoá nào để chia sẻ (mỗi `GpuContext` có khoá riêng).
+- **Vị trí**: [d3d12.rs:816](../crates/gpufx-core/src/d3d12.rs#L816) (đoạn đặt fence và submit, đến dòng 824)
+- **Vì sao**: một editor có thread preview không thể làm đúng hợp đồng của `from_device` nếu không có khoá chung; vi phạm gây khung sai mà không báo lỗi. Nên đưa ra một khoá (hoặc hàm submit) mà ứng dụng dùng chung với context.
+- **Ngày ghi**: 2026-11-09
+
+### [Thấp] `GpuFrame::check` nhận mọi input lớn hơn khung trên mọi backend
+- **Vấn đề**: kiểm kích thước chấp nhận texture lớn hơn khung, nên truyền sai width/height giờ âm thầm cắt thay vì báo lỗi.
+- **Vị trí**: [frame.rs:380](../crates/gpufx-core/src/frame.rs#L380)
+- **Vì sao**: nên giữ API công khai chặt và chỉ nới ở lớp bọc D3D12, nơi việc đọc input lớn hơn thật sự cần.
+- **Ngày ghi**: 2026-11-09
+
+### [Thấp] `GraphState.scratch` không bao giờ đuổi mục cũ
+- **Vấn đề**: graph sống lâu xử lý clip nhiều kích thước giữ texture scratch cho từng kích thước.
+- **Vị trí**: [d3d12.rs:301](../crates/gpufx-core/src/d3d12.rs#L301) (đến dòng 323)
+- **Vì sao**: bộ nhớ GPU tăng theo số kích thước đã gặp; nên giới hạn số mục (vd LRU như `OPENED_MAX` của texture mở).
+- **Ngày ghi**: 2026-11-09
+
+### [Thấp] Test `d3d12_dxil_cache_gives_the_pixels_of_the_normal_path` lỗi FXC trong draw.wgsl
+- **Vấn đề**: test lỗi với một lỗi FXC ở draw.wgsl; đã lỗi từ trước ở 9308529.
+- **Vị trí**: test `d3d12_dxil_cache_gives_the_pixels_of_the_normal_path` trong `crates/gpufx-core`
+- **Vì sao**: đường DXIL cache chưa có test xanh nên không bắt được hồi quy.
+- **Ngày ghi**: 2026-11-09
+
+### [Thấp] Input có padding giả định khung nằm ở góc trên trái
+- **Vấn đề**: `process_d3d12` đọc input lớn hơn khung từ gốc (0,0); offset crop khác 0 chưa được hỗ trợ.
+- **Vị trí**: [d3d12.rs:376](../crates/gpufx-core/src/d3d12.rs#L376) (`check`, nhánh `direct` của input)
+- **Vì sao**: decoder có crop lệch (vd 1080 trong 1088 với offset) sẽ đọc sai vùng; cần nhận offset hoặc từ chối rõ.
+- **Ngày ghi**: 2026-11-09

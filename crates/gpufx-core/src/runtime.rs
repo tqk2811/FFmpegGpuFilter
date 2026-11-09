@@ -302,8 +302,16 @@ impl GpuContext {
     /// `PASSTHROUGH_SHADERS` on D3D12 turns on the DXIL shader cache of `cache_dir`.
     ///
     /// On D3D12 the context also takes [`crate::EffectGraph::process_d3d12`] frames of the device's
-    /// `ID3D12Device`. Fences of those frames are staged on the queue, so nothing else may submit
-    /// on `queue` from another thread during that call.
+    /// `ID3D12Device`. **Contract:** the fences of those frames are staged on the queue and
+    /// consumed by the next submit from anyone. So while `process_d3d12` runs no other thread may
+    /// call `queue.submit` on this queue: the application must serialize all its submits against
+    /// `process_d3d12`, and create only one `GpuContext` per queue (each context has its own submit
+    /// lock, so two contexts do not exclude each other). A violation can produce wrong frames with
+    /// no error.
+    ///
+    /// `process_d3d12` waits on the device (`device.poll`): it blocks the calling thread, and may
+    /// run the application's `map_async` callbacks there. A failed submission poisons only this
+    /// context; the device stays usable by the application.
     ///
     /// wgpu reports errors outside an error scope to the device's uncaptured error handler, which
     /// panics by default: set one with `wgpu::Device::on_uncaptured_error` to keep the process
@@ -318,7 +326,8 @@ impl GpuContext {
         let mut ctx = Self::from_parts(device, queue, adapter.get_info(), cache_dir);
         let c = Arc::get_mut(&mut ctx).expect("new");
         // Only what the application enabled on its device can be used.
-        c.coop_f16 = coop_f16(adapter) && c.device.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
+        c.coop_f16 = coop_f16(adapter)
+            && c.device.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX | wgpu::Features::SHADER_F16);
         c.plane_f16 = plane_f16(adapter, &c.device);
         #[cfg(windows)]
         if c.info.backend == wgpu::Backend::Dx12 {
@@ -330,8 +339,15 @@ impl GpuContext {
     /// The features to request for a device given to [`GpuContext::from_device`]: everything
     /// gpufx can use that `adapter` has, apart from the experimental cooperative matrices (they
     /// need `wgpu::ExperimentalFeatures::enabled()` in the device descriptor: add them yourself).
+    /// On D3D12 this includes `PASSTHROUGH_SHADERS` (the DXIL shader cache of
+    /// [`GpuContext::from_device`]'s `cache_dir` needs it; wgpu's D3D12 adapters always list it,
+    /// and it costs nothing until a passthrough shader module is created).
     pub fn wanted_features(adapter: &wgpu::Adapter) -> wgpu::Features {
-        adapter.features() & (GPU_FEATURES - wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX)
+        let mut wanted = adapter.features() & (GPU_FEATURES - wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
+        if adapter.get_info().backend == wgpu::Backend::Dx12 {
+            wanted |= adapter.features() & wgpu::Features::PASSTHROUGH_SHADERS;
+        }
+        wanted
     }
 
     /// The limits to request for a device given to [`GpuContext::from_device`].

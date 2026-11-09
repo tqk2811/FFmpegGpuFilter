@@ -694,7 +694,7 @@ unsafe fn run_dx12<S: GpuStage + ?Sized>(
     sync: &[(ID3D12Fence, u64, u64)],
 ) -> Result<wgpu::SubmissionIndex, Error> {
     if *shared.submit.lock().unwrap_or_else(|p| p.into_inner()) {
-        return Err(Error::Gpu("an earlier D3D12 submission failed; the shared device is no longer used".into()));
+        return Err(Error::Gpu("an earlier D3D12 submission failed; this context no longer uses the device".into()));
     }
     let device = &ctx.device;
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -837,7 +837,7 @@ unsafe fn run_dx12<S: GpuStage + ?Sized>(
     if left || error.is_some() {
         *poisoned = true;
         let why = error.map_or_else(|| "it was not submitted".to_string(), |e| e.to_string());
-        return Err(Error::Gpu(format!("D3D12 submission failed ({why}); the shared device is no longer used")));
+        return Err(Error::Gpu(format!("D3D12 submission failed ({why}); this context no longer uses the device")));
     }
     Ok(index)
 }
@@ -955,11 +955,11 @@ mod tests {
         ctx: &GpuContext,
         r: &ID3D12Resource,
         whole: wgpu::TextureFormat,
-        size: (u32, u32),
+        size: (u32, u32, u32),
         from: wgpu::TextureUses,
         to: wgpu::TextureUses,
     ) {
-        let extent = wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 };
+        let extent = wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: size.2 };
         let t = unsafe { hal::dx12::Device::texture_from_raw(r.clone(), whole, wgpu::TextureDimension::D2, extent, 1, 1) };
         let mut enc = ctx.device.create_command_encoder(&Default::default());
         unsafe {
@@ -975,18 +975,18 @@ mod tests {
         ctx.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
-    /// A wrapper of plane `plane` in state `state`, with `usage`.
+    /// A wrapper of plane `plane` (all `size.2` slices) in state `state`, with `usage`.
     fn wrap(
         ctx: &GpuContext,
         r: &ID3D12Resource,
         format: PixelFormat,
         plane: usize,
-        size: (u32, u32),
+        size: (u32, u32, u32),
         usage: wgpu::TextureUsages,
         state: wgpu::TextureUses,
     ) -> wgpu::Texture {
         let (w, h) = format.plane_texture_size(plane, size.0, size.1);
-        let extent = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+        let extent = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: size.2 };
         let tf = format.plane_texture_format(plane);
         unsafe {
             let mut t = hal::dx12::Device::texture_from_raw(r.clone(), tf, wgpu::TextureDimension::D2, extent, 1, 1);
@@ -1018,8 +1018,9 @@ mod tests {
         }
     }
 
-    /// Fills the resource: the `frame` region with a pattern, everything else with 0xff.
-    fn fill(ctx: &GpuContext, r: &ID3D12Resource, format: PixelFormat, size: (u32, u32), frame: (u32, u32)) {
+    /// Fills slice `slice` of the resource (`size.2` slices): the `frame` region with a pattern
+    /// that depends on `seed`, everything else with 0xff.
+    fn fill(ctx: &GpuContext, r: &ID3D12Resource, format: PixelFormat, size: (u32, u32, u32), frame: (u32, u32), slice: u32, seed: u32) {
         use wgpu::TextureUses as S;
         set_state(ctx, r, whole_format(format), size, S::UNINITIALIZED, S::COPY_DST);
         for p in 0..format.plane_count() {
@@ -1031,14 +1032,16 @@ mod tests {
             let mut data = vec![0xffu8; (row * ph) as usize];
             for y in 0..fh {
                 for x in 0..fw * texel {
-                    data[(y * row + x) as usize] = ((x * 3 + y * 11 + p as u32 * 40) % 200 + 16) as u8;
+                    data[(y * row + x) as usize] = ((x * 3 + y * 11 + p as u32 * 40 + seed) % 200 + 16) as u8;
                 }
             }
+            let mut copy = t.as_image_copy();
+            copy.origin.z = slice;
             ctx.queue.write_texture(
-                t.as_image_copy(),
+                copy,
                 &data,
                 wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(ph) },
-                t.size(),
+                wgpu::Extent3d { depth_or_array_layers: 1, ..t.size() },
             );
         }
         ctx.queue.submit([]);
@@ -1050,8 +1053,9 @@ mod tests {
     fn read_rgba(ctx: &GpuContext, r: &ID3D12Resource, size: (u32, u32)) -> Vec<u8> {
         use wgpu::TextureUses as S;
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        set_state(ctx, r, format, size, S::UNINITIALIZED, S::COPY_SRC);
-        let t = wrap(ctx, r, PixelFormat::Rgba, 0, size, wgpu::TextureUsages::COPY_SRC, S::COPY_SRC);
+        let size3 = (size.0, size.1, 1);
+        set_state(ctx, r, format, size3, S::UNINITIALIZED, S::COPY_SRC);
+        let t = wrap(ctx, r, PixelFormat::Rgba, 0, size3, wgpu::TextureUsages::COPY_SRC, S::COPY_SRC);
         let row = (size.0 * 4).next_multiple_of(256);
         let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -1074,16 +1078,32 @@ mod tests {
         let mapped = buffer.slice(..).get_mapped_range().unwrap();
         let out = mapped.chunks(row as usize).flat_map(|l| l[..(size.0 * 4) as usize].to_vec()).collect();
         drop(mapped);
-        set_state(ctx, r, format, size, S::COPY_SRC, S::UNINITIALIZED);
+        set_state(ctx, r, format, size3, S::COPY_SRC, S::UNINITIALIZED);
         out
     }
 
     /// `format` frame of `frame` size in a resource of `size`, through a bypassed graph (the
     /// conversion only, so chroma shows) and through an effect, into RGBA.
     fn run(ctx: &Arc<GpuContext>, format: PixelFormat, dxgi: DXGI_FORMAT, size: (u32, u32), frame: (u32, u32)) -> Option<[Vec<u8>; 2]> {
+        run_slice(ctx, format, dxgi, (size.0, size.1, 1), frame, 0, 0)
+    }
+
+    /// Like [`run`] on slice `slice` of a texture of `size.2` slices; slice `s` holds the pattern
+    /// of seed `seed + 37 * s`.
+    fn run_slice(
+        ctx: &Arc<GpuContext>,
+        format: PixelFormat,
+        dxgi: DXGI_FORMAT,
+        size: (u32, u32, u32),
+        frame: (u32, u32),
+        slice: u32,
+        seed: u32,
+    ) -> Option<[Vec<u8>; 2]> {
         let dev = raw_device(ctx).unwrap();
-        let input = resource(&dev, dxgi, (size.0, size.1, 1), D3D12_RESOURCE_FLAG_NONE)?;
-        fill(ctx, &input, format, size, frame);
+        let input = resource(&dev, dxgi, (size.0, size.1, size.2 as u16), D3D12_RESOURCE_FLAG_NONE)?;
+        for s in 0..size.2 {
+            fill(ctx, &input, format, size, frame, s, seed + 37 * s);
+        }
         let out = resource(&dev, DXGI_FORMAT_R8G8B8A8_UNORM, (frame.0, frame.1, 1), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)?;
         let fence: ID3D12Fence = unsafe { dev.CreateFence(0, D3D12_FENCE_FLAG_NONE) }.unwrap();
         let package = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/gpufx/ffmpeg/grayscale");
@@ -1092,18 +1112,18 @@ mod tests {
         })
         .unwrap();
         let color = ColorInfo::default();
-        let frame_of = |format, width, height, r: &ID3D12Resource| D3d12Frame {
+        let frame_of = |format, width, height, r: &ID3D12Resource, input_frame: bool| D3d12Frame {
             format,
             width,
             height,
             resource: r.as_raw(),
-            subresource: 0,
+            subresource: if input_frame { slice } else { 0 },
             fence: fence.as_raw(),
             fence_value: 0,
             color,
         };
-        let mut ins = [frame_of(format, frame.0, frame.1, &input)];
-        let mut outs = [frame_of(PixelFormat::Rgba, frame.0, frame.1, &out)];
+        let mut ins = [frame_of(format, frame.0, frame.1, &input, true)];
+        let mut outs = [frame_of(PixelFormat::Rgba, frame.0, frame.1, &out, false)];
         let mut results: [Vec<u8>; 2] = Default::default();
         for (i, info) in [None, Some(FrameInfo::new(0.0, 0))].iter().enumerate() {
             unsafe { graph.process_d3d12(&mut ins, &mut outs, info.as_ref()) }.unwrap();
@@ -1129,5 +1149,23 @@ mod tests {
             assert_eq!(padded[0], exact[0], "{}: bypassed, conversion only", format.name());
             assert_eq!(padded[1], exact[1], "{}: through an effect", format.name());
         }
+    }
+
+    #[test]
+    fn padded_texture_array_frames_read_their_own_slice() {
+        let Some(ctx) = app_context() else { return };
+        let (format, dxgi) = (PixelFormat::Nv12, DXGI_FORMAT_NV12);
+        // Slice 1 of a padded two-slice array (slice s holds the pattern of seed 37 * s).
+        let Some(array) = run_slice(&ctx, format, dxgi, (64, 40, 2), (64, 32), 1, 0) else {
+            eprintln!("skipping: no NV12 texture arrays on this device");
+            return;
+        };
+        // The same pattern alone in an exact texture, and slice 0's pattern.
+        let slice1 = run_slice(&ctx, format, dxgi, (64, 32, 1), (64, 32), 0, 37).unwrap();
+        let slice0 = run_slice(&ctx, format, dxgi, (64, 32, 1), (64, 32), 0, 0).unwrap();
+        assert_ne!(slice0[0], slice1[0], "the two slices must differ for the test to mean anything");
+        assert_eq!(array[0], slice1[0], "bypassed, conversion only: slice 1, not the padding");
+        assert_eq!(array[1], slice1[1], "through an effect: slice 1, not the padding");
+        assert_ne!(array[0], slice0[0], "not slice 0");
     }
 }
