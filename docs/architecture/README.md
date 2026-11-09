@@ -887,7 +887,8 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   (fence wait/signal), outputs are gpufx's shared NT handle D3D11 textures opened in that D3D12 device; one
   submission waits the inputs' fences and the shared D3D11 fence, and the call waits on the CPU as above.
   The filter takes the D3D11 device from `-filter_hw_device` and refuses passthrough (another API).
-- Rust: `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
+- Rust: `GpuContext::from_device` (a wgpu device the application owns; on D3D12 it takes D3D12 frames of its
+  `ID3D12Device` too), `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
   (`gpufx_core::d3d12`, `cfg(windows)`, built on `encode_gpu`). C API (v7, additive): `gpufx_d3d12_supported`,
   `gpufx_effect_use_d3d12`, `gpufx_effect_process_d3d12`, `gpufx_effect_use_d3d11`,
   `gpufx_effect_process_d3d11`, `gpufx_effect_use_d3d12_to_d3d11`, `gpufx_effect_process_d3d12_to_d3d11`; on other systems they fail with a message.

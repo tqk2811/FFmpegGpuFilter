@@ -164,6 +164,26 @@ pub(crate) fn device_limits(supported: &wgpu::Limits) -> wgpu::Limits {
     }
 }
 
+/// Features a device given to [`GpuContext::from_device`] must have when its adapter does:
+/// 16-bit plane textures (P010, RGBA64 frames) and storage access to the plane formats of GPU
+/// output frames.
+pub const REQUIRED_DEVICE_FEATURES: wgpu::Features =
+    wgpu::Features::TEXTURE_FORMAT_16BIT_NORM.union(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+
+/// Why a device cannot be given to [`GpuContext::from_device`], if so.
+fn check_app_device(adapter: wgpu::Features, device: wgpu::Features, limits: &wgpu::Limits) -> Result<(), Error> {
+    let missing = (adapter & REQUIRED_DEVICE_FEATURES) - device;
+    if !missing.is_empty() {
+        return Err(Error::Gpu(format!("the device lacks features gpufx needs and the adapter has: {missing:?}")));
+    }
+    let mut low = Vec::new();
+    wgpu::Limits::default().check_limits_with_fail_fn(limits, false, |name, need, has| low.push(format!("{name} (needs {need}, has {has})")));
+    if !low.is_empty() {
+        return Err(Error::Gpu(format!("the device's limits are below the WebGPU defaults gpufx needs: {}", low.join(", "))));
+    }
+    Ok(())
+}
+
 /// A GPU device. One context can be shared by many effects.
 pub struct GpuContext {
     /// The D3D12 device shared with the caller (see `d3d12.rs`), `None` otherwise. First, so
@@ -257,14 +277,68 @@ impl GpuContext {
             extra |= wgpu::Features::PASSTHROUGH_SHADERS;
         }
         let (device, queue) = open_device(adapter, label, extra)?;
-        let mut ctx = Self::from_device(device, queue, adapter.get_info(), cache_dir);
+        let mut ctx = Self::from_parts(device, queue, adapter.get_info(), cache_dir);
         let c = Arc::get_mut(&mut ctx).expect("new");
         c.coop_f16 = coop_f16(adapter);
         c.plane_f16 = plane_f16(adapter, &c.device);
         Ok(ctx)
     }
 
-    pub(crate) fn from_device(
+    /// A context on a device the application made and keeps using, so that effects and the
+    /// application's own work (surfaces, previews, its passes) run on one wgpu device. `adapter`
+    /// is the one `device` was requested from.
+    ///
+    /// **Required:** every limit at least [`wgpu::Limits::default`] (the WebGPU defaults), and the
+    /// features of [`REQUIRED_DEVICE_FEATURES`] that the adapter has. Without them this returns
+    /// [`Error::Gpu`] naming what is missing, instead of wgpu errors at the first frame. Request
+    /// the device with [`GpuContext::wanted_features`] and [`GpuContext::wanted_limits`] to get
+    /// these and what gpufx can use beyond them.
+    ///
+    /// **Optional**, not checked: what is missing only narrows what runs. Without `PIPELINE_CACHE`
+    /// there is no on-disk pipeline cache, without `SHADER_F16` a group that `requires` it does not
+    /// match, without `EXPERIMENTAL_COOPERATIVE_MATRIX` no tensor cores, and with the default
+    /// buffer limits output planes above 128 MiB (8K RGBA64) fail.
+    /// `PASSTHROUGH_SHADERS` on D3D12 turns on the DXIL shader cache of `cache_dir`.
+    ///
+    /// On D3D12 the context also takes [`crate::EffectGraph::process_d3d12`] frames of the device's
+    /// `ID3D12Device`. Fences of those frames are staged on the queue, so nothing else may submit
+    /// on `queue` from another thread during that call.
+    ///
+    /// wgpu reports errors outside an error scope to the device's uncaptured error handler, which
+    /// panics by default: set one with `wgpu::Device::on_uncaptured_error` to keep the process
+    /// alive. The types are those of the re-exported `gpufx_core::wgpu`.
+    pub fn from_device(
+        adapter: &wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        cache_dir: Option<&std::path::Path>,
+    ) -> Result<Arc<Self>, Error> {
+        check_app_device(adapter.features(), device.features(), &device.limits())?;
+        let mut ctx = Self::from_parts(device, queue, adapter.get_info(), cache_dir);
+        let c = Arc::get_mut(&mut ctx).expect("new");
+        // Only what the application enabled on its device can be used.
+        c.coop_f16 = coop_f16(adapter) && c.device.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX);
+        c.plane_f16 = plane_f16(adapter, &c.device);
+        #[cfg(windows)]
+        if c.info.backend == wgpu::Backend::Dx12 {
+            c.d3d12 = Some(crate::d3d12::Shared::of_context(c)?);
+        }
+        Ok(ctx)
+    }
+
+    /// The features to request for a device given to [`GpuContext::from_device`]: everything
+    /// gpufx can use that `adapter` has, apart from the experimental cooperative matrices (they
+    /// need `wgpu::ExperimentalFeatures::enabled()` in the device descriptor: add them yourself).
+    pub fn wanted_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+        adapter.features() & (GPU_FEATURES - wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX)
+    }
+
+    /// The limits to request for a device given to [`GpuContext::from_device`].
+    pub fn wanted_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+        device_limits(&adapter.limits())
+    }
+
+    pub(crate) fn from_parts(
         device: wgpu::Device,
         queue: wgpu::Queue,
         info: wgpu::AdapterInfo,

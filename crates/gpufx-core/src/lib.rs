@@ -34,7 +34,9 @@ pub use graph::{parse_effect_item, BypassPad, EffectGraph, InlineOptions, Memory
 pub use manifest::{Manifest, StreamInfo};
 pub use package::Package;
 pub use pool::PoolStats;
-pub use runtime::{Backend, Effect, FrameInfo, GpuContext, Image, ImageMut, Program};
+pub use runtime::{Backend, Effect, FrameInfo, GpuContext, Image, ImageMut, Program, REQUIRED_DEVICE_FEATURES};
+/// The wgpu gpufx is built on: a device for [`GpuContext::from_device`] must come from this one.
+pub use wgpu;
 pub use shader_cache::{precompile, ShaderCacheStats};
 
 #[derive(Debug, thiserror::Error)]

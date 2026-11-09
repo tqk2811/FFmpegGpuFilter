@@ -346,6 +346,66 @@ fn gpu_frames_are_checked() {
     assert!(err.to_string().contains("2 plane(s)"), "{err}");
 }
 
+/// The adapter of the test backend, and a device on it with `features` and `limits`.
+fn app_device(
+    features: impl Fn(&wgpu::Adapter) -> wgpu::Features,
+    limits: impl Fn(&wgpu::Adapter) -> wgpu::Limits,
+) -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    gpu()?;
+    let backends = match common::backend() {
+        gpufx_core::Backend::Auto => wgpu::Backends::all(),
+        gpufx_core::Backend::Vulkan => wgpu::Backends::VULKAN,
+        gpufx_core::Backend::Dx12 => wgpu::Backends::DX12,
+        gpufx_core::Backend::Metal => wgpu::Backends::METAL,
+    };
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        ..Default::default()
+    }))
+    .ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_features: features(&adapter),
+        required_limits: limits(&adapter),
+        ..Default::default()
+    }))
+    .ok()?;
+    Some((adapter, device, queue))
+}
+
+#[test]
+fn an_application_device_runs_effects() {
+    let Some((adapter, device, queue)) = app_device(GpuContext::wanted_features, GpuContext::wanted_limits) else { return };
+    let ctx = GpuContext::from_device(&adapter, device.clone(), queue, None).unwrap();
+    assert_eq!(ctx.device(), &device, "the application's own device");
+    let mut g = graph(&ctx, "[0]grayscale.zip[out]");
+    let (w, h) = (16, 16);
+    let input = upload(&ctx, PixelFormat::Nv12, &pattern(PixelFormat::Nv12, w, h, 1), w, h);
+    let got = gpu_run(&ctx, &mut g, &[input], &[target(&ctx, PixelFormat::Rgba, w, h)], Some(&FrameInfo::new(0.0, 0)));
+
+    let reference = gpu().unwrap();
+    let mut g = graph(&reference, "[0]grayscale.zip[out]");
+    let input = upload(&reference, PixelFormat::Nv12, &pattern(PixelFormat::Nv12, w, h, 1), w, h);
+    let want = gpu_run(&reference, &mut g, &[input], &[target(&reference, PixelFormat::Rgba, w, h)], Some(&FrameInfo::new(0.0, 0)));
+    assert_eq!(got, want);
+}
+
+#[test]
+fn an_application_device_without_what_gpufx_needs_is_an_error() {
+    // Limits below the WebGPU defaults.
+    if let Some((adapter, device, queue)) = app_device(GpuContext::wanted_features, |_| wgpu::Limits::downlevel_webgl2_defaults()) {
+        let err = GpuContext::from_device(&adapter, device, queue, None).err().expect("low limits are refused").to_string();
+        assert!(err.contains("max_storage_buffer_binding_size"), "{err}");
+    }
+    // Required features the adapter has and the device did not ask for.
+    if let Some((adapter, device, queue)) = app_device(|_| wgpu::Features::empty(), GpuContext::wanted_limits) {
+        if adapter.features().intersects(gpufx_core::REQUIRED_DEVICE_FEATURES) {
+            let err = GpuContext::from_device(&adapter, device, queue, None).err().expect("missing features are refused").to_string();
+            assert!(err.contains("lacks features"), "{err}");
+        }
+    }
+}
+
 /// An effect reading its input through a mip chain (the smallest level), as a package
 /// directory removed when dropped.
 struct MipPackage(PathBuf);

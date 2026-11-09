@@ -878,7 +878,8 @@ ffmpeg -init_hw_device d3d11va=dx -filter_hw_device dx -i a.mp4 \
   output là texture D3D11 shared NT handle của gpufx, mở trong device D3D12 đó; một lần submit chờ fence của input và
   fence D3D11 shared, rồi lời gọi chờ trên CPU như trên. Filter lấy device D3D11 từ `-filter_hw_device` và từ chối
   passthrough (khác API).
-- Rust: `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
+- Rust: `GpuContext::from_device` (device wgpu do ứng dụng sở hữu; trên D3D12 nhận luôn frame D3D12 của
+  `ID3D12Device` đó), `GpuContext::from_d3d12` / `from_d3d11`, `EffectGraph::process_d3d12` / `process_d3d11`
   (`gpufx_core::d3d12`, `cfg(windows)`, dựa trên `encode_gpu`). C API (v7, chỉ thêm): `gpufx_d3d12_supported`,
   `gpufx_effect_use_d3d12`, `gpufx_effect_process_d3d12`, `gpufx_effect_use_d3d11`,
   `gpufx_effect_process_d3d11`, `gpufx_effect_use_d3d12_to_d3d11`, `gpufx_effect_process_d3d12_to_d3d11`; trên hệ khác các hàm này báo lỗi.

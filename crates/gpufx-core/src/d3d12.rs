@@ -114,6 +114,14 @@ pub(crate) struct Shared {
     submit: Mutex<bool>,
 }
 
+impl Shared {
+    /// For a context on a device the application owns ([`GpuContext::from_device`]): its
+    /// `ID3D12Device`, nothing of D3D11.
+    pub(crate) fn of_context(ctx: &GpuContext) -> Result<Self, Error> {
+        Ok(Shared { device: Com(raw_device(ctx)?), d3d11: None, to_d3d11: false, submit: Mutex::new(false) })
+    }
+}
+
 struct D3d11 {
     context: Com<ID3D11DeviceContext4>,
     device: Com<ID3D11Device>,
