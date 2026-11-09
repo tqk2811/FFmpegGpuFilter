@@ -519,3 +519,10 @@ Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423
 - **Vị trí**: [d3d12.rs:376](../crates/gpufx-core/src/d3d12.rs#L376) (`check`, nhánh `direct` của input)
 - **Vì sao**: decoder có crop lệch (vd 1080 trong 1088 với offset) sẽ đọc sai vùng; cần nhận offset hoặc từ chối rõ.
 - **Ngày ghi**: 2026-11-09
+
+### [Thấp] Transition trên track phía trên với clip trong suốt một phần bị tối
+
+- **Vấn đề**: `xfade` trộn cả rgb lẫn alpha theo tuyến tính (straight alpha) rồi `overlay` lại cộng theo straight alpha, nên vùng bán trong suốt khi chuyển cảnh trên track phía trên bị tối đi. Chưa kiểm slide, wipe, zoom.
+- **Vị trí**: `packages/gpufx/ffmpeg/xfade/shaders/xfade.wgsl:83` (`mix(a.a, b.a, prog)` cùng `mixc`), `packages/gpufx/ffmpeg/overlay/shaders/overlay.wgsl:22`
+- **Vì sao**: cảnh có clip trong suốt một phần (khung hình thu nhỏ, logo) đặt trên track trên mà có transition sẽ lệch màu ở mép. Hướng sửa có khả năng nhất là dùng premultiplied alpha ở `xfade` và `overlay`.
+- **Ngày ghi**: 2026-11-10

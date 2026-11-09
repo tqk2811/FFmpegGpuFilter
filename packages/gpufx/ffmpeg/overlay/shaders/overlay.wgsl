@@ -4,9 +4,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let uv = gpufx_uv(id);
     let bg = textureSampleLevel(base, smp, uv, 0.0);
     let osize = vec2f(textureDimensions(top));
-    // Keep the overlay aspect ratio; scale is relative to the frame width.
+    // Scale is relative to the frame width. The overlay keeps its aspect ratio unless a height is given.
     let w = params.scale * globals.size.x;
-    let size = vec2f(w, w * osize.y / osize.x);
+    let h = select(w * osize.y / osize.x, params.height * globals.size.y, params.height > 0.0);
+    let size = vec2f(w, h);
     let px = vec2f(id.xy) + 0.5 - vec2f(params.x, params.y) * globals.size;
     let b = params.border;
     if (any(px < vec2f(-b)) || any(px > size + b)) {

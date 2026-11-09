@@ -19,9 +19,10 @@ Written inline after the package name: `overlay.zip=name=value`. Several options
 
 | Name | Type | Default | Range | Description |
 |------|------|---------|-------|-------------|
-| `x` | float | `0.65` | -1 to 2 | Left edge of the overlay, 0..1 of the frame width |
-| `y` | float | `0.05` | -1 to 2 | Top edge of the overlay, 0..1 of the frame height |
-| `scale` | float | `0.3` | 0.01 to 1 | Overlay width relative to the frame width |
+| `x` | float | `0.65` | -8 to 8 | Left edge of the overlay, 0..1 of the frame width |
+| `y` | float | `0.05` | -8 to 8 | Top edge of the overlay, 0..1 of the frame height |
+| `scale` | float | `0.3` | 0.01 to 8 | Overlay width relative to the frame width |
+| `height` | float | `0` | 0 to 1000 | Overlay height relative to the frame height; `0` keeps the aspect ratio of the overlay |
 | `opacity` | float | `1` | 0 to 1 | Overlay opacity |
 | `border` | float | `0` | 0 to 50 | Border width in pixels |
 | `border_color` | color | `#ffffff` | RGBA | Border color; alpha is its opacity over the bottom input, like the picture's own alpha |
@@ -46,4 +47,4 @@ The effect runs on every backend the filter supports (Vulkan, D3D12/D3D11, Metal
 
 ## Notes
 
-The overlay keeps its own aspect ratio; only its width is set (`scale`). It may reach outside the frame (`x`, `y` accept -1 to 2).
+The overlay keeps its own aspect ratio unless `height` is set: with `height` above 0 the overlay is `scale` of the frame width wide and `height` of the frame height tall, which stretches it to that shape. It may reach outside the frame (`x`, `y` accept -8 to 8, `scale` up to 8).
