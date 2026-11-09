@@ -1198,24 +1198,36 @@ mod tests {
         let mut ins = [frame_of(PixelFormat::Nv12, &input)];
         let mut outs = [frame_of(PixelFormat::Rgba, &out)];
 
-        struct Guard<'a>(&'a std::cell::Cell<u32>);
+        struct Guard<'a> {
+            taken: &'a std::cell::Cell<u32>,
+            fence: &'a ID3D12Fence,
+            submitted_before_drop: &'a std::cell::Cell<bool>,
+        }
         impl Drop for Guard<'_> {
             fn drop(&mut self) {
-                self.0.set(self.0.get() + 100);
+                self.taken.set(self.taken.get() + 100);
+                // Only a submission that already happened can signal the fence.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while unsafe { self.fence.GetCompletedValue() } < 1 && std::time::Instant::now() < deadline {
+                    std::thread::yield_now();
+                }
+                self.submitted_before_drop.set(unsafe { self.fence.GetCompletedValue() } >= 1);
             }
         }
         let taken = std::cell::Cell::new(0);
+        let submitted_before_drop = std::cell::Cell::new(false);
         assert!(!ctx.conv.gpu_frame_pipelines_built(), "a new context has not built them");
         let info = FrameInfo::new(0.0, 0);
         unsafe {
             graph.process_d3d12_with_submit_lock(&mut ins, &mut outs, Some(&info), || {
                 assert!(ctx.conv.gpu_frame_pipelines_built(), "the pipelines must be built before the lock is taken");
                 taken.set(taken.get() + 1);
-                Guard(&taken)
+                Guard { taken: &taken, fence: &fence, submitted_before_drop: &submitted_before_drop }
             })
         }
         .unwrap();
         assert_eq!(taken.get(), 101, "the lock is taken once and dropped by the time the call returns");
+        assert!(submitted_before_drop.get(), "the lock must be held until the work is submitted");
         assert_eq!((ins[0].fence_value, outs[0].fence_value), (1, 1), "the work was submitted");
     }
 
