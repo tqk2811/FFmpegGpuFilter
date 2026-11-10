@@ -15,7 +15,13 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path $root "dist/packages/gpufx" }
 if ($Models -and (Split-Path -Leaf $Out.TrimEnd('\', '/')) -ne "gpufx") { throw "-Models needs -Out <root>\gpufx (models go to <root>\gpufx_ai_*)" }
-if (-not $Dirs) { $Dirs = Get-ChildItem -Recurse -File -Filter manifest.json (Join-Path $root "packages/gpufx") | Sort-Object FullName | ForEach-Object { $_.Directory.FullName } }
+if (-not $Dirs) {
+    if (-not (Test-Path (Join-Path $root "packages/gpufx"))) {
+        git -C $root submodule update --init packages
+        if ($LASTEXITCODE -ne 0) { throw "git submodule update failed" }
+    }
+    $Dirs = Get-ChildItem -Recurse -File -Filter manifest.json (Join-Path $root "packages/gpufx") | Sort-Object FullName | ForEach-Object { $_.Directory.FullName }
+}
 
 cargo build --release --quiet --manifest-path (Join-Path $root "Cargo.toml") -p gpufx-cli
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }

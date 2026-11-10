@@ -14,6 +14,7 @@
 
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+[ -d "$ROOT/packages/gpufx_ai_upscale" ] || git -C "$ROOT" submodule update --init packages
 BIN=
 while [ $# -gt 0 ]; do
     case "$1" in

@@ -18,6 +18,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = Split-Path -Parent $PSScriptRoot
+if (-not (Test-Path (Join-Path $root 'packages/gpufx_ai_upscale'))) {
+    git -C $root submodule update --init packages
+    if ($LASTEXITCODE -ne 0) { throw 'git submodule update failed' }
+}
 # name -> packages/gpufx_ai_<filter>/<name> folder holding its source.json
 $modelDirs = @{}
 Get-ChildItem (Join-Path $root 'packages') -Directory -Filter 'gpufx_ai_*' | ForEach-Object {
