@@ -239,6 +239,16 @@ Chi tiết, nguồn và lỗi đã biết: [docs/REQUIREMENTS-vi.md](docs/REQUIR
 
 Cần Rust (stable) và một driver GPU (Linux không có GPU có thể dùng `mesa-vulkan-drivers`/lavapipe).
 
+`packages/` là git submodule ([FFmpegGpuFilter-packages](https://github.com/tqk2811/FFmpegGpuFilter-packages)). Các
+hiệu ứng mẫu, test và `pack-packages` đều cần nó, nên phải khởi tạo sau khi clone. Submodule `external/FFmpeg` rất lớn và
+chỉ bản build FFmpeg mới dùng; các script build tự tải nó, nên đừng dùng `--recursive`:
+
+```sh
+git clone https://github.com/tqk2811/FFmpegGpuFilter.git
+cd FFmpegGpuFilter
+git submodule update --init packages
+```
+
 ```sh
 cargo build --release
 cargo test --release                       # chạy các hiệu ứng mẫu trên GPU hiện có
@@ -374,6 +384,7 @@ make -j"$(nproc)"
 | `ffmpeg/` | Filter `vf_gpufx.c` và script tích hợp |
 | `external/FFmpeg` | Submodule mã nguồn FFmpeg |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx một lệnh trong Docker |
+| `packages/` | Submodule [FFmpegGpuFilter-packages](https://github.com/tqk2811/FFmpegGpuFilter-packages) chứa hiệu ứng và mô tả model |
 | `packages/gpufx/` | Gói hiệu ứng, chia theo thư mục nhóm (`ffmpeg/`, `capcut/`, `standalone/`, `tqk2811/...`) |
 | `scripts/` | `build-prebuilt.sh` (build nhanh trên FFmpeg build sẵn), `test-bundle.sh`, `install-libgpufx.sh`, `pack-packages.sh`/`.ps1` (đóng gói zip) |
 
@@ -389,7 +400,8 @@ Mã nguồn của repo dùng giấy phép [MIT](LICENSE), trừ các phần sau:
 | Ảnh lá của `falling-ginkgo` | CC BY 3.0 (game-icons.net, Delapouite) |
 | `bin/dxcompiler.dll` trong bản win64 (DirectX Shader Compiler, Microsoft) | LLVM (University of Illinois/NCSA), MIT và điều khoản DXC của Microsoft: `bin/LICENSE-dxcompiler-*.txt`. Là DLL riêng, wgpu nạp lúc chạy; xoá nó thì dùng FXC |
 
-Nguồn và giấy phép của ảnh lá ở [assets/leaves/README.md](assets/leaves/README.md).
+Nguồn và giấy phép của ảnh lá ở [assets/leaves/README.md](assets/leaves/README.md). Submodule `packages/`
+mang cùng giấy phép MIT và các thông báo này trong repo riêng của nó.
 
 Thư viện `libgpufx` và các hiệu ứng mẫu dùng được trong phần mềm đóng nguồn, nhưng phải kèm
 thông báo bản quyền: MIT của repo, Apache 2.0 / CC BY 3.0 nếu dùng hai hiệu ứng lá, và giấy

@@ -243,6 +243,16 @@ Details, sources and known issues: [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 You need Rust (stable) and a GPU driver (on Linux without a GPU you can use `mesa-vulkan-drivers`/lavapipe).
 
+`packages/` is a git submodule ([FFmpegGpuFilter-packages](https://github.com/tqk2811/FFmpegGpuFilter-packages)). The
+sample effects, the tests and `pack-packages` need it, so initialise it after cloning. The `external/FFmpeg` submodule
+is large and only the FFmpeg builds use it; the build scripts fetch it themselves, so leave `--recursive` out:
+
+```sh
+git clone https://github.com/tqk2811/FFmpegGpuFilter.git
+cd FFmpegGpuFilter
+git submodule update --init packages
+```
+
 ```sh
 cargo build --release
 cargo test --release                       # run the sample effects on the available GPU
@@ -379,6 +389,7 @@ make -j"$(nproc)"
 | `ffmpeg/` | The `vf_gpufx.c` filter and the integration script |
 | `external/FFmpeg` | FFmpeg source submodule |
 | `docker/`, `build.sh`, `build.ps1` | Build FFmpeg + gpufx with one command in Docker |
+| `packages/` | Submodule [FFmpegGpuFilter-packages](https://github.com/tqk2811/FFmpegGpuFilter-packages) with the effects and model descriptions |
 | `packages/gpufx/` | Effect packages, in group folders (`ffmpeg/`, `capcut/`, `standalone/`, `tqk2811/...`) |
 | `scripts/` | `build-prebuilt.sh` (fast build on a prebuilt FFmpeg), `test-bundle.sh`, `install-libgpufx.sh`, `pack-packages.sh`/`.ps1` (zip packaging) |
 
@@ -394,7 +405,8 @@ The repo's source code is under the [MIT](LICENSE) license, except for the follo
 | Leaf images of `falling-ginkgo` | CC BY 3.0 (game-icons.net, Delapouite) |
 | `bin/dxcompiler.dll` in the win64 build (DirectX Shader Compiler, Microsoft) | LLVM (University of Illinois/NCSA), MIT and the Microsoft DXC terms: `bin/LICENSE-dxcompiler-*.txt`. A separate DLL that wgpu loads at run time; delete it to compile with FXC |
 
-The sources and licenses of the leaf images are in [assets/leaves/README.md](assets/leaves/README.md).
+The sources and licenses of the leaf images are in [assets/leaves/README.md](assets/leaves/README.md). The `packages/`
+submodule carries the same MIT license and these notices in its own repository.
 
 The `libgpufx` library and the sample effects can be used in closed-source software, but you must include
 the copyright notices: the repo's MIT, Apache 2.0 / CC BY 3.0 if you use the two leaf effects, and the licenses

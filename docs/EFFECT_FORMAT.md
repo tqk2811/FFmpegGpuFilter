@@ -22,7 +22,8 @@ gpufx run 'my-effect=strength=0.8' -i in.png -o out.png
 gpufx pack my-effect my-effect.zip
 ```
 
-Package several effects at once (no FFmpeg build or Docker needed):
+Package several effects at once (no FFmpeg build or Docker needed). `packages/` is a git submodule; the script
+initialises it when it is empty:
 
 ```sh
 scripts/pack-packages.sh                         # every directory in packages/gpufx -> dist/packages/gpufx/<group>/<name>.zip
@@ -770,7 +771,7 @@ their numbers.
 
 ## Included examples
 
-The examples live in group folders under `packages/gpufx/`: `ffmpeg/` (equivalents of FFmpeg built-in filters and `xfade`), `tqk2811/FFmpegArgs.TanersenerSlideShow/` (ports of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (recreations of CapCut transitions), `standalone/` (our own effects) and the nested group `tqk2811/TqkLibrary.FFmpegTransition/` (ports of [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). A group can sit at any depth: a package is any folder with a `manifest.json`. See [packages/gpufx/README.md](../packages/gpufx/README.md). The group is only a folder: a package is still referred to by its own name.
+`packages/` is the git submodule [FFmpegGpuFilter-packages](https://github.com/tqk2811/FFmpegGpuFilter-packages): `git submodule update --init packages` fills it. The examples live in group folders under `packages/gpufx/`: `ffmpeg/` (equivalents of FFmpeg built-in filters and `xfade`), `tqk2811/FFmpegArgs.TanersenerSlideShow/` (ports of [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (recreations of CapCut transitions), `standalone/` (our own effects) and the nested group `tqk2811/TqkLibrary.FFmpegTransition/` (ports of [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). A group can sit at any depth: a package is any folder with a `manifest.json`. See [packages/gpufx/README.md](../packages/gpufx/README.md). The group is only a folder: a package is still referred to by its own name.
 
 | Package | Demonstrates |
 |---------|--------------|

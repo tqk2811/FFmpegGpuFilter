@@ -22,7 +22,8 @@ gpufx run 'my-effect=strength=0.8' -i in.png -o out.png
 gpufx pack my-effect my-effect.zip
 ```
 
-Đóng gói nhiều hiệu ứng một lúc (không cần build FFmpeg hay Docker):
+Đóng gói nhiều hiệu ứng một lúc (không cần build FFmpeg hay Docker). `packages/` là git submodule; script tự
+khởi tạo nó khi đang trống:
 
 ```sh
 scripts/pack-packages.sh                         # mọi thư mục trong packages/gpufx -> dist/packages/gpufx/<group>/<name>.zip
@@ -758,7 +759,7 @@ theo cùng quy tắc. `gpufx info` in các tên kèm số của chúng.
 
 ## Ví dụ có sẵn
 
-Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmpeg/` (tương đương filter dựng sẵn và chuyển cảnh `xfade` của FFmpeg), `tqk2811/FFmpegArgs.TanersenerSlideShow/` (viết lại từ [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (dựng lại chuyển cảnh CapCut), `standalone/` (hiệu ứng tự viết) và nhóm lồng `tqk2811/TqkLibrary.FFmpegTransition/` (port từ [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). Nhóm có thể nằm ở độ sâu bất kỳ: gói là mọi thư mục có `manifest.json`. Xem [packages/gpufx/README.md](../packages/gpufx/README.md). Nhóm chỉ là thư mục: gói vẫn được gọi bằng tên riêng của nó.
+`packages/` là git submodule [FFmpegGpuFilter-packages](https://github.com/tqk2811/FFmpegGpuFilter-packages): chạy `git submodule update --init packages` để có nội dung. Các ví dụ nằm trong các thư mục nhóm dưới `packages/gpufx/`: `ffmpeg/` (tương đương filter dựng sẵn và chuyển cảnh `xfade` của FFmpeg), `tqk2811/FFmpegArgs.TanersenerSlideShow/` (viết lại từ [tanersener/ffmpeg-video-slideshow-scripts](https://github.com/tanersener/ffmpeg-video-slideshow-scripts)), `capcut/` (dựng lại chuyển cảnh CapCut), `standalone/` (hiệu ứng tự viết) và nhóm lồng `tqk2811/TqkLibrary.FFmpegTransition/` (port từ [TqkLibrary.FFmpegTransition](https://github.com/tqk2811/TqkLibrary.FFmpegTransition)). Nhóm có thể nằm ở độ sâu bất kỳ: gói là mọi thư mục có `manifest.json`. Xem [packages/gpufx/README.md](../packages/gpufx/README.md). Nhóm chỉ là thư mục: gói vẫn được gọi bằng tên riêng của nó.
 
 | Gói | Minh hoạ |
 |-----|----------|
