@@ -3,3 +3,7 @@
 	url = https://github.com/FFmpeg/FFmpeg.git
 	branch = master
 	shallow = true
+[submodule "packages"]
+	path = packages
+	url = https://github.com/tqk2811/FFmpegGpuFilter-packages.git
+	branch = master
