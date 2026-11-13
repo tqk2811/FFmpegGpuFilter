@@ -14,7 +14,7 @@ Một frame Vulkan của FFmpeg (`libavutil/hwcontext_vulkan.h`), nằm ở `AVF
 
 ## PSNR
 
-Peak Signal-to-Noise Ratio, đo bằng dB: độ giống nhau từng pixel giữa hai ảnh, `10·log10(255² / MSE)` với MSE là trung bình bình phương chênh lệch. Càng cao càng giống; hai ảnh y hệt thì MSE = 0 (`scripts/capcut-compare.py` ghi 99). Mốc thô cho ảnh 8-bit: ≥40 dB gần như không phân biệt, 30–40 dB khá giống, 20–30 dB thấy khác rõ, <20 dB khác nhiều. Chỉ đo sai khác pixel, không phản ánh cảm nhận mắt (lệch 1–2 px ở cạnh sắc cũng tụt mạnh), nên thường đi kèm [SSIM](#L19).
+Peak Signal-to-Noise Ratio, đo bằng dB: độ giống nhau từng pixel giữa hai ảnh, `10·log10(255² / MSE)` với MSE là trung bình bình phương chênh lệch. Càng cao càng giống; hai ảnh y hệt thì MSE = 0 (công cụ đo thường ghi 99 hoặc vô cùng). Mốc thô cho ảnh 8-bit: ≥40 dB gần như không phân biệt, 30–40 dB khá giống, 20–30 dB thấy khác rõ, <20 dB khác nhiều. Chỉ đo sai khác pixel, không phản ánh cảm nhận mắt (lệch 1–2 px ở cạnh sắc cũng tụt mạnh), nên thường đi kèm [SSIM](#L19).
 
 ## SSIM
 
