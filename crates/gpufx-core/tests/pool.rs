@@ -231,3 +231,21 @@ fn a_new_size_frees_the_textures_of_the_old_one() {
     // Only the small textures are left.
     assert!(after.idle_bytes * 10 < before.idle_bytes, "{before:?} -> {after:?}");
 }
+
+#[test]
+fn trim_pool_frees_every_idle_resource() {
+    let _serial = serial();
+    let Some(ctx) = own_gpu() else { return };
+    let (w, h) = (64, 36);
+    let src = gradient(w, h, 1);
+    let mut g = graph(&ctx, "[0]invert.zip[out]");
+    let want = run(&mut g, &src, w, h, 0);
+    let before = ctx.pool_stats();
+    assert!(before.idle > 0 && before.idle_bytes > 0, "{before:?}");
+    ctx.trim_pool();
+    let after = ctx.pool_stats();
+    assert_eq!((after.idle, after.idle_bytes, after.borrowed), (0, 0, 0), "{after:?}");
+    // The graph still runs, borrowing new resources.
+    assert_eq!(run(&mut g, &src, w, h, 1), want);
+    assert!(ctx.pool_stats().created > before.created);
+}

@@ -414,6 +414,14 @@ impl GpuContext {
         self.pool.stats()
     }
 
+    /// Frees every idle texture and buffer of the frame resource pool now. The pool frees
+    /// idle resources only as frames are given back, so a caller that stops rendering (a
+    /// paused preview, a finished export) calls this to release them. Nothing calls it on
+    /// its own; resources borrowed at the time stay, and a later frame creates what it needs.
+    pub fn trim_pool(&self) {
+        self.pool.trim();
+    }
+
     /// Whether planes of a `pixel_layout` other than `rgba` are 16-bit floats. For tests.
     #[doc(hidden)]
     pub fn plane_f16(&self) -> bool {

@@ -206,6 +206,20 @@ impl Pool {
         }
     }
 
+    /// Frees every idle resource now, without waiting for [`IDLE_FRAMES`] frames (rendering
+    /// stopped, so no give back will come to free them). Borrowed resources stay.
+    pub fn trim(&self) {
+        let mut inner = self.lock();
+        let mut freed = 0;
+        inner.entries.retain(|e| {
+            if !e.borrowed {
+                freed += e.bytes;
+            }
+            e.borrowed
+        });
+        inner.held_bytes -= freed;
+    }
+
     /// Drops borrowed resources that must not be handed out again.
     pub fn forget(&self, ids: &[u64]) {
         let mut inner = self.lock();
