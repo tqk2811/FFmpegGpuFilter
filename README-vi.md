@@ -247,6 +247,7 @@ chỉ bản build FFmpeg mới dùng; các script build tự tải nó, nên đ�
 git clone https://github.com/tqk2811/FFmpegGpuFilter.git
 cd FFmpegGpuFilter
 git submodule update --init packages
+git -C packages submodule update --init gpufx/capcut
 ```
 
 ```sh
