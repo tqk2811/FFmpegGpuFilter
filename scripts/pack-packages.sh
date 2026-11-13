@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
 done
 # A package is any folder with a manifest.json below packages/gpufx, at any depth.
 if [ $# -eq 0 ]; then
-    [ -d "$ROOT/packages/gpufx" ] || { git -C "$ROOT" submodule update --init packages && git -C "$ROOT/packages" submodule update --init gpufx/capcut; }
+    [ -d "$ROOT/packages/gpufx" ] || git -C "$ROOT" submodule update --init packages
     OLD_IFS=$IFS; IFS="
 "
     set -- $(find "$ROOT/packages/gpufx" -name manifest.json | sort | sed 's|/manifest.json$||')

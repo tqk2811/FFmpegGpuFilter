@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       # The tests and the shader check read packages/. Not `submodules: true`: this job does not
       # need the FFmpeg submodule.
-      - run: git submodule update --init packages && git -C packages submodule update --init gpufx/capcut
+      - run: git submodule update --init packages
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt

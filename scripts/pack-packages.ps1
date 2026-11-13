@@ -19,8 +19,6 @@ if (-not $Dirs) {
     if (-not (Test-Path (Join-Path $root "packages/gpufx"))) {
         git -C $root submodule update --init packages
         if ($LASTEXITCODE -ne 0) { throw "git submodule update failed" }
-        git -C (Join-Path $root "packages") submodule update --init gpufx/capcut
-        if ($LASTEXITCODE -ne 0) { throw "git submodule update failed" }
     }
     $Dirs = Get-ChildItem -Recurse -File -Filter manifest.json (Join-Path $root "packages/gpufx") | Sort-Object FullName | ForEach-Object { $_.Directory.FullName }
 }
