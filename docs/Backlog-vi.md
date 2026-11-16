@@ -485,3 +485,9 @@ Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423
 - **Vị trí**: `packages/gpufx/ffmpeg/xfade/shaders/xfade.wgsl:83` (`mix(a.a, b.a, prog)` cùng `mixc`), `packages/gpufx/ffmpeg/overlay/shaders/overlay.wgsl:22`
 - **Vì sao**: cảnh có clip trong suốt một phần (khung hình thu nhỏ, logo) đặt trên track trên mà có transition sẽ lệch màu ở mép. Hướng sửa có khả năng nhất là dùng premultiplied alpha ở `xfade` và `overlay`.
 - **Ngày ghi**: 2026-11-10
+
+### [Thấp] Khung HDR/BT.2020 đọc thẳng theo plane thì bỏ qua tone map
+- **Vấn đề**: chỉ pass chuyển sang RGBA (`to_sdr` của convert_in.wgsl) tone map PQ/HLG và đổi gam BT.2020 sang BT.709. Effect khai báo `pixel_layout` khác `rgba` đọc plane qua `planes_in_source`, nhận nguyên mã PQ/HLG; đường in-place NV12 8-bit của graph cũng vậy với nguồn HLG 8-bit hiếm gặp. Đầu ra luôn ghi như SDR BT.709 dù `ColorInfo` của output nói gì: chưa có đường xuất HDR.
+- **Vị trí**: [convert.rs:175](../crates/gpufx-core/src/convert.rs#L175) (`planes_in_source`), [convert_in.wgsl:144](../crates/gpufx-core/src/convert_in.wgsl#L144) (`to_sdr`), [hdr.rs](../crates/gpufx-core/src/hdr.rs)
+- **Vì sao**: nên làm khi có effect theo plane dùng cho video điện thoại, hoặc khi cần xuất HDR: tone map trong pass plane, hoặc ép khung cần đổi màu đi qua pass RGBA.
+- **Ngày ghi**: 2026-11-16
