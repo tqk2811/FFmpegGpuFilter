@@ -12,6 +12,7 @@ build/matting-test.png, the portrait the GPU tests compare against the CPU refer
     py scripts/convert-matting-models.py modnet-webcam           chosen models
     py scripts/convert-matting-models.py --paddle-python <exe>   run the Paddle steps with another Python
     py scripts/convert-matting-models.py --bin <gpufx-nnconv>    use a built converter instead of `cargo run`
+    py scripts/convert-matting-models.py --strict                fail when the ncnn files differ from source.json
 
 Needs Python 3.10 to 3.12 with: torch (CPU is enough), onnx, pnnx, pillow (MODNet, the test image), and
 paddlepaddle 3.1 and paddle2onnx 2.1 (PP-HumanSeg). paddle2onnx can fail to load next to torch or
@@ -26,7 +27,7 @@ source.json of a matting model:
   "export"       {"height", "width"}: the input size of the export (MODNet's graph runs at any multiple of 32
                  after it; PP-HumanSeg's is fixed)
   "sha256_param", "sha256_bin"   the ncnn files this script made with the tool versions above; another
-                 version may write other bytes (a warning, not an error)
+                 version may write other bytes (a warning, an error with --strict)
 """
 import argparse
 import hashlib
@@ -197,7 +198,10 @@ def build(name, mdir, args):
     for key, f in (("sha256_param", param), ("sha256_bin", binf)):
         want, got = src.get(key), sha256(f)
         if want and want != got:
-            print(f"warning: {name}: {f.name} has sha256 {got}, source.json {key} is {want} (another pnnx or exporter version?)")
+            msg = f"{name}: {f.name} has sha256 {got}, source.json {key} is {want} (another pnnx or exporter version?)"
+            if args.strict:
+                raise SystemExit(msg)
+            print(f"warning: {msg}")
     lic = None
     if src.get("license_url"):
         lic = fetch(src["license_url"], src["sha256_license"], work / "LICENSE")
@@ -229,6 +233,7 @@ def main():
     ap.add_argument("--python", default=sys.executable, help="Python with torch (MODNet export)")
     ap.add_argument("--paddle-python", default=sys.executable, help="Python with paddlepaddle and paddle2onnx")
     ap.add_argument("--bin", default="", help="a built gpufx-nnconv")
+    ap.add_argument("--strict", action="store_true", help="fail when the ncnn files differ from sha256_param / sha256_bin")
     args = ap.parse_args()
     base = ROOT / "packages" / FILTER
     dirs = {d.name: d for d in sorted(base.iterdir()) if (d / "source.json").exists()}

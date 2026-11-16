@@ -73,13 +73,13 @@
 - **Ngày ghi**: 2026-10-21
 
 ### [Thấp] Matting: các phần để sau của `FrameMatte`
-- **Vấn đề**: (1) resize khung xuống kích thước model là bilinear không antialias (demo MODNet dùng `INTER_AREA`): khung 4K xuống 512 bị răng cưa, có thể làm alpha rung; (2) PP-HumanSeg kéo giãn mọi khung về 256x144, khung dọc bị méo, có thể letterbox; (3) chưa có làm mượt theo thời gian (MODNet webcam không có), video có thể nhấp nháy viền; (4) chưa có filter FFmpeg / FFI cho `gpufx_ai_matting`, tên filter mới chỉ dùng để gắn `used_for`; (5) `draw` tạo uniform buffer và bind group mỗi lần gọi.
+- **Vấn đề**: (1) resize khung xuống kích thước model là bilinear không antialias (demo MODNet dùng `INTER_AREA`): khung 4K xuống 512 bị răng cưa, có thể làm alpha rung; (2) PP-HumanSeg kéo giãn mọi khung về 256x144, khung dọc bị méo, có thể letterbox; (3) chưa có làm mượt theo thời gian (MODNet webcam không có), video có thể nhấp nháy viền; (4) chưa có filter FFmpeg / FFI cho `gpufx_ai_matting`, tên filter mới chỉ dùng để gắn `used_for`; (5) `draw` tạo uniform buffer và bind group mỗi lần gọi, `encode` tạo bind group input mỗi frame: nên cache theo texture view (hoặc theo khung của pool).
 - **Vị trí**: [matte_in.wgsl:30](../crates/gpufx-core/src/nn/matte_in.wgsl#L30), [matte.rs:262](../crates/gpufx-core/src/nn/matte.rs#L262), [matte.rs:418](../crates/gpufx-core/src/nn/matte.rs#L418), [used_for.rs:15](../crates/gpufx-core/src/used_for.rs#L15)
 - **Vì sao**: chất lượng alpha trên video thật và tích hợp vào editor.
 - **Ngày ghi**: 2026-11-17
 
 ### [Thấp] Runtime nn: pooling global và instance_norm chưa tối ưu
-- **Vấn đề**: `pool.wgsl` cho mỗi phần tử ra một thread, pooling global nên một thread cộng cả mặt channel; `instance_norm.wgsl` một workgroup mỗi channel (MODNet chỉ 8 đến 48 channel, ít workgroup trên mặt lớn). MODNet f16 ở 896x512 mất ~14,6 ms/frame trên RTX 4060 Laptop, chưa profile xem hai op này chiếm bao nhiêu.
+- **Vấn đề**: `pool.wgsl` cho mỗi phần tử ra một thread, pooling global nên một thread cộng cả mặt channel (nên reduce song song trong workgroup như `instance_norm.wgsl`); `instance_norm.wgsl` một workgroup mỗi channel (MODNet chỉ 8 đến 48 channel, ít workgroup trên mặt lớn). MODNet f16 ở 896x512 mất ~14,6 ms/frame trên RTX 4060 Laptop, chưa profile xem hai op này chiếm bao nhiêu.
 - **Vị trí**: [pool.wgsl:28](../crates/gpufx-core/src/nn/pool.wgsl#L28), [instance_norm.wgsl:38](../crates/gpufx-core/src/nn/instance_norm.wgsl#L38)
 - **Vì sao**: chia mặt cho nhiều workgroup (reduce hai tầng) nếu profile cho thấy đáng.
 - **Ngày ghi**: 2026-11-17
