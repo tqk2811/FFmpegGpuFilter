@@ -12,10 +12,13 @@ gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> --used-
 
 `-o` ending in `.zip` writes a zip, anything else a directory with the same files. The name defaults to the
 output file stem. `--used-for` (required) is written to `used_for` of `model.json`: `gpufx_ai_upscale` for a
-`super_resolution` model, `gpufx_ai_framerate` for a `frame_interp` one (checked against the `kind` of `io.json`).
+`super_resolution` model, `gpufx_ai_framerate` for a `frame_interp` one, `gpufx_ai_matting` for a `matting` one
+(checked against the `kind` of `io.json`).
 Each `packages/gpufx_ai_*/*/source.json` has its `"used_for"`, which the fetch scripts pass on. Model files are not in git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` download the
 models listed in `packages/gpufx_ai_*/*/source.json` (pinned URLs, sha256 checked) into `build/packages/<filter>/<name>/` and convert them
-to `build/packages/<filter>/<name>.zip`.
+to `build/packages/<filter>/<name>.zip`. The matting models have no ncnn release: `scripts/convert-matting-models.py`
+downloads their upstream files (pinned in `packages/gpufx_ai_matting/*/source.json`), exports them to ONNX, converts
+them with pnnx and then with `gpufx-nnconv` (see "Matting" below); the fetch scripts skip them.
 
 ## Package files
 
@@ -52,7 +55,8 @@ original tensor. `outputs` are the tensors no op reads.
   "ops": [ { "op": "conv2d", "name": "convrelu_0", "inputs": ["18"], "output": "20", "...": "params" } ] }
 ```
 
-`used_for` (required) lists the FFmpeg filters the model is for: `gpufx_ai_upscale`, `gpufx_ai_framerate`. A
+`used_for` (required) lists the FFmpeg filters the model is for: `gpufx_ai_upscale`, `gpufx_ai_framerate`,
+`gpufx_ai_matting`. A
 missing or empty list, or an unknown name, fails to load. Each filter checks its own name is listed
 (`package rife-v4.6 is for gpufx_ai_framerate, not gpufx_ai_upscale`); an effect package given to an AI filter, or
 a model given to `gpufx`, fails saying what kind of package it is and which filter takes it. A package converted
@@ -63,9 +67,9 @@ parameters of its kind. Unknown ncnn layer types or parameters make the converte
 
 | op | Parameters | Meaning |
 |---|---|---|
-| `conv2d` | `in_channels`, `out_channels`, `kernel` [h,w], `stride` [h,w], `dilation` [h,w], `pad` [top,left,bottom,right], `activation`, `weight`, `bias` | cross-correlation with zero padding, no groups; weight layout `[out][in][kh][kw]` (ncnn native) |
+| `conv2d` | `in_channels`, `out_channels`, `kernel` [h,w], `stride` [h,w], `dilation` [h,w], `pad` [top,left,bottom,right], `groups` (optional, 1), `activation`, `weight`, `bias` | cross-correlation with zero padding; weight layout `[out][in / groups][kh][kw]` (ncnn native). Output channel `o` reads input channels `[g * in / groups, (g + 1) * in / groups)`, `g = o / (out / groups)`; `groups == in == out` is depthwise. The GPU runs groups 1 and depthwise only (another count fails to load) |
 | `deconv2d` | same, plus `output_pad` [h,w] | transposed convolution; weight layout `[out][in][kh][kw]` (ncnn native; PyTorch `ConvTranspose2d` is `[in][out]`), kernel not flipped |
-| `activation` | `type` | from ReLU (slope 0 is `relu`, else `leaky_relu`) and Sigmoid layers |
+| `activation` | `type` | from ReLU (slope 0 is `relu`, else `leaky_relu`), Sigmoid, HardSigmoid and HardSwish layers |
 | `binary` | `kind`, `scalar` | `add sub mul div max min pow rsub rdiv`; one input when `scalar` is set, else two inputs whose dimensions are equal or 1 (a size 1 dimension is repeated, e.g. a `1 x H x W` mask times a `3 x H x W` image). `rsub` is `b - a`, `rdiv` is `b / a` (`b` the scalar or the second input) |
 | `eltwise` | `kind` (`prod sum max`), `coeffs` | n inputs; `sum` with `coeffs` is `sum(c_i * x_i)` |
 | `concat` | `axis` | along channels (only `0`) |
@@ -75,9 +79,24 @@ parameters of its kind. Unknown ncnn layer types or parameters make the converte
 | `warp` | `variant` (`rife`) | inputs `[image, flow]`, flow has 2 channels |
 | `prelu` | `slope` (f32 blob) | `x >= 0 ? x : slope[c] * x`; `slope.count` is the channel count, or 1 for one shared slope |
 | `clip` | `min`, `max` | `clamp(x, min, max)` (ncnn Clip; a missing bound is the f32 limit) |
+| `pool` | `kind` (`max avg`), `global`, `kernel` [h,w], `stride` [h,w], `pad` [top,left,bottom,right], `count_include_pad` | `global`: the max or mean of each channel plane, output `C x 1 x 1` (kernel, stride and pad unused). Else a window: output size as a convolution of dilation 1, a window counts only the pixels inside the input (max ignores the padding; average divides by that count, or by `kh * kw` with `count_include_pad`); the padding is smaller than the kernel |
+| `instance_norm` | `channels`, `eps`, `gamma`, `beta` | per channel `(x - mean) / sqrt(var + eps)` over its plane (biased variance around the mean), then `* gamma[c] + beta[c]` when both f32 blobs are given (both or neither) |
 
-`activation` of a conv is `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}` or `{"type":"sigmoid"}`,
-applied after the bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
+`activation` of a conv is `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}`, `{"type":"sigmoid"}`,
+`{"type":"clip","min":a,"max":b}`, `{"type":"hard_sigmoid","alpha":a,"beta":b}` or
+`{"type":"hard_swish","alpha":a,"beta":b}`, applied after the bias; an `activation` op takes the same types.
+`leaky_relu(x) = x >= 0 ? x : s * x`, `hard_sigmoid(x) = clamp(a * x + b, 0, 1)`,
+`hard_swish(x) = x * hard_sigmoid(x)` (ncnn HardSigmoid / HardSwish, whose defaults are `a = 0.2`, `b = 0.5`).
+
+The converter also maps ncnn layers that have no op of their own: `ConvolutionDepthWise` and a grouped
+`Convolution` are `conv2d` with `groups`; `BatchNorm` is a depthwise 1x1 `conv2d` (weight
+`slope / sqrt(var + eps)`, bias `bias - mean * weight`, computed in f64); `InnerProduct` of a `C x 1 x 1` vector
+(the output of a global `Pooling` or of another InnerProduct) is a 1x1 `conv2d` (weights `[out][in]`), and a
+`Reshape` of such a vector to `w = 1, h = 1` is an alias like `Split`; a `Slice` along the channels with several
+outputs becomes one `slice` op per output (`<layer>_<k>`); activation type 3 (clip) and 6 (hard swish) of a
+convolution or InnerProduct map to the types above; `4=-233` (SAME padding, as pnnx writes ONNX `auto_pad`) is
+taken for stride 1 and an odd kernel span only, where it is the symmetric `(span - 1) / 2`. `Pooling` needs
+`pad_mode` 1 (valid, explicit pads) or `global`, and is not adaptive.
 
 ### Parameters
 
@@ -160,6 +179,32 @@ convolution sums in f16 (f32 sums cost about 55% more time for ~10 dB), so it as
 65504, the f16 maximum (inputs above it are clamped): fine for models on [0, 1] images such as Real-ESRGAN; force
 `Precision::F32` for a model with large activations.
 
+### Matting
+
+The `matting` models (`packages/gpufx_ai_matting/*/io.json`, run by `FrameMatte`, filter name `gpufx_ai_matting`):
+
+```json
+{ "kind": "matting", "family": "modnet", "inputs": { "image": "in0" }, "output": "out0", "color": "rgb",
+  "mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5],
+  "size": { "mode": "short_side", "short_side": 512, "multiple": 32 },
+  "matte": { "type": "alpha", "channel": 0 } }
+```
+
+- `size` is the model input size for a `w x h` frame. `short_side`: the frame scaled so its short side is
+  `short_side`, each side then rounded to the nearest multiple of `multiple` (at least one; default 1), so the
+  aspect ratio holds up to that rounding (MODNet: 1920x1080 runs at 896x512). `fixed` with `height` and `width`:
+  always that size, the frame stretched (PP-HumanSeg: 256x144).
+- The frame is resized to it bilinearly with half-pixel centres, the source clamped to the frame, no antialias
+  (the `resize` rule above), as RGB in [0, 1], then `(v - mean) / std` per channel (defaults 0 and 1).
+- `matte` turns the output (the model size, any channel count) into one alpha per pixel: `alpha` takes channel
+  `channel` as it is, `sigmoid` its sigmoid, `softmax` the softmax over the channels at `channel` (the foreground
+  class; PP-HumanSeg's export ends in a Softmax the conversion removes, so the runtime takes it). The result is
+  clamped to [0, 1].
+- `FrameMatte::draw` resizes the matte bilinearly (half-pixel centres, clamped) into a one-channel texture of any
+  size (r8unorm, r16float or r32float): the model size for the raw matte, the frame size to cut the frame out.
+
+The CPU reference of these steps is `gpufx-nnconv frames::matte` (and `frames::resize_matte`).
+
 ## Bundles (several scales in one package)
 
 ```
@@ -182,10 +227,12 @@ A package without `package.json` is a single model package (RIFE).
 
 ## Not supported (converter fails)
 
-Quantized weights (tags other than fp16 and f32), grouped convolution, `Crop` other than one channel range,
-`Concat` and `Crop` on axes other than channels, `PixelShuffle` mode other than 0, fixed deconvolution output
-size, SAME padding, activation types other than none, relu, leaky relu and sigmoid inside a convolution, `PReLU`
-parameters other than `num_slope`, any layer type not in the table.
+Quantized weights (tags other than fp16 and f32), grouped deconvolution, `Crop` other than one channel range,
+`Concat`, `Crop` and `Slice` on axes other than channels, `PixelShuffle` mode other than 0, fixed deconvolution
+output size, SAME padding other than stride 1 with an odd kernel, activation types other than none, relu, leaky
+relu, clip, sigmoid and hard swish inside a convolution, `PReLU` parameters other than `num_slope`, `InnerProduct`
+or `Reshape` of anything but a `C x 1 x 1` vector, adaptive `Pooling` or a `pad_mode` other than valid,
+`Softmax` (`scripts/convert-matting-models.py` removes PP-HumanSeg's), any layer type not in the table.
 
 ## Verification
 
@@ -198,3 +245,9 @@ deconvolution layout, the resize rule, `warp` and the op order.
 realesr-animevideov3 x2, x3 and x4 variants match at 58.0, 57.9 and 58.4 dB, realesr-general-x4v3 at 56.2 dB
 (that model is not in the ncnn release; compared with the same weights run by ncnn), which confirms `prelu`,
 `clip`, bicubic `resize` and the reflect padding.
+
+The matting packages match onnxruntime on their upstream ONNX export within 8e-6 (MODNet at 512x512) and 3e-6
+(PP-HumanSeg, after the softmax) on a real portrait, which confirms the depthwise and grouped convolution,
+`BatchNorm`, `InstanceNorm`, pooling, `InnerProduct`, hard activations and the downscaling `resize`. On the GPU
+(`matting_packages_match_the_cpu_reference` in `crates/gpufx-core/tests/nn.rs`) the f32 alpha is within 1e-5 of
+the CPU reference; with f16 convolutions the IoU of the mattes at 0.5 stays above 0.9998.

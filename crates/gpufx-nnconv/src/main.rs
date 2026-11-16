@@ -18,7 +18,8 @@ usage:
              one) and LICENSE. -o ending in .zip writes a zip,
              anything else a directory. The name defaults to the output file stem.
              --used-for lists the FFmpeg filters the model is for (gpufx_ai_upscale
-             for super_resolution, gpufx_ai_framerate for frame_interp).
+             for super_resolution, gpufx_ai_framerate for frame_interp,
+             gpufx_ai_matting for matting).
              --rewrite rife-v4-scale turns the fixed scale 1 of a RIFE v4.6 IFNet into the
              run-time parameter scale (0.25..1); a model of another layout is an error.
   gpufx-nnconv bundle --variant <dir>=<pkg.zip|dir> [--variant ...]
@@ -74,7 +75,9 @@ fn ncnn(args: &[String]) -> Result<(), String> {
     }
     let (Some(param), Some(bin), Some(io), Some(out)) = (param, bin, io, out) else { return Err(USAGE.to_string()) };
     let Some(used_for) = used_for else {
-        return Err(format!("--used-for is required: the filters the model is for (gpufx_ai_upscale or gpufx_ai_framerate)\n{USAGE}"));
+        return Err(format!(
+            "--used-for is required: the filters the model is for (gpufx_ai_upscale, gpufx_ai_framerate or gpufx_ai_matting)\n{USAGE}"
+        ));
     };
     let out = PathBuf::from(out);
     let name = name.unwrap_or_else(|| out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());

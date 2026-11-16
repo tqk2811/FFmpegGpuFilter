@@ -11,11 +11,13 @@ pub const GPUFX: &str = "gpufx";
 pub const AI_UPSCALE: &str = "gpufx_ai_upscale";
 /// The `gpufx_ai_framerate` filter: gpufx-nn `frame_interp` models.
 pub const AI_FRAMERATE: &str = "gpufx_ai_framerate";
+/// Background removal: gpufx-nn `matting` models ([`crate::nn::FrameMatte`]).
+pub const AI_MATTING: &str = "gpufx_ai_matting";
 /// The io.json `kind` each AI filter runs. Same table as `gpufx-nnconv` (`package::FILTERS`), which does not
 /// depend on this crate.
-const KINDS: &[(&str, &str)] = &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp")];
+const KINDS: &[(&str, &str)] = &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp"), (AI_MATTING, "matting")];
 /// Every filter name `used_for` may list.
-pub const FILTERS: &[&str] = &[GPUFX, AI_UPSCALE, AI_FRAMERATE];
+pub const FILTERS: &[&str] = &[GPUFX, AI_UPSCALE, AI_FRAMERATE, AI_MATTING];
 
 /// Checks a `used_for` list: not empty, known filter names, no duplicates.
 pub(crate) fn validate(list: &[String]) -> Result<(), String> {
@@ -121,6 +123,8 @@ mod tests {
         let io = |k: &str| serde_json::json!({ "kind": k });
         assert!(check_kind("a", &io("super_resolution"), AI_UPSCALE).is_ok());
         assert!(check_kind("a", &io("frame_interp"), AI_FRAMERATE).is_ok());
+        assert!(check_kind("a", &io("matting"), AI_MATTING).is_ok());
+        assert!(check_kind("a", &io("matting"), AI_UPSCALE).is_err());
         assert!(check_kind("a", &serde_json::Value::Null, AI_UPSCALE).is_ok());
         let e = check_kind("m", &io("frame_interp"), AI_UPSCALE).unwrap_err().to_string();
         assert_eq!(

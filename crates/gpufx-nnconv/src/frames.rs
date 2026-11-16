@@ -205,3 +205,146 @@ mod tests {
         }
     }
 }
+
+/// The model size `(w, h)` of a `w x h` frame for a `matting` io.json `size` (see `MatteSize` in gpufx-core):
+/// `short_side` scales the short side to `short_side` and rounds each side to the nearest multiple of `multiple`
+/// (at least one); `fixed` is `width x height`.
+pub fn matte_size(io: &serde_json::Value, w: usize, h: usize) -> Result<(usize, usize)> {
+    let s = &io["size"];
+    let get = |k: &str| s[k].as_u64().filter(|v| *v > 0).map(|v| v as usize).ok_or_else(|| crate::Error(format!("io.json size.{k}")));
+    match s["mode"].as_str() {
+        Some("fixed") => Ok((get("width")?, get("height")?)),
+        Some("short_side") => {
+            let multiple = if s.get("multiple").is_some() { get("multiple")? } else { 1 };
+            let k = get("short_side")? as f64 / w.min(h).max(1) as f64;
+            let side = |v: usize| (((v as f64 * k) / multiple as f64).round() as usize).max(1) * multiple;
+            Ok((side(w), side(h)))
+        }
+        _ => fail("io.json size.mode must be \"short_side\" or \"fixed\""),
+    }
+}
+
+/// The source taps of output pixel `d` of a bilinear resize from `i` to `o` pixels: half-pixel centres, clamped
+/// (`(x0, x1, weight of x1)`), in f32 as the shaders compute them.
+fn bilinear_tap(d: usize, i: usize, o: usize) -> (usize, usize, f32) {
+    let s = ((d as f32 + 0.5) * i as f32 / o as f32 - 0.5).clamp(0.0, (i - 1) as f32);
+    let x0 = s.floor();
+    (x0 as usize, (x0 as usize + 1).min(i - 1), s - x0)
+}
+
+/// The model input of a `matting` package for `img`: resized to the model size (bilinear, half-pixel centres,
+/// no antialias), RGB in [0, 1], then `(v - mean) / std`.
+pub fn matte_input(io: &serde_json::Value, img: &Rgb8) -> Result<Tensor> {
+    let (mw, mh) = matte_size(io, img.w, img.h)?;
+    let triple = |k: &str, d: f32| -> [f32; 3] {
+        let a = &io[k];
+        [0, 1, 2].map(|i| a[i].as_f64().map_or(d, |v| v as f32))
+    };
+    let (mean, std) = (triple("mean", 0.0), triple("std", 1.0));
+    let mut t = Tensor::zeros(3, mh, mw);
+    let px = |x: usize, y: usize, c: usize| img.data[(y * img.w + x) * 3 + c] as f32 / 255.0;
+    for y in 0..mh {
+        let (y0, y1, fy) = bilinear_tap(y, img.h, mh);
+        for x in 0..mw {
+            let (x0, x1, fx) = bilinear_tap(x, img.w, mw);
+            for c in 0..3 {
+                let top = px(x0, y0, c) + (px(x1, y0, c) - px(x0, y0, c)) * fx;
+                let bot = px(x0, y1, c) + (px(x1, y1, c) - px(x0, y1, c)) * fx;
+                t.data[(c * mh + y) * mw + x] = (top + (bot - top) * fy - mean[c]) * (1.0 / std[c]);
+            }
+        }
+    }
+    Ok(t)
+}
+
+/// The alpha matte of `img` at the model size with the CPU reference executor, following the `matting` io.json
+/// of the package: [`matte_input`], run, then `matte.type` (`alpha` clamped, `sigmoid`, or `softmax` over the
+/// channels at `matte.channel`). Returns `(mw, mh, alpha)`.
+pub fn matte(model: &Reference, img: &Rgb8) -> Result<(usize, usize, Vec<f32>)> {
+    let io = &model.io;
+    if io["kind"] != "matting" {
+        return fail("io.json is not a matting description");
+    }
+    let in_name = io["inputs"]["image"].as_str().ok_or_else(|| crate::Error("io.json has no inputs.image".into()))?.to_string();
+    let out_name = io["output"].as_str().ok_or_else(|| crate::Error("io.json has no output".into()))?;
+    let x = matte_input(io, img)?;
+    let (mw, mh) = (x.w, x.h);
+    let mut inputs = HashMap::new();
+    inputs.insert(in_name, x);
+    let mut outputs = model.run(inputs)?;
+    let Some(out) = outputs.remove(out_name) else { return fail(format!("no output \"{out_name}\"")) };
+    if out.w != mw || out.h != mh {
+        return fail(format!("output is {}x{}, the matte must be the model size {mw}x{mh}", out.w, out.h));
+    }
+    let ch = io["matte"]["channel"].as_u64().unwrap_or(0) as usize;
+    if ch >= out.c {
+        return fail(format!("matte channel {ch} of an output of {} channels", out.c));
+    }
+    let plane = mw * mh;
+    let at = |k: usize, i: usize| out.data[k * plane + i];
+    let alpha = (0..plane)
+        .map(|i| {
+            let a = match io["matte"]["type"].as_str() {
+                Some("sigmoid") => 1.0 / (1.0 + (-at(ch, i)).exp()),
+                Some("softmax") => {
+                    let m = (0..out.c).map(|k| at(k, i)).fold(f32::NEG_INFINITY, f32::max);
+                    let s: f32 = (0..out.c).map(|k| (at(k, i) - m).exp()).sum();
+                    (at(ch, i) - m).exp() / s
+                }
+                _ => at(ch, i),
+            };
+            a.clamp(0.0, 1.0)
+        })
+        .collect();
+    Ok((mw, mh, alpha))
+}
+
+/// A matte resized to `dw x dh` the way `FrameMatte::draw` does: bilinear, half-pixel centres, clamped.
+pub fn resize_matte(alpha: &[f32], mw: usize, mh: usize, dw: usize, dh: usize) -> Vec<f32> {
+    let mut out = vec![0.0; dw * dh];
+    for y in 0..dh {
+        let (y0, y1, fy) = bilinear_tap(y, mh, dh);
+        for x in 0..dw {
+            let (x0, x1, fx) = bilinear_tap(x, mw, dw);
+            let a = |x: usize, y: usize| alpha[y * mw + x];
+            let top = a(x0, y0) + (a(x1, y0) - a(x0, y0)) * fx;
+            let bot = a(x0, y1) + (a(x1, y1) - a(x0, y1)) * fx;
+            out[y * dw + x] = top + (bot - top) * fy;
+        }
+    }
+    out
+}
+
+/// Intersection over union of two mattes thresholded at 0.5 (1 when both are empty).
+pub fn matte_iou(a: &[f32], b: &[f32]) -> f64 {
+    let (mut i, mut u) = (0usize, 0usize);
+    for (x, y) in a.iter().zip(b) {
+        let (p, q) = (*x >= 0.5, *y >= 0.5);
+        i += (p && q) as usize;
+        u += (p || q) as usize;
+    }
+    if u == 0 {
+        1.0
+    } else {
+        i as f64 / u as f64
+    }
+}
+
+#[cfg(test)]
+mod matte_tests {
+    use super::*;
+
+    #[test]
+    fn matte_sizes_and_taps() {
+        let io = serde_json::json!({"size": {"mode": "short_side", "short_side": 512, "multiple": 32}});
+        assert_eq!(matte_size(&io, 1920, 1080).unwrap(), (896, 512));
+        assert_eq!(matte_size(&io, 640, 480).unwrap(), (672, 512));
+        let fixed = serde_json::json!({"size": {"mode": "fixed", "height": 144, "width": 256}});
+        assert_eq!(matte_size(&fixed, 7, 9).unwrap(), (256, 144));
+        // halving: output pixel 0 is the mean of input 0 and 1; same size is a copy
+        assert_eq!(bilinear_tap(0, 4, 2), (0, 1, 0.5));
+        assert_eq!(bilinear_tap(3, 4, 4), (3, 3, 0.0));
+        assert_eq!(resize_matte(&[0.0, 1.0], 2, 1, 4, 1), [0.0, 0.25, 0.75, 1.0]);
+        assert_eq!(matte_iou(&[0.9, 0.1, 0.6], &[0.8, 0.7, 0.2]), 1.0 / 3.0);
+    }
+}

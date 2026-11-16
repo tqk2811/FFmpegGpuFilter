@@ -7,7 +7,7 @@ mod common;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpufx_core::nn::{FrameInterp, FrameUpscale, InterpFrames, NnModel, Precision, UpscaleFrames, UpscaleOptions};
+use gpufx_core::nn::{FrameInterp, FrameMatte, FrameUpscale, InterpFrames, NnModel, Precision, UpscaleFrames, UpscaleOptions};
 use gpufx_core::{ColorInfo, GpuContext, GpuFrame, Image, Matrix, PixelFormat, Range};
 use gpufx_nnconv::reference::{Reference, Tensor};
 
@@ -1629,4 +1629,183 @@ fn interp_frames_scale() {
     assert_eq!(fi.interp().plan().unwrap().tensor("in0").unwrap().h, 64);
     assert!(fi.set_scale(0.2).unwrap_err().to_string().contains("out of its range"));
     assert_eq!(fi.interp().param("scale"), Some(0.5), "a failed set keeps the value");
+}
+
+/// Renders the last matte of `fm` into a `w x h` texture of `format` and reads it back as f32.
+fn draw_matte(ctx: &GpuContext, fm: &FrameMatte, w: u32, h: u32, format: wgpu::TextureFormat) -> Vec<f32> {
+    let device = ctx.device();
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let bpp = format.block_copy_size(None).unwrap();
+    let row = (w * bpp).div_ceil(256) * 256;
+    let rb = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (row * h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&Default::default());
+    fm.draw(&mut enc, &tex.create_view(&Default::default())).unwrap();
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &rb,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    ctx.queue().submit([enc.finish()]);
+    let slice = rb.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mut out = Vec::with_capacity((w * h) as usize);
+    {
+        let m = slice.get_mapped_range().unwrap();
+        for y in 0..h as usize {
+            let r = &m[y * row as usize..][..(w * bpp) as usize];
+            match format {
+                wgpu::TextureFormat::R8Unorm => out.extend(r.iter().map(|&v| v as f32 / 255.0)),
+                wgpu::TextureFormat::R16Float => {
+                    out.extend(r.as_chunks::<2>().0.iter().map(|c| gpufx_nnconv::reference::f16_to_f32(u16::from_le_bytes(*c))))
+                }
+                _ => out.extend(r.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c))),
+            }
+        }
+    }
+    rb.unmap();
+    out
+}
+
+fn rgb_of(rgba: &[u8]) -> Vec<u8> {
+    rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()
+}
+
+fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len());
+    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max)
+}
+
+/// `FrameMatte` against gpufx-nnconv `frames::matte` on a small 2-class model of each io.json kind of size and
+/// matte: the resize and normalization of the frame, the softmax / sigmoid / alpha of the output, and the draw
+/// at the model size and at the frame size in every target format.
+#[test]
+fn frame_matte_matches_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(21));
+    let ops = vec![
+        conv(&mut w, &mut r, "conv2d", "c", "in0", 3, 2, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], "null"),
+        op("activation", "out0", &["c"], r#""type":"hard_swish","alpha":0.5,"beta":0.5"#),
+    ];
+    let json = model(&["in0"], &["out0"], &ops)
+        .replace(r#""used_for":["gpufx_ai_upscale","gpufx_ai_framerate"]"#, r#""used_for":["gpufx_ai_matting"]"#);
+    let (fw, fh) = (37u32, 23u32);
+    let mut rng = Rng(22);
+    let rgba: Vec<u8> = (0..fw * fh * 4).map(|_| ((rng.next() + 1.0) * 127.5) as u8).collect();
+    let frame = gpufx_nnconv::frames::Rgb8 { w: fw as usize, h: fh as usize, data: rgb_of(&rgba) };
+    for (size, matte) in [
+        (r#"{"mode":"short_side","short_side":16,"multiple":8}"#, r#"{"type":"softmax","channel":1}"#),
+        (r#"{"mode":"fixed","height":12,"width":20}"#, r#"{"type":"sigmoid","channel":0}"#),
+        (r#"{"mode":"short_side","short_side":40,"multiple":1}"#, r#"{"type":"alpha","channel":1}"#),
+    ] {
+        let io = format!(
+            r#"{{"kind":"matting","inputs":{{"image":"in0"}},"output":"out0","color":"rgb","mean":[0.4,0.5,0.6],"std":[0.2,0.25,0.5],"size":{size},"matte":{matte}}}"#
+        );
+        let cpu = Reference::from_parts(json.as_bytes(), &w.0, Some(io.as_bytes())).unwrap();
+        let (mw, mh, want) = gpufx_nnconv::frames::matte(&cpu, &frame).unwrap();
+        let gpu = NnModel::from_parts(ctx.clone(), json.as_bytes(), &w.0, Some(io.as_bytes())).unwrap();
+        let mut fm = FrameMatte::new(Arc::new(gpu)).unwrap();
+        let (gw, gh, got) = fm.matte(&view(&rgba, fw, fh)).unwrap();
+        assert_eq!((gw as usize, gh as usize), (mw, mh), "{size}");
+        assert!(max_diff(&got, &want) < 1e-5, "{size} {matte}: {}", max_diff(&got, &want));
+        let d = max_diff(&draw_matte(&ctx, &fm, gw, gh, wgpu::TextureFormat::R32Float), &got);
+        assert!(d < 1e-6, "the draw at the model size is a copy: {d}");
+        let big = gpufx_nnconv::frames::resize_matte(&want, mw, mh, fw as usize, fh as usize);
+        for (format, tol) in
+            [(wgpu::TextureFormat::R32Float, 1e-5), (wgpu::TextureFormat::R16Float, 1e-3), (wgpu::TextureFormat::R8Unorm, 1.0 / 255.0)]
+        {
+            let d = max_diff(&draw_matte(&ctx, &fm, fw, fh, format), &big);
+            assert!(d <= tol, "{format:?}: {d}");
+        }
+    }
+    // a model that is not for matting is refused
+    let up = NnModel::from_parts(ctx.clone(), model(&["in0"], &["out0"], &ops).as_bytes(), &w.0, None).unwrap();
+    assert!(FrameMatte::new(Arc::new(up)).is_err());
+}
+
+/// The matting packages (`build/packages/gpufx_ai_matting/*.zip` and `build/matting-test.png` from
+/// `scripts/convert-matting-models.py`) on the GPU against the CPU reference: the f32 graph on random inputs
+/// (1e-4), the alpha of a portrait (f32 and f16: IoU of the mattes at 0.5 and the largest difference), and the
+/// time per frame at the model input size. Skipped when the files are not there. Run in release: the CPU
+/// reference is slow in debug.
+#[test]
+fn matting_packages_match_the_cpu_reference() {
+    let Some(ctx) = gpu() else { return };
+    let img_path = repo_path("build/matting-test.png");
+    let Ok(img) = image::open(&img_path) else {
+        eprintln!("skipping: no {} (scripts/convert-matting-models.py writes it)", img_path.display());
+        return;
+    };
+    let img = img.to_rgb8();
+    let (fw, fh) = img.dimensions();
+    let rgba = rgba_of(img.as_raw());
+    let frame = gpufx_nnconv::frames::Rgb8 { w: fw as usize, h: fh as usize, data: img.as_raw().clone() };
+    for name in ["modnet-webcam", "pp-humanseg-v2-lite"] {
+        let path = repo_path(&format!("build/packages/gpufx_ai_matting/{name}.zip"));
+        if !path.exists() {
+            eprintln!("skipping {name}: no {}", path.display());
+            continue;
+        }
+        let cpu = Reference::load(&path).unwrap();
+        let (mw, mh, want) = gpufx_nnconv::frames::matte(&cpu, &frame).unwrap();
+        // the graph in f32 on random inputs of the model size
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut file = |n: &str| {
+            let mut b = Vec::new();
+            std::io::Read::read_to_end(&mut zip.by_name(n).unwrap(), &mut b).unwrap();
+            b
+        };
+        let (json, weights) = (file("model.json"), file("weights.bin"));
+        let mut r = Rng(31);
+        check_with(
+            &ctx,
+            std::str::from_utf8(&json).unwrap(),
+            &weights,
+            &[("in0", [3, mh as u32, mw as u32])],
+            &mut r,
+            Precision::F32,
+            1e-4,
+        );
+        for precision in [Precision::F32, Precision::Auto] {
+            let mut fm = FrameMatte::open(ctx.clone(), &path, precision).unwrap();
+            let (gw, gh, got) = fm.matte(&view(&rgba, fw, fh)).unwrap();
+            assert_eq!((gw as usize, gh as usize), (mw, mh));
+            let iou = gpufx_nnconv::frames::matte_iou(&got, &want);
+            let d = max_diff(&got, &want);
+            let f16 = fm.model().uses_f16();
+            fm.matte(&view(&rgba, fw, fh)).unwrap();
+            let ms = fm.bench(20).unwrap();
+            eprintln!(
+                "{name} {} {mw}x{mh}: IoU {iou:.5}, max |alpha diff| {d:.2e} against the CPU reference; {ms:.2} ms/frame on {}",
+                if f16 { "f16" } else { "f32" },
+                ctx.description()
+            );
+            assert!(iou >= if f16 { 0.99 } else { 0.999 }, "{name}: IoU {iou}");
+            if !f16 {
+                assert!(d < 1e-3, "{name}: {d}");
+            }
+            // a 1080p frame (MODNet runs at 896x512)
+            let big = rgba_of(image::imageops::resize(&img, 1920, 1080, image::imageops::FilterType::Triangle).as_raw());
+            let (bw, bh, _) = fm.matte(&view(&big, 1920, 1080)).unwrap();
+            let ms = fm.bench(20).unwrap();
+            eprintln!("{name} {} 1080p frame at {bw}x{bh}: {ms:.2} ms/frame", if f16 { "f16" } else { "f32" });
+        }
+    }
 }

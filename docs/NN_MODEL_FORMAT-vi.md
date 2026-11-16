@@ -12,10 +12,13 @@ gpufx-nnconv ncnn --param <model.param> --bin <model.bin> --io <io.json> --used-
 
 `-o` kết thúc bằng `.zip` thì ghi zip, còn lại ghi thư mục có cùng các file. Mặc định tên model là tên file output
 (bỏ đuôi). `--used-for` (bắt buộc) được ghi vào `used_for` của `model.json`: `gpufx_ai_upscale` cho model
-`super_resolution`, `gpufx_ai_framerate` cho model `frame_interp` (đối chiếu với `kind` của `io.json`). Mỗi
+`super_resolution`, `gpufx_ai_framerate` cho model `frame_interp`, `gpufx_ai_matting` cho model `matting` (đối
+chiếu với `kind` của `io.json`). Mỗi
 `packages/gpufx_ai_*/*/source.json` có `"used_for"` riêng, script fetch truyền tiếp cho converter. File model không nằm trong git: `scripts/fetch-models.sh` / `scripts/fetch-models.ps1` tải các model
 liệt kê trong `packages/gpufx_ai_*/*/source.json` (URL ghim commit, kiểm sha256) vào `build/packages/<filter>/<name>/` rồi convert thành
-`build/packages/<filter>/<name>.zip`.
+`build/packages/<filter>/<name>.zip`. Model tách nền (matting) không có bản ncnn phát hành:
+`scripts/convert-matting-models.py` tải file gốc (ghim trong `packages/gpufx_ai_matting/*/source.json`), xuất ra
+ONNX, convert bằng pnnx rồi bằng `gpufx-nnconv` (xem mục "Matting" bên dưới); script fetch bỏ qua chúng.
 
 ## File trong package
 
@@ -52,7 +55,8 @@ không op nào đọc.
   "ops": [ { "op": "conv2d", "name": "convrelu_0", "inputs": ["18"], "output": "20", "...": "params" } ] }
 ```
 
-`used_for` (bắt buộc) liệt kê các filter FFmpeg dùng model: `gpufx_ai_upscale`, `gpufx_ai_framerate`. Thiếu, mảng
+`used_for` (bắt buộc) liệt kê các filter FFmpeg dùng model: `gpufx_ai_upscale`, `gpufx_ai_framerate`,
+`gpufx_ai_matting`. Thiếu, mảng
 rỗng hoặc tên lạ thì không load được. Mỗi filter kiểm tên của chính nó có trong danh sách
 (`package rife-v4.6 is for gpufx_ai_framerate, not gpufx_ai_upscale`); đưa package effect cho filter AI, hoặc model
 cho `gpufx`, thì lỗi nói rõ đó là loại package gì và filter nào dùng được. Package convert từ trước khi có
@@ -63,9 +67,9 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 
 | op | Tham số | Ý nghĩa |
 |---|---|---|
-| `conv2d` | `in_channels`, `out_channels`, `kernel` [h,w], `stride` [h,w], `dilation` [h,w], `pad` [top,left,bottom,right], `activation`, `weight`, `bias` | cross-correlation, pad bằng 0, không group; layout weight `[out][in][kh][kw]` (ncnn native) |
+| `conv2d` | `in_channels`, `out_channels`, `kernel` [h,w], `stride` [h,w], `dilation` [h,w], `pad` [top,left,bottom,right], `groups` (tuỳ chọn, 1), `activation`, `weight`, `bias` | cross-correlation, pad bằng 0; layout weight `[out][in / groups][kh][kw]` (ncnn native). Channel ra `o` đọc các channel vào `[g * in / groups, (g + 1) * in / groups)`, `g = o / (out / groups)`; `groups == in == out` là depthwise. GPU chỉ chạy groups 1 và depthwise (số group khác thì nạp lỗi) |
 | `deconv2d` | như trên, thêm `output_pad` [h,w] | transposed convolution; layout weight `[out][in][kh][kw]` (ncnn native; `ConvTranspose2d` của PyTorch là `[in][out]`), kernel không lật |
-| `activation` | `type` | từ layer ReLU (slope 0 là `relu`, khác 0 là `leaky_relu`) và Sigmoid |
+| `activation` | `type` | từ layer ReLU (slope 0 là `relu`, khác 0 là `leaky_relu`), Sigmoid, HardSigmoid và HardSwish |
 | `binary` | `kind`, `scalar` | `add sub mul div max min pow rsub rdiv`; có `scalar` thì 1 input, không thì 2 input có từng chiều bằng nhau hoặc bằng 1 (chiều kích thước 1 được lặp lại, vd mask `1 x H x W` nhân ảnh `3 x H x W`). `rsub` là `b - a`, `rdiv` là `b / a` (`b` là scalar hoặc input thứ hai) |
 | `eltwise` | `kind` (`prod sum max`), `coeffs` | n input; `sum` có `coeffs` là `sum(c_i * x_i)` |
 | `concat` | `axis` | theo channel (chỉ `0`) |
@@ -75,9 +79,23 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 | `warp` | `variant` (`rife`) | input `[image, flow]`, flow có 2 channel |
 | `prelu` | `slope` (blob f32) | `x >= 0 ? x : slope[c] * x`; `slope.count` là số channel, hoặc 1 khi mọi channel dùng chung một slope |
 | `clip` | `min`, `max` | `clamp(x, min, max)` (Clip của ncnn; thiếu cận nào thì lấy giới hạn của f32) |
+| `pool` | `kind` (`max avg`), `global`, `kernel` [h,w], `stride` [h,w], `pad` [top,left,bottom,right], `count_include_pad` | `global`: max hoặc trung bình của từng mặt channel, ra `C x 1 x 1` (bỏ qua kernel, stride, pad). Còn lại là cửa sổ: kích thước ra như convolution dilation 1, cửa sổ chỉ tính các pixel nằm trong input (max bỏ qua phần pad; trung bình chia cho số pixel đó, hoặc cho `kh * kw` khi có `count_include_pad`); pad nhỏ hơn kernel |
+| `instance_norm` | `channels`, `eps`, `gamma`, `beta` | mỗi channel `(x - mean) / sqrt(var + eps)` trên mặt của nó (phương sai lệch quanh mean), rồi `* gamma[c] + beta[c]` khi có cả hai blob f32 (có cả hai hoặc không có cái nào) |
 
-`activation` của conv là `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}` hoặc `{"type":"sigmoid"}`,
-áp sau khi cộng bias. `leaky_relu(x) = x >= 0 ? x : s * x`.
+`activation` của conv là `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}`, `{"type":"sigmoid"}`,
+`{"type":"clip","min":a,"max":b}`, `{"type":"hard_sigmoid","alpha":a,"beta":b}` hoặc
+`{"type":"hard_swish","alpha":a,"beta":b}`, áp sau khi cộng bias; op `activation` nhận cùng các type đó.
+`leaky_relu(x) = x >= 0 ? x : s * x`, `hard_sigmoid(x) = clamp(a * x + b, 0, 1)`,
+`hard_swish(x) = x * hard_sigmoid(x)` (HardSigmoid / HardSwish của ncnn, mặc định `a = 0.2`, `b = 0.5`).
+
+Converter còn đổi các layer ncnn không có op riêng: `ConvolutionDepthWise` và `Convolution` có group là `conv2d`
+có `groups`; `BatchNorm` là `conv2d` depthwise 1x1 (weight `slope / sqrt(var + eps)`, bias `bias - mean * weight`,
+tính bằng f64); `InnerProduct` trên vector `C x 1 x 1` (output của `Pooling` global hoặc của InnerProduct khác) là
+`conv2d` 1x1 (weights `[out][in]`), và `Reshape` vector đó thành `w = 1, h = 1` là alias như `Split`; `Slice` theo
+channel nhiều output thành mỗi output một op `slice` (`<layer>_<k>`); activation type 3 (clip) và 6 (hard swish)
+của convolution hoặc InnerProduct đổi sang các type trên; `4=-233` (padding SAME, pnnx ghi từ `auto_pad` của ONNX)
+chỉ nhận khi stride 1 và độ rộng kernel lẻ, lúc đó là pad đối xứng `(span - 1) / 2`. `Pooling` cần `pad_mode` 1
+(valid, pad tường minh) hoặc `global`, và không adaptive.
 
 ### Tham số
 
@@ -160,6 +178,31 @@ f16 cộng dồn tổng convolution bằng f16 (cộng dồn f32 chậm hơn kho
 activation luôn nhỏ hơn nhiều so với 65504, giá trị lớn nhất của f16 (input vượt ngưỡng bị clamp): ổn với model
 chạy trên ảnh [0, 1] như Real-ESRGAN; model có activation lớn thì ép `Precision::F32`.
 
+### Matting
+
+Model `matting` (`packages/gpufx_ai_matting/*/io.json`, chạy bằng `FrameMatte`, tên filter `gpufx_ai_matting`):
+
+```json
+{ "kind": "matting", "family": "modnet", "inputs": { "image": "in0" }, "output": "out0", "color": "rgb",
+  "mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5],
+  "size": { "mode": "short_side", "short_side": 512, "multiple": 32 },
+  "matte": { "type": "alpha", "channel": 0 } }
+```
+
+- `size` là kích thước input của model cho khung `w x h`. `short_side`: co khung để cạnh ngắn bằng `short_side`,
+  rồi làm tròn mỗi cạnh về bội gần nhất của `multiple` (ít nhất một lần; mặc định 1), nên tỉ lệ khung giữ đúng tới
+  mức làm tròn đó (MODNet: 1920x1080 chạy ở 896x512). `fixed` với `height` và `width`: luôn kích thước đó, khung bị
+  kéo giãn (PP-HumanSeg: 256x144).
+- Khung được resize bilinear, tâm half-pixel, kẹp source trong khung, không antialias (quy tắc `resize` ở trên),
+  dạng RGB trong [0, 1], rồi `(v - mean) / std` theo từng channel (mặc định 0 và 1).
+- `matte` đổi output (kích thước model, số channel bất kỳ) thành một alpha mỗi pixel: `alpha` lấy nguyên channel
+  `channel`, `sigmoid` lấy sigmoid của nó, `softmax` lấy softmax theo channel tại `channel` (lớp foreground; bản xuất
+  của PP-HumanSeg kết thúc bằng Softmax mà bước convert bỏ đi, nên runtime tự tính). Kết quả kẹp vào [0, 1].
+- `FrameMatte::draw` resize matte bilinear (tâm half-pixel, có kẹp) vào texture một channel kích thước bất kỳ
+  (r8unorm, r16float hoặc r32float): kích thước model cho matte gốc, kích thước khung để tách nền khung.
+
+Tham chiếu CPU của các bước này là `frames::matte` (và `frames::resize_matte`) của gpufx-nnconv.
+
 ## Bundle (nhiều scale trong một package)
 
 ```
@@ -181,10 +224,12 @@ Bundle chứa nhiều biến thể của cùng một họ model, lúc chạy ch�
 
 ## Chưa hỗ trợ (converter báo lỗi)
 
-Weights quantized (tag khác fp16 và f32), grouped convolution, `Crop` khác một khoảng channel, `Concat` và `Crop`
-theo trục khác channel, `PixelShuffle` mode khác 0, output size cố định của deconvolution, padding SAME, activation
-trong convolution ngoài none/relu/leaky relu/sigmoid, tham số `PReLU` ngoài `num_slope`, mọi loại layer không có
-trong bảng.
+Weights quantized (tag khác fp16 và f32), deconvolution có group, `Crop` khác một khoảng channel, `Concat`, `Crop`
+và `Slice` theo trục khác channel, `PixelShuffle` mode khác 0, output size cố định của deconvolution, padding SAME
+ngoài stride 1 với kernel lẻ, activation trong convolution ngoài none/relu/leaky relu/clip/sigmoid/hard swish,
+tham số `PReLU` ngoài `num_slope`, `InnerProduct` hoặc `Reshape` trên thứ không phải vector `C x 1 x 1`, `Pooling`
+adaptive hoặc `pad_mode` khác valid, `Softmax` (`scripts/convert-matting-models.py` bỏ Softmax của PP-HumanSeg),
+mọi loại layer không có trong bảng.
 
 ## Đối chiếu
 
@@ -197,3 +242,9 @@ deconvolution, quy tắc resize, `warp` và thứ tự op.
 x3, x4 của realesr-animevideov3 khớp ở 58.0, 57.9 và 58.4 dB, realesr-general-x4v3 ở 56.2 dB (model này không có
 trong bản release ncnn; so với cùng weights chạy bằng ncnn), xác nhận `prelu`, `clip`, `resize` bicubic và cách pad
 reflect.
+
+Package matting khớp onnxruntime chạy bản xuất ONNX gốc trong khoảng 8e-6 (MODNet ở 512x512) và 3e-6
+(PP-HumanSeg, sau softmax) trên một ảnh chân dung thật, xác nhận convolution depthwise và có group, `BatchNorm`,
+`InstanceNorm`, pooling, `InnerProduct`, các hard activation và `resize` thu nhỏ. Trên GPU
+(`matting_packages_match_the_cpu_reference` trong `crates/gpufx-core/tests/nn.rs`) alpha f32 lệch tham chiếu CPU
+dưới 1e-5; với convolution f16, IoU của matte ở ngưỡng 0.5 vẫn trên 0.9998.

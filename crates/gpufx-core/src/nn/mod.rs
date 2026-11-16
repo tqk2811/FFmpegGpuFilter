@@ -2,7 +2,7 @@
 //! shaders. Nothing in here knows a particular model: [`NnModel`] holds the graph and its weights on the GPU,
 //! [`NnPlan`] is that graph laid out for one set of input sizes (tensor buffers, one dispatch list), and
 //! [`FrameInterp`] drives a `frame_interp` package (RIFE) as its `io.json` describes, [`FrameUpscale`] a
-//! `super_resolution` package (Real-ESRGAN), in tiles.
+//! `super_resolution` package (Real-ESRGAN), in tiles, [`FrameMatte`] a `matting` package (MODNet, PP-HumanSeg).
 //!
 //! The CPU reference executor of `gpufx-nnconv` (`src/reference.rs`) pins the semantics of every op; the
 //! shaders follow it (same tap rules, same summation order where it matters).
@@ -10,6 +10,7 @@
 mod frames;
 mod interp;
 mod kernels;
+mod matte;
 pub mod model;
 mod plan;
 mod rewrite;
@@ -21,6 +22,7 @@ use std::sync::Arc;
 
 pub use frames::{auto_scale, InterpFrames, UpscaleFrames, AUTO_SCALE_MAX_PIXELS};
 pub use interp::FrameInterp;
+pub use matte::{FrameMatte, MatteIo, MatteSize, MatteType, MATTE_FORMATS};
 pub use plan::{NnPlan, Profile, TensorView};
 pub use upscale::{FrameUpscale, TileLayout, UpscaleOptions, DEFAULT_TENSOR_BYTES};
 
