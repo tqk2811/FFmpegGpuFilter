@@ -1713,6 +1713,7 @@ fn frame_matte_matches_the_reference() {
     for (size, matte) in [
         (r#"{"mode":"short_side","short_side":16,"multiple":8}"#, r#"{"type":"softmax","channel":1}"#),
         (r#"{"mode":"fixed","height":12,"width":20}"#, r#"{"type":"sigmoid","channel":0}"#),
+        (r#"{"mode":"fixed","height":12,"width":20}"#, r#"{"type":"sigmoid","channel":1}"#),
         (r#"{"mode":"short_side","short_side":40,"multiple":1}"#, r#"{"type":"alpha","channel":1}"#),
     ] {
         let io = format!(

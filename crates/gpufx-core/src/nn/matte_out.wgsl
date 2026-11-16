@@ -21,7 +21,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u, @
     }
     var a = 0.0;
     switch p.mode {
-        case 1u: { a = 1.0 / (1.0 + exp(-src[p.in_off + i])); }
+        case 1u: { a = 1.0 / (1.0 + exp(-src[p.in_off + p.fg * p.plane + i])); }
         case 2u: {
             var m = src[p.in_off + i];
             for (var k = 1u; k < p.c; k++) {
