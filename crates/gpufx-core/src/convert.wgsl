@@ -30,8 +30,13 @@ struct Conv {
     ch1: u32,
     ch2: u32,
     ch3: u32,
+    // Input conversion to SDR BT.709 (see crate::hdr), convert_in only.
+    transfer: u32,        // 0 SDR, 1 PQ, 2 HLG
+    primaries: u32,       // 0 BT.709, 1 BT.2020
+    peak: f32,            // cd/m2 the tone map starts from
     pad0: u32,
     pad1: u32,
+    pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> cv: Conv;

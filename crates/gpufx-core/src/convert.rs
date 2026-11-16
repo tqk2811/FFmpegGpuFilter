@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::frame::{ColorInfo, FrameMut, Layout, PixelFormat, PlaneKind};
+use crate::frame::{ColorInfo, FrameMut, Layout, PixelFormat, PlaneKind, Primaries, Transfer};
 use crate::lru::Lru;
 use crate::manifest::{PixelLayout, Plane};
 use crate::pool::PoolKey;
@@ -47,7 +47,7 @@ fn in_group(gpu: bool) -> u32 {
     }
 }
 /// Size of the `Conv` uniform struct of convert.wgsl.
-const UNIFORM_SIZE: u64 = 112;
+const UNIFORM_SIZE: u64 = 128;
 
 /// Pipelines of the conversion passes, compiled once per device. Those for frames
 /// already on the GPU are compiled the first time such a frame comes.
@@ -621,6 +621,14 @@ fn uniform(format: PixelFormat, w: u32, h: u32, color: &ColorInfo, plane: Option
         words.extend(ch);
     }
     words.resize(UNIFORM_SIZE as usize / 4, 0);
+    // transfer, primaries and peak of `Conv`, after the 26 words above.
+    words[26] = match color.transfer {
+        Transfer::Sdr => 0,
+        Transfer::Pq => 1,
+        Transfer::Hlg => 2,
+    };
+    words[27] = (color.primaries == Primaries::Bt2020) as u32;
+    words[28] = (crate::hdr::source_peak(color.transfer, color.peak_nits) as f32).to_bits();
     let mut out = [0u8; UNIFORM_SIZE as usize];
     for (dst, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(words) {
         *dst = word.to_le_bytes();

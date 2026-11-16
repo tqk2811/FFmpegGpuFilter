@@ -291,7 +291,7 @@ fn color_info(c: &GpufxColor) -> Result<ColorInfo, String> {
     let chroma_location = *[Left, Center, TopLeft, Top, BottomLeft, Bottom]
         .get(c.chroma_location as usize)
         .ok_or_else(|| format!("unknown chroma location {}", c.chroma_location))?;
-    Ok(ColorInfo { matrix, range, chroma_location, premultiplied: c.flags & FRAME_PREMULTIPLIED != 0 })
+    Ok(ColorInfo { matrix, range, chroma_location, premultiplied: c.flags & FRAME_PREMULTIPLIED != 0, ..Default::default() })
 }
 
 unsafe fn pixel_format(name: *const c_char, what: &str) -> Result<PixelFormat, String> {

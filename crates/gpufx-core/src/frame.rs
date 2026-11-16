@@ -264,6 +264,42 @@ pub struct ColorInfo {
     pub range: Range,
     pub chroma_location: ChromaLocation,
     pub premultiplied: bool,
+    /// Transfer function of an input. Anything but [`Transfer::Sdr`], or BT.2020 primaries,
+    /// makes the input pass convert the frame to SDR BT.709 (see [`crate::hdr`]). Outputs are
+    /// always written as SDR BT.709, whatever these say.
+    pub transfer: Transfer,
+    pub primaries: Primaries,
+    /// Peak luminance of the content in cd/m2, from its content light level or mastering
+    /// display metadata; 0 when unknown (PQ then assumes [`crate::hdr::DEFAULT_PQ_PEAK`]).
+    pub peak_nits: u32,
+}
+
+/// Transfer function (EOTF / OETF) of a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Transfer {
+    /// BT.709 / BT.601 / sRGB-like gamma: what effects work in.
+    #[default]
+    Sdr,
+    /// SMPTE ST 2084 (HDR10).
+    Pq,
+    /// ARIB STD-B67 hybrid log-gamma.
+    Hlg,
+}
+
+/// Colour primaries of a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Primaries {
+    /// BT.709 (also what BT.601 sources are treated as).
+    #[default]
+    Bt709,
+    Bt2020,
+}
+
+impl ColorInfo {
+    /// Whether the input pass converts this frame to SDR BT.709.
+    pub fn needs_sdr_conversion(&self) -> bool {
+        self.transfer != Transfer::Sdr || self.primaries != Primaries::Bt709
+    }
 }
 
 /// A frame in CPU memory, one slice and row stride per plane (unused planes are empty).

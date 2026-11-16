@@ -73,8 +73,99 @@ fn pixel(id: vec2u) -> vec4f {
         c = vec4f(r, g, bl, a);
     }
     c = clamp(c, vec4f(0.0), vec4f(1.0));
+    if (cv.transfer != 0u || cv.primaries != 0u) {
+        c = vec4f(to_sdr(c.rgb), c.a);
+    }
     if (cv.premul != 0u) {
         c = vec4f(select(vec3f(0.0), min(c.rgb / c.a, vec3f(1.0)), c.a > 0.0), c.a);
     }
     return c;
+}
+
+// HDR / BT.2020 to SDR BT.709: the maths of crate::hdr, which documents the choices.
+const SDR_WHITE: f32 = 203.0;
+const HLG_PEAK: f32 = 1000.0;
+const SDR_GAMMA: f32 = 2.4;
+const LUMA_2020: vec3f = vec3f(0.2627, 0.6780, 0.0593);
+const LUMA_709: vec3f = vec3f(0.2126, 0.7152, 0.0722);
+
+fn pq_eotf(e: f32) -> f32 {
+    let p = pow(clamp(e, 0.0, 1.0), 1.0 / 78.84375);
+    let num = max(p - 0.8359375, 0.0);
+    return 10000.0 * pow(num / (18.8515625 - 18.6875 * p), 1.0 / 0.1593017578125);
+}
+
+fn pq_inverse_eotf(nits: f32) -> f32 {
+    let y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), 78.84375);
+}
+
+fn hlg_inverse_oetf(e: f32) -> f32 {
+    let x = clamp(e, 0.0, 1.0);
+    if (x <= 0.5) {
+        return x * x / 3.0;
+    }
+    return (exp((x - 0.55991073) / 0.17883277) + 0.28466892) / 12.0;
+}
+
+// BT.2390 EETF, source peak -> target peak, in cd/m2.
+fn eetf(nits: f32, source_peak: f32, target_peak: f32) -> f32 {
+    if (source_peak <= target_peak) {
+        return min(nits, source_peak);
+    }
+    let peak = pq_inverse_eotf(source_peak);
+    let e1 = pq_inverse_eotf(nits) / peak;
+    let max_lum = pq_inverse_eotf(target_peak) / peak;
+    let ks = 1.5 * max_lum - 0.5;
+    var e2 = e1;
+    if (e1 >= ks) {
+        let t = min((e1 - ks) / (1.0 - ks), 1.0);
+        let t2 = t * t;
+        let t3 = t2 * t;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks + (t3 - 2.0 * t2 + t) * (1.0 - ks) + (-2.0 * t3 + 3.0 * t2) * max_lum;
+    }
+    return pq_eotf(e2 * peak);
+}
+
+fn fit_gamut(rgb: vec3f) -> vec3f {
+    let y = clamp(dot(rgb, LUMA_709), 0.0, 1.0);
+    let hi = max(rgb.r, max(rgb.g, rgb.b));
+    let lo = min(rgb.r, min(rgb.g, rgb.b));
+    var s = 1.0;
+    if (hi > 1.0) {
+        s = min(s, (1.0 - y) / (hi - y));
+    }
+    if (lo < 0.0) {
+        s = min(s, y / (y - lo));
+    }
+    return clamp(vec3f(y) + (rgb - vec3f(y)) * s, vec3f(0.0), vec3f(1.0));
+}
+
+fn to_sdr(rgb: vec3f) -> vec3f {
+    var linear: vec3f;
+    if (cv.transfer == 0u) {
+        linear = pow(rgb, vec3f(SDR_GAMMA));
+    } else {
+        var display: vec3f;
+        if (cv.transfer == 1u) {
+            display = vec3f(pq_eotf(rgb.r), pq_eotf(rgb.g), pq_eotf(rgb.b));
+        } else {
+            let scene = vec3f(hlg_inverse_oetf(rgb.r), hlg_inverse_oetf(rgb.g), hlg_inverse_oetf(rgb.b));
+            let ys = dot(scene, LUMA_2020);
+            display = scene * select(0.0, HLG_PEAK * pow(ys, 0.2), ys > 0.0);
+        }
+        let y = dot(display, LUMA_2020);
+        let ratio = select(0.0, eetf(y, cv.peak, SDR_WHITE) / y, y > 0.0);
+        linear = display * (ratio / SDR_WHITE);
+    }
+    if (cv.primaries == 1u) {
+        // BT.2087 BT.2020 -> BT.709; WGSL matrices are column major.
+        let m = mat3x3f(
+            vec3f(1.660491, -0.124550, -0.018151),
+            vec3f(-0.587641, 1.132900, -0.100579),
+            vec3f(-0.072850, -0.008349, 1.118730),
+        );
+        linear = m * linear;
+    }
+    return pow(fit_gamut(linear), vec3f(1.0 / SDR_GAMMA));
 }

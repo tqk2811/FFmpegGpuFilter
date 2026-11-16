@@ -10,6 +10,7 @@ mod dxil;
 pub mod expr;
 pub mod frame;
 pub mod graph;
+pub mod hdr;
 mod lru;
 pub mod manifest;
 mod mips;
@@ -29,7 +30,7 @@ pub mod videotoolbox;
 #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
 pub mod vulkan;
 
-pub use frame::{ChromaLocation, ColorInfo, Frame, FrameMut, GpuFrame, Matrix, PixelFormat, Range};
+pub use frame::{ChromaLocation, ColorInfo, Frame, FrameMut, GpuFrame, Matrix, PixelFormat, Primaries, Range, Transfer};
 pub use graph::{parse_effect_item, BypassPad, EffectGraph, InlineOptions, MemoryStats, Source};
 pub use manifest::{Manifest, StreamInfo};
 pub use package::Package;

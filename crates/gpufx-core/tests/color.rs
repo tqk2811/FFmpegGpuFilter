@@ -512,3 +512,41 @@ fn rgba_target(out: &mut [u8]) -> FrameMut<'_> {
         color: ColorInfo::default(),
     }
 }
+
+/// Limited range 10-bit Y, U, V codes back to non-linear RGB, the inverse of `encode`.
+fn decode_limited_10(yuv: [f64; 3], matrix: Matrix) -> [f64; 3] {
+    let (kr, kb) = kr_kb(matrix);
+    let y = (yuv[0] / 4.0 - 16.0) / 219.0;
+    let u = (yuv[1] / 4.0 - 128.0) / 224.0;
+    let v = (yuv[2] / 4.0 - 128.0) / 224.0;
+    let r = y + 2.0 * (1.0 - kr) * v;
+    let b = y + 2.0 * (1.0 - kb) * u;
+    let g = (y - kr * r - kb * b) / (1.0 - kr - kb);
+    [r, g, b].map(|c| c.clamp(0.0, 1.0))
+}
+
+#[test]
+fn hdr_and_bt2020_inputs_are_tone_mapped_to_sdr_bt709_as_the_reference_says() {
+    use gpufx_core::{hdr, Primaries, Transfer};
+    let Some(ctx) = gpu() else { return };
+    let mut fx = identity(&ctx, "hdr");
+    let patches = [[0.5, 0.5, 0.5], [0.75, 0.75, 0.75], [0.7, 0.3, 0.2], [0.2, 0.8, 0.3], [0.9, 0.9, 0.9], [0.1, 0.1, 0.1]];
+    for (transfer, peak) in [(Transfer::Pq, 1000), (Transfer::Pq, 4000), (Transfer::Hlg, 0), (Transfer::Sdr, 0)] {
+        let color = ColorInfo { matrix: Matrix::Bt2020, transfer, primaries: Primaries::Bt2020, peak_nits: peak, ..Default::default() };
+        for rgb in patches {
+            let src = Planes::from_rgba(PixelFormat::P010, 4, 4, &color, |_, _| [rgb[0], rgb[1], rgb[2], 1.0]);
+            let codes = [src.values[0][0], src.values[1][0], src.values[1][1]].map(f64::from);
+            let expected = hdr::to_sdr(decode_limited_10(codes, Matrix::Bt2020), transfer, Primaries::Bt2020, peak).map(|c| c * 255.0);
+            let out = run(&mut fx, &src, color, PixelFormat::Rgba, ColorInfo::default());
+            let got = &out.values[0][..3];
+            for (g, e) in got.iter().zip(expected) {
+                assert!((f64::from(*g) - e).abs() <= 2.0, "{transfer:?} {peak} {rgb:?}: got {got:?}, expected {expected:?}");
+            }
+        }
+    }
+    // The tone map is not a no-op: PQ mid grey (about 92 cd/m2) is far from the SDR code 128.
+    let color = ColorInfo { matrix: Matrix::Bt2020, transfer: Transfer::Pq, primaries: Primaries::Bt2020, ..Default::default() };
+    let src = Planes::from_rgba(PixelFormat::P010, 4, 4, &color, |_, _| [0.5, 0.5, 0.5, 1.0]);
+    let out = run(&mut fx, &src, color, PixelFormat::Rgba, ColorInfo::default());
+    assert!(out.values[0][0] > 160, "{:?}", &out.values[0][..3]);
+}
