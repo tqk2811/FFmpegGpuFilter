@@ -488,6 +488,12 @@ Vấn đề: [`LayoutConvert::encode`](../crates/gpufx-core/src/convert.rs#L1423
 
 ### [Thấp] Khung HDR/BT.2020 đọc thẳng theo plane thì bỏ qua tone map
 - **Vấn đề**: chỉ pass chuyển sang RGBA (`to_sdr` của convert_in.wgsl) tone map PQ/HLG và đổi gam BT.2020 sang BT.709. Effect khai báo `pixel_layout` khác `rgba` đọc plane qua `planes_in_source`, nhận nguyên mã PQ/HLG; đường in-place NV12 8-bit của graph cũng vậy với nguồn HLG 8-bit hiếm gặp. Đầu ra luôn ghi như SDR BT.709 dù `ColorInfo` của output nói gì: chưa có đường xuất HDR.
-- **Vị trí**: [convert.rs:175](../crates/gpufx-core/src/convert.rs#L175) (`planes_in_source`), [convert_in.wgsl:144](../crates/gpufx-core/src/convert_in.wgsl#L144) (`to_sdr`), [hdr.rs](../crates/gpufx-core/src/hdr.rs)
+- **Vị trí**: [convert.rs:175](../crates/gpufx-core/src/convert.rs#L175) (`planes_in_source`), [convert_in.wgsl:145](../crates/gpufx-core/src/convert_in.wgsl#L145) (`to_sdr`), [hdr.rs](../crates/gpufx-core/src/hdr.rs)
 - **Vì sao**: nên làm khi có effect theo plane dùng cho video điện thoại, hoặc khi cần xuất HDR: tone map trong pass plane, hoặc ép khung cần đổi màu đi qua pass RGBA.
+- **Ngày ghi**: 2026-11-16
+
+### [Vừa] Qua C FFI khung HDR/BT.2020 luôn bị coi là SDR BT.709
+- **Vấn đề**: `GpufxColor` của C FFI chỉ có `matrix`, `range`, `chroma_location`, `flags`; `color_info` điền phần còn lại của `ColorInfo` bằng `..Default::default()`, nên `transfer`, `primaries`, `peak_nits` luôn là SDR / BT.709 / 0 và filter FFmpeg không bao giờ bật tone map PQ/HLG hay đổi gam BT.2020. Thêm trường vào `GpufxColor` không tương thích ngược được một cách gọn: struct nằm theo giá trị giữa `GpufxFrame` (không có trường kích thước/phiên bản), và `vf_gpufx` nằm trong cây FFmpeg bên thứ ba, không sửa ở đây, nên cũng không ai điền các trường mới. Mã hoá vào các bit trống của `flags` thì được nhưng vô ích khi chưa có phía C gửi lên.
+- **Vị trí**: [lib.rs:294](../crates/gpufx-ffi/src/lib.rs#L294) (`color_info`), [gpufx.h:76](../crates/gpufx-ffi/include/gpufx.h#L76) (`GpufxColor`)
+- **Vì sao**: nên làm khi cần lọc video HDR qua filter FFmpeg: thêm một API mới (vd `GpufxColor2` có trường kích thước, hoặc hàm `gpufx_set_input_hdr`) rồi để `vf_gpufx` đọc `color_trc`, `color_primaries` và side data MaxCLL/mastering display.
 - **Ngày ghi**: 2026-11-16
