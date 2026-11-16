@@ -550,3 +550,78 @@ fn hdr_and_bt2020_inputs_are_tone_mapped_to_sdr_bt709_as_the_reference_says() {
     let out = run(&mut fx, &src, color, PixelFormat::Rgba, ColorInfo::default());
     assert!(out.values[0][0] > 160, "{:?}", &out.values[0][..3]);
 }
+
+/// HLG at 75 % is the reference white of BT.2408, 203 cd/m2 on the 1000 cd/m2 reference display
+/// (BT.2408 table 1): checked on the display light, before any tone map.
+#[test]
+fn hlg_75_percent_is_203_nits_of_display_light() {
+    use gpufx_core::hdr;
+    let display = hdr::hlg_ootf([hdr::hlg_inverse_oetf(0.75); 3]);
+    assert!(display.iter().all(|&c| (c - 203.0).abs() <= 1.0), "{display:?}");
+}
+
+/// RGB -> XYZ of a set of primaries and the D65 white, from their xy chromaticities.
+fn rgb_to_xyz(primaries: [[f64; 2]; 3]) -> [[f64; 3]; 3] {
+    let xyz = |[x, y]: [f64; 2]| [x / y, 1.0, (1.0 - x - y) / y];
+    let (r, g, b, w) = (xyz(primaries[0]), xyz(primaries[1]), xyz(primaries[2]), xyz([0.3127, 0.3290]));
+    let m = [[r[0], g[0], b[0]], [r[1], g[1], b[1]], [r[2], g[2], b[2]]];
+    let s = mul_vec(invert(m), w);
+    m.map(|row| [row[0] * s[0], row[1] * s[1], row[2] * s[2]])
+}
+
+fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    let c = |r0: usize, c0: usize, r1: usize, c1: usize| m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0];
+    [
+        [c(1, 1, 2, 2) / det, -c(0, 1, 2, 2) / det, c(0, 1, 1, 2) / det],
+        [-c(1, 0, 2, 2) / det, c(0, 0, 2, 2) / det, -c(0, 0, 1, 2) / det],
+        [c(1, 0, 2, 1) / det, -c(0, 0, 2, 1) / det, c(0, 0, 1, 1) / det],
+    ]
+}
+
+fn mul_vec(m: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
+    m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
+}
+
+/// The BT.2087 matrix rebuilt from the primaries of BT.2020 and BT.709, and the published
+/// BT.709 values of BT.2020 pure red, green and blue (BT.2087 section 2).
+#[test]
+fn the_bt2020_to_bt709_matrix_matches_the_primaries() {
+    use gpufx_core::hdr;
+    let bt2020 = rgb_to_xyz([[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]]);
+    let bt709 = rgb_to_xyz([[0.640, 0.330], [0.300, 0.600], [0.150, 0.060]]);
+    let to_709 = invert(bt709);
+    for (column, published) in [[1.6605, -0.1246, -0.0182], [-0.5876, 1.1329, -0.1006], [-0.0728, -0.0083, 1.1187]].into_iter().enumerate() {
+        let mut primary = [0.0; 3];
+        primary[column] = 1.0;
+        let derived = mul_vec(to_709, mul_vec(bt2020, primary));
+        let used = mul_vec(hdr::BT2020_TO_BT709, primary);
+        for i in 0..3 {
+            assert!((derived[i] - published[i]).abs() < 1e-3, "primary {column}: derived {derived:?}, published {published:?}");
+            assert!((used[i] - published[i]).abs() < 1e-3, "primary {column}: used {used:?}, published {published:?}");
+        }
+    }
+}
+
+/// A bright saturated PQ highlight on the GPU (a BT.709 red and blue at 1000 cd/m2, as BT.2020
+/// signals): the tone map keeps its hue and does not wash it out to grey or white.
+#[test]
+fn saturated_pq_highlights_keep_their_hue() {
+    use gpufx_core::{hdr, Primaries, Transfer};
+    let Some(ctx) = gpu() else { return };
+    let mut fx = identity(&ctx, "highlight");
+    let color = ColorInfo { matrix: Matrix::Bt2020, transfer: Transfer::Pq, primaries: Primaries::Bt2020, peak_nits: 1000, ..Default::default() };
+    // BT.709 red and blue in BT.2020 linear light, scaled so the strongest channel is 1000 cd/m2.
+    for (name, linear, strongest) in [("red", [0.6274, 0.0691, 0.0164], 0), ("blue", [0.0433, 0.0113, 0.8956], 2)] {
+        let top = linear.iter().copied().fold(0.0, f64::max);
+        let signal = linear.map(|c| hdr::pq_inverse_eotf(c / top * 1000.0));
+        let src = Planes::from_rgba(PixelFormat::P010, 4, 4, &color, |_, _| [signal[0], signal[1], signal[2], 1.0]);
+        let out = run(&mut fx, &src, color, PixelFormat::Rgba, ColorInfo::default());
+        let got: [f64; 3] = std::array::from_fn(|i| f64::from(out.values[0][i]));
+        let max = got.iter().copied().fold(0.0, f64::max);
+        let min = got.iter().copied().fold(f64::MAX, f64::min);
+        assert_eq!(got[strongest], max, "{name}: the hue moved: {got:?}");
+        assert!(max >= 250.0, "{name}: the highlight is dimmed: {got:?}");
+        assert!(min <= 0.7 * max, "{name}: washed out towards white: {got:?}");
+    }
+}

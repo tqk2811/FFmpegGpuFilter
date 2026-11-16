@@ -271,6 +271,7 @@ pub struct ColorInfo {
     pub primaries: Primaries,
     /// Peak luminance of the content in cd/m2, from its content light level or mastering
     /// display metadata; 0 when unknown (PQ then assumes [`crate::hdr::DEFAULT_PQ_PEAK`]).
+    /// Known values are clamped to [`crate::hdr::MIN_PEAK`]..[`crate::hdr::MAX_PEAK`].
     pub peak_nits: u32,
 }
 

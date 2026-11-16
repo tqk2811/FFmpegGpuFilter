@@ -88,6 +88,7 @@ const HLG_PEAK: f32 = 1000.0;
 const SDR_GAMMA: f32 = 2.4;
 const LUMA_2020: vec3f = vec3f(0.2627, 0.6780, 0.0593);
 const LUMA_709: vec3f = vec3f(0.2126, 0.7152, 0.0722);
+const MAX_RGB_WEIGHT: f32 = 0.75;
 
 fn pq_eotf(e: f32) -> f32 {
     let p = pow(clamp(e, 0.0, 1.0), 1.0 / 78.84375);
@@ -154,8 +155,9 @@ fn to_sdr(rgb: vec3f) -> vec3f {
             let ys = dot(scene, LUMA_2020);
             display = scene * select(0.0, HLG_PEAK * pow(ys, 0.2), ys > 0.0);
         }
-        let y = dot(display, LUMA_2020);
-        let ratio = select(0.0, eetf(y, cv.peak, SDR_WHITE) / y, y > 0.0);
+        // max(R, G, B) blended with the luminance (hdr::tone_map_intensity).
+        let i = MAX_RGB_WEIGHT * max(display.r, max(display.g, display.b)) + (1.0 - MAX_RGB_WEIGHT) * dot(display, LUMA_2020);
+        let ratio = select(0.0, eetf(i, cv.peak, SDR_WHITE) / i, i > 0.0);
         linear = display * (ratio / SDR_WHITE);
     }
     if (cv.primaries == 1u) {
