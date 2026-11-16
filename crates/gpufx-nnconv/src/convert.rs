@@ -68,7 +68,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
         let output = &layer.outputs[0];
         let p = &layer.params;
         let params = match ty {
-            "Convolution" => OpParams::Conv2d(conv(layer, &mut cx)?),
+            "Convolution" | "ConvolutionDepthWise" => OpParams::Conv2d(conv(layer, &mut cx)?),
             "Deconvolution" => OpParams::Deconv2d(deconv(layer, &mut cx)?),
             "ReLU" => {
                 p.expect_only(&[0]).map_err(|e| layer.err(e))?;
@@ -246,6 +246,7 @@ struct Geometry {
     activation: Option<Activation>,
     weight_count: usize,
     bias: bool,
+    groups: u32,
 }
 
 #[allow(clippy::manual_is_multiple_of)] // is_multiple_of needs Rust 1.90, the MSRV is 1.88
@@ -257,8 +258,12 @@ fn geometry(layer: &Layer, deconv: bool) -> Result<Geometry> {
         allowed.extend([18, 19, 20, 21]);
     }
     p.expect_only(&allowed).map_err(|e| layer.err(e))?;
-    if p.int(7, 1).map_err(|e| layer.err(e))? != 1 {
-        return Err(layer.err("grouped convolution is not supported"));
+    let groups = uint(p, 7, 1, layer)?;
+    if groups == 0 {
+        return Err(layer.err("group must be positive"));
+    }
+    if deconv && groups != 1 {
+        return Err(layer.err("grouped deconvolution is not supported"));
     }
     let out_channels = uint(p, 0, 0, layer)?;
     let kw = uint(p, 1, 0, layer)?;
@@ -289,6 +294,9 @@ fn geometry(layer: &Layer, deconv: bool) -> Result<Geometry> {
     if weight_count == 0 || weight_count % kernel_size != 0 {
         return Err(layer.err(format!("weight_data_size {weight_count} does not fit {out_channels} outputs and a {kh}x{kw} kernel")));
     }
+    if out_channels % groups != 0 {
+        return Err(layer.err(format!("{groups} groups do not divide {out_channels} outputs")));
+    }
     Ok(Geometry {
         out_channels,
         kernel: [kh, kw],
@@ -298,6 +306,7 @@ fn geometry(layer: &Layer, deconv: bool) -> Result<Geometry> {
         activation,
         weight_count,
         bias: p.int(5, 0).map_err(|e| layer.err(e))? != 0,
+        groups,
     })
 }
 
@@ -310,8 +319,9 @@ struct ConvBlobs {
 fn blobs(layer: &Layer, cx: &mut Context, g: &Geometry) -> Result<ConvBlobs> {
     let weight = cx.read_weight(layer, g.weight_count)?;
     let bias = if g.bias { Some(cx.read_bias(layer, g.out_channels as usize)?) } else { None };
+    // ncnn layout `[out][in / groups][kh][kw]`
     let per_input = g.out_channels as usize * g.kernel[0] as usize * g.kernel[1] as usize;
-    Ok(ConvBlobs { in_channels: (g.weight_count / per_input) as u32, weight, bias })
+    Ok(ConvBlobs { in_channels: (g.weight_count / per_input) as u32 * g.groups, weight, bias })
 }
 
 fn conv(layer: &Layer, cx: &mut Context) -> Result<ConvParams> {
@@ -324,6 +334,7 @@ fn conv(layer: &Layer, cx: &mut Context) -> Result<ConvParams> {
         stride: g.stride,
         dilation: g.dilation,
         pad: g.pad,
+        groups: g.groups,
         activation: g.activation,
         weight: b.weight,
         bias: b.bias,
@@ -538,6 +549,45 @@ Sigmoid sg 1 1 out0 out1
         assert!(convert_ncnn(&unknown, &bin(), "t").unwrap_err().0.contains("'Swish'"));
         let cropped = PARAM.replace("-23311=1,0", "-23311=1,1");
         assert!(convert_ncnn(&cropped, &bin(), "t").unwrap_err().0.contains("axis"));
+    }
+
+    #[test]
+    fn converts_depthwise_and_grouped_conv() {
+        // ConvolutionDepthWise of 4 channels (group 4, 3x3: 36 weights) and a Convolution of 2 groups
+        let param = "7767517
+3 3
+Input in0 0 1 in0
+ConvolutionDepthWise d 1 1 in0 a 0=4 1=3 4=1 6=36 7=4
+                     Convolution g 1 1 a out0 0=2 1=1 6=4 7=2
+";
+        let mut b = Vec::new();
+        b.extend(TAG_F32.to_le_bytes());
+        b.extend([0u8; 36 * 4]);
+        b.extend(TAG_F32.to_le_bytes());
+        b.extend([0u8; 4 * 4]);
+        let c = convert_ncnn(param, &b, "t").unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&c.model).unwrap()).unwrap();
+        let ops = v["ops"].as_array().unwrap();
+        assert_eq!((ops[0]["op"].as_str(), ops[0]["in_channels"].as_u64(), ops[0]["groups"].as_u64()), (Some("conv2d"), Some(4), Some(4)));
+        assert_eq!(
+            (ops[1]["in_channels"].as_u64(), ops[1]["out_channels"].as_u64(), ops[1]["groups"].as_u64()),
+            (Some(4), Some(2), Some(2))
+        );
+        // groups 1 is left out of model.json
+        let plain = convert_ncnn(
+            "7767517
+2 2
+Input in0 0 1 in0
+Convolution c 1 1 in0 out0 0=1 1=1 6=3
+",
+            &[0u8; 16],
+            "t",
+        )
+        .unwrap();
+        assert!(serde_json::to_value(&plain.model).unwrap()["ops"][0].get("groups").is_none());
+        // a group count that does not divide the outputs fails
+        let bad = param.replace("0=2 1=1 6=4 7=2", "0=3 1=1 6=6 7=2");
+        assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("groups"));
     }
 
     #[test]

@@ -147,9 +147,17 @@ pub struct ConvParams {
     pub dilation: [u32; 2],
     /// top, left, bottom, right
     pub pad: [u32; 4],
+    /// Channel groups: input and output channels split in `groups` equal parts, part `g` of the output reading
+    /// only part `g` of the input (`groups == in_channels == out_channels` is depthwise). Left out when 1.
+    #[serde(skip_serializing_if = "is_one")]
+    pub groups: u32,
     pub activation: Option<Activation>,
     pub weight: BlobRef,
     pub bias: Option<BlobRef>,
+}
+
+fn is_one(v: &u32) -> bool {
+    *v == 1
 }
 
 #[derive(Serialize, Debug)]

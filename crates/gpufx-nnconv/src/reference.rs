@@ -133,8 +133,10 @@ struct ConvOp {
     /// top, left, bottom, right
     pad: [usize; 4],
     output_pad: [usize; 2],
+    /// output channel `o` reads input channels `[g * cin / groups, (g + 1) * cin / groups)`, `g = o / (cout / groups)`
+    groups: usize,
     act: Option<Act>,
-    /// `[out][in][kh][kw]`
+    /// `[out][in / groups][kh][kw]`
     w: Vec<f32>,
     b: Vec<f32>,
 }
@@ -354,9 +356,16 @@ fn parse_conv(o: &Value, weights: &[u8], deconv: bool) -> Result<ConvOp> {
     let cin = usize_of(o, "in_channels")?;
     let cout = usize_of(o, "out_channels")?;
     let k = usize_array::<2>(o, "kernel")?;
+    let groups = match o.get("groups") {
+        Some(g) if !g.is_null() => usize_of(o, "groups")?,
+        _ => 1,
+    };
+    if groups == 0 || cin % groups != 0 || cout % groups != 0 || (deconv && groups != 1) {
+        return fail(format!("{groups} groups for {cin} inputs and {cout} outputs"));
+    }
     let w = blob(get(o, "weight")?, weights)?;
-    if w.len() != cin * cout * k[0] * k[1] {
-        return fail(format!("weight has {} elements, expected {}", w.len(), cin * cout * k[0] * k[1]));
+    if w.len() != cin / groups * cout * k[0] * k[1] {
+        return fail(format!("weight has {} elements, expected {}", w.len(), cin / groups * cout * k[0] * k[1]));
     }
     let b = match o.get("bias") {
         Some(b) if !b.is_null() => blob(b, weights)?,
@@ -373,6 +382,7 @@ fn parse_conv(o: &Value, weights: &[u8], deconv: bool) -> Result<ConvOp> {
         dil: usize_array::<2>(o, "dilation")?,
         pad: usize_array::<4>(o, "pad")?,
         output_pad: if deconv { usize_array::<2>(o, "output_pad")? } else { [0, 0] },
+        groups,
         act: parse_act_value(o.get("activation").unwrap_or(&Value::Null))?,
         w,
         b,
@@ -730,13 +740,16 @@ fn conv2d(x: &Tensor, c: &ConvOp) -> Result<Tensor> {
     let ow = conv_out(x.w, pl, pr, kw, dw, sw)?;
     let (ih, iw) = (x.h as isize, x.w as isize);
     let mut out = Tensor::zeros(c.cout, oh, ow);
+    let cin_g = c.cin / c.groups;
+    let cout_g = c.cout / c.groups;
     par_planes(&mut out.data, oh * ow, |o, plane| {
         plane.fill(c.b[o]);
-        for q in 0..c.cin {
-            let src = &x.data[q * x.h * x.w..(q + 1) * x.h * x.w];
+        for q in 0..cin_g {
+            let qi = (o / cout_g) * cin_g + q;
+            let src = &x.data[qi * x.h * x.w..(qi + 1) * x.h * x.w];
             for ky in 0..kh {
                 for kx in 0..kw {
-                    let wv = c.w[((o * c.cin + q) * kh + ky) * kw + kx];
+                    let wv = c.w[((o * cin_g + q) * kh + ky) * kw + kx];
                     // input column of output column xo is xo * sw + off
                     let off = (kx * dw) as isize - pl as isize;
                     let x_lo = if off >= 0 { 0 } else { ((-off) as usize).div_ceil(sw) };
@@ -1062,7 +1075,7 @@ mod tests {
 
     #[allow(clippy::too_many_arguments)]
     fn conv(cin: usize, cout: usize, k: [usize; 2], stride: usize, pad: [usize; 4], w: &[f32], b: &[f32], act: Option<Act>) -> ConvOp {
-        ConvOp { cin, cout, k, stride: [stride; 2], dil: [1, 1], pad, output_pad: [0, 0], act, w: w.to_vec(), b: b.to_vec() }
+        ConvOp { cin, cout, k, stride: [stride; 2], dil: [1, 1], pad, output_pad: [0, 0], groups: 1, act, w: w.to_vec(), b: b.to_vec() }
     }
 
     #[test]
@@ -1109,6 +1122,24 @@ mod tests {
         let c = conv(2, 2, [1, 1], 1, [0; 4], &[10., 20., 30., 40.], &[0., 0.], None);
         let y = conv2d(&t(2, 1, 1, &[1., 2.]), &c).unwrap();
         assert_eq!(y.data, [50., 110.]);
+    }
+
+    #[test]
+    fn grouped_and_depthwise_conv() {
+        // depthwise 3x3 pad 1 on 2 channels: each channel only sees its own kernel
+        let x = t(2, 2, 2, &[1., 2., 3., 4., 10., 20., 30., 40.]);
+        let mut w = vec![0.0; 18];
+        w[4] = 2.0; // channel 0: centre tap x2
+        w[9 + 5] = 1.0; // channel 1: right neighbour
+        let mut c = conv(2, 2, [3, 3], 1, [1; 4], &w, &[0.5, 0.0], None);
+        c.groups = 2;
+        let y = conv2d(&x, &c).unwrap();
+        assert_eq!(y.data, [2.5, 4.5, 6.5, 8.5, 20., 0., 40., 0.]);
+        // 2 groups of 2 inputs -> 1 output each: out0 = in0 + 2 in1, out1 = 3 in2 + 4 in3
+        let mut c = conv(4, 2, [1, 1], 1, [0; 4], &[1., 2., 3., 4.], &[0., 0.], None);
+        c.groups = 2;
+        let y = conv2d(&t(4, 1, 1, &[1., 1., 1., 2.]), &c).unwrap();
+        assert_eq!(y.data, [3., 11.]);
     }
 
     fn deconv(cin: usize, cout: usize, k: usize, stride: usize, pad: usize, w: &[f32], b: &[f32]) -> ConvOp {
