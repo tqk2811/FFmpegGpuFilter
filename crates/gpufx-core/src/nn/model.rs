@@ -44,8 +44,32 @@ struct RawOp {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Activation {
     Relu,
-    LeakyRelu { slope: f32 },
+    LeakyRelu {
+        slope: f32,
+    },
     Sigmoid,
+    /// `clamp(x, min, max)`
+    Clip {
+        min: f32,
+        max: f32,
+    },
+    /// `clamp(alpha * x + beta, 0, 1)`
+    HardSigmoid {
+        alpha: f32,
+        beta: f32,
+    },
+    /// `x * clamp(alpha * x + beta, 0, 1)`
+    HardSwish {
+        alpha: f32,
+        beta: f32,
+    },
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PoolKind {
+    Max,
+    Avg,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +169,16 @@ pub enum OpKind {
     Clip {
         min: f32,
         max: f32,
+    },
+    /// Max or average pooling; `global` over the whole plane (`C x 1 x 1`).
+    Pool {
+        kind: PoolKind,
+        global: bool,
+        kernel: [u32; 2],
+        stride: [u32; 2],
+        /// top, left, bottom, right
+        pad: [u32; 4],
+        count_include_pad: bool,
     },
 }
 
@@ -255,6 +289,30 @@ fn parse_op(raw: RawOp) -> Result<Op, Error> {
                 return Err(err(format!("clip [{min}, {max}] is not a range")));
             }
             OpKind::Clip { min, max }
+        }
+        "pool" => {
+            let global = field::<Option<bool>>(p, "global")?.unwrap_or(false);
+            let kernel: [u32; 2] = field(p, "kernel")?;
+            let stride: [u32; 2] = field(p, "stride")?;
+            let pad: [u32; 4] = field(p, "pad")?;
+            if !global
+                && (kernel.contains(&0)
+                    || stride.contains(&0)
+                    || pad[0] >= kernel[0]
+                    || pad[2] >= kernel[0]
+                    || pad[1] >= kernel[1]
+                    || pad[3] >= kernel[1])
+            {
+                return Err(err("pool kernel and stride must be positive and the padding smaller than the kernel"));
+            }
+            OpKind::Pool {
+                kind: field(p, "kind")?,
+                global,
+                kernel,
+                stride,
+                pad,
+                count_include_pad: field::<Option<bool>>(p, "count_include_pad")?.unwrap_or(false),
+            }
         }
         k => return Err(err(format!("unknown op \"{k}\""))),
     };

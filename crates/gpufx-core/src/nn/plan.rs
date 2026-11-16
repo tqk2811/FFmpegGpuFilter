@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::kernels::{self, ConvConfig, CoopConfig, Fixed, Kernel, PARAM_SLOT};
-use super::model::{Activation, BinaryKind, EltwiseKind, Op, OpKind, ResizeMode};
+use super::model::{Activation, BinaryKind, EltwiseKind, Op, OpKind, PoolKind, ResizeMode};
 use super::{conv_shape, rewrite, NnModel};
 use crate::Error;
 
@@ -94,6 +94,9 @@ fn act_code(a: Option<Activation>) -> ActCode {
         Some(Activation::Relu) => (1, 0.0, 0.0, 0, 0),
         Some(Activation::LeakyRelu { slope }) => (2, slope, 0.0, 0, 0),
         Some(Activation::Sigmoid) => (3, 0.0, 0.0, 0, 0),
+        Some(Activation::Clip { min, max }) => (5, min, max, 0, 0),
+        Some(Activation::HardSigmoid { alpha, beta }) => (6, alpha, beta, 0, 0),
+        Some(Activation::HardSwish { alpha, beta }) => (7, alpha, beta, 0, 0),
     }
 }
 
@@ -213,6 +216,16 @@ fn infer(kind: &OpKind, ins: &[[u32; 3]]) -> Result<[u32; 3], String> {
                 return Err(format!("pixel_shuffle factor {r} does not divide {c} channels"));
             }
             [c / (r * r), h * r, w * r]
+        }
+        OpKind::Pool { global: true, .. } => [one()?[0], 1, 1],
+        OpKind::Pool { kernel, stride, pad, .. } => {
+            let [c, h, w] = one()?;
+            let (Some(oh), Some(ow)) =
+                (conv_out(h, pad[0], pad[2], kernel[0], 1, stride[0]), conv_out(w, pad[1], pad[3], kernel[1], 1, stride[1]))
+            else {
+                return Err(format!("input {h}x{w} is smaller than the pool window"));
+            };
+            [c, oh, ow]
         }
         OpKind::Warp => match ins {
             [img, flow] if flow[0] >= 2 && flow[1] == img[1] && flow[2] == img[2] => *img,
@@ -595,12 +608,15 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f
             }
             OpKind::Activation(a) => {
                 let x = &ins[0];
-                let (mode, slope) = match a {
-                    Activation::Relu => (10, 0.0),
-                    Activation::LeakyRelu { slope } => (11, *slope),
-                    Activation::Sigmoid => (12, 0.0),
+                let (mode, slope, ca, cb) = match *a {
+                    Activation::Relu => (10, 0.0, 1.0, 1.0),
+                    Activation::LeakyRelu { slope } => (11, slope, 1.0, 1.0),
+                    Activation::Sigmoid => (12, 0.0, 1.0, 1.0),
+                    Activation::Clip { min, max } => (16, 0.0, min, max),
+                    Activation::HardSigmoid { alpha, beta } => (17, 0.0, alpha, beta),
+                    Activation::HardSwish { alpha, beta } => (18, 0.0, alpha, beta),
                 };
-                pend.push(ew("activation", ew_words(mode, true, x, x, slope, 1.0, 1.0), x, x, out.len()));
+                pend.push(ew("activation", ew_words(mode, true, x, x, slope, ca, cb), x, x, out.len()));
             }
             OpKind::Prelu { .. } => {
                 let x = &ins[0];
@@ -708,6 +724,37 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f
                 pend.push(Pending {
                     label: "pixel_shuffle",
                     kernel: Kernel::Fixed(Fixed::PixelShuffle),
+                    words,
+                    src0: x.slot,
+                    src1: x.slot,
+                    dst: out.slot,
+                    groups: (gx, gy, 1),
+                });
+            }
+            OpKind::Pool { kind, global, kernel, stride, pad, count_include_pad } => {
+                let x = &ins[0];
+                let ([kh, kw], [sh, sw], [pt, pl]) =
+                    if *global { ([x.h, x.w], [1, 1], [0, 0]) } else { (*kernel, *stride, [pad[0], pad[1]]) };
+                let words = Words::default()
+                    .u(out.len())
+                    .u(x.h)
+                    .u(x.w)
+                    .u(out.h)
+                    .u(out.w)
+                    .u(kh)
+                    .u(kw)
+                    .u(sh)
+                    .u(sw)
+                    .u(pt)
+                    .u(pl)
+                    .u((*kind == PoolKind::Max) as u32)
+                    .u(*count_include_pad as u32)
+                    .u(x.offset)
+                    .u(out.offset);
+                let (gx, gy) = groups_1d(out.len(), 256);
+                pend.push(Pending {
+                    label: "pool",
+                    kernel: Kernel::Fixed(Fixed::Pool),
                     words,
                     src0: x.slot,
                     src1: x.slot,

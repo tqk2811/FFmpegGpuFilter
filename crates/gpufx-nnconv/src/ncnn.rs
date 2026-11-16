@@ -18,6 +18,11 @@ impl Params {
         self.values.contains_key(&key) || self.arrays.contains_key(&key)
     }
 
+    /// The raw text of a value (pnnx writes expressions such as `6="1,1,//(120,0n),0n"`).
+    pub fn string(&self, key: i32) -> Option<&str> {
+        self.values.get(&key).map(String::as_str)
+    }
+
     pub fn int(&self, key: i32, default: i64) -> Result<i64> {
         let Some(v) = self.values.get(&key) else { return Ok(default) };
         parse_int(v).ok_or_else(|| Error(format!("key {key}: '{v}' is not an integer")))

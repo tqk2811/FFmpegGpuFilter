@@ -78,6 +78,10 @@ enum Act {
     Relu,
     Leaky(f32),
     Sigmoid,
+    Clip(f32, f32),
+    /// alpha, beta
+    HardSigmoid(f32, f32),
+    HardSwish(f32, f32),
 }
 
 impl Act {
@@ -92,6 +96,9 @@ impl Act {
                 }
             }
             Act::Sigmoid => 1.0 / (1.0 + (-x).exp()),
+            Act::Clip(lo, hi) => x.clamp(lo, hi),
+            Act::HardSigmoid(a, b) => (a * x + b).clamp(0.0, 1.0),
+            Act::HardSwish(a, b) => x * (a * x + b).clamp(0.0, 1.0),
         }
     }
 }
@@ -155,6 +162,18 @@ enum Kind {
     Warp,
     Prelu { slope: Vec<f32> },
     Clip { min: f32, max: f32 },
+    Pool(PoolOp),
+}
+
+#[derive(Clone, Debug)]
+struct PoolOp {
+    max: bool,
+    global: bool,
+    k: [usize; 2],
+    stride: [usize; 2],
+    /// top, left, bottom, right
+    pad: [usize; 4],
+    count_include_pad: bool,
 }
 
 struct RefOp {
@@ -320,6 +339,10 @@ fn usize_of(v: &Value, key: &str) -> Result<usize> {
     }
 }
 
+fn f32_of(v: &Value, key: &str) -> Result<f32> {
+    get(v, key)?.as_f64().map(|f| f as f32).ok_or_else(|| crate::Error(format!("\"{key}\" must be a number")))
+}
+
 fn parse_act_value(v: &Value) -> Result<Option<Act>> {
     if v.is_null() {
         return Ok(None);
@@ -329,6 +352,9 @@ fn parse_act_value(v: &Value) -> Result<Option<Act>> {
         "relu" => Act::Relu,
         "leaky_relu" => Act::Leaky(get(v, "slope")?.as_f64().unwrap_or(0.0) as f32),
         "sigmoid" => Act::Sigmoid,
+        "clip" => Act::Clip(f32_of(v, "min")?, f32_of(v, "max")?),
+        "hard_sigmoid" => Act::HardSigmoid(f32_of(v, "alpha")?, f32_of(v, "beta")?),
+        "hard_swish" => Act::HardSwish(f32_of(v, "alpha")?, f32_of(v, "beta")?),
         _ => return fail(format!("unknown activation \"{ty}\"")),
     }))
 }
@@ -468,6 +494,26 @@ fn parse_op(o: &Value, weights: &[u8]) -> Result<RefOp> {
             min: get(o, "min")?.as_f64().ok_or_else(|| crate::Error("\"min\" must be a number".into()))? as f32,
             max: get(o, "max")?.as_f64().ok_or_else(|| crate::Error("\"max\" must be a number".into()))? as f32,
         },
+        "pool" => {
+            let max = match get(o, "kind")?.as_str().unwrap_or("") {
+                "max" => true,
+                "avg" => false,
+                k => return fail(format!("unknown pool kind \"{k}\"")),
+            };
+            let global = get(o, "global")?.as_bool().unwrap_or(false);
+            let p = PoolOp {
+                max,
+                global,
+                k: usize_array::<2>(o, "kernel")?,
+                stride: usize_array::<2>(o, "stride")?,
+                pad: usize_array::<4>(o, "pad")?,
+                count_include_pad: o.get("count_include_pad").and_then(Value::as_bool).unwrap_or(false),
+            };
+            if !global && (p.k.contains(&0) || p.stride.contains(&0)) {
+                return fail("pool kernel and stride must be positive");
+            }
+            Kind::Pool(p)
+        }
         k => return fail(format!("unknown op \"{k}\"")),
     };
     Ok(RefOp { name, inputs, output, kind })
@@ -695,11 +741,62 @@ fn exec(kind: &Kind, args: &[&Tensor]) -> Result<Tensor> {
             _ => fail("warp needs [image, flow]"),
         },
         Kind::Prelu { slope } => prelu(one(args)?, slope),
+        Kind::Pool(p) => pool(one(args)?, p),
         Kind::Clip { min, max } => {
             let x = one(args)?;
             Ok(Tensor::new(x.c, x.h, x.w, x.data.iter().map(|&v| v.clamp(*min, *max)).collect()))
         }
     }
+}
+
+/// Max or average pooling (ncnn Pooling, pad_mode valid). A window only counts the pixels inside the input;
+/// average with `count_include_pad` divides by the whole kernel (pads read 0). Global: the mean or max of the
+/// plane, `C x 1 x 1`. Sums in f64.
+fn pool(x: &Tensor, p: &PoolOp) -> Result<Tensor> {
+    let plane = x.plane_len();
+    if p.global {
+        let data = (0..x.c)
+            .map(|c| {
+                let s = &x.data[c * plane..(c + 1) * plane];
+                if p.max {
+                    s.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                } else {
+                    (s.iter().map(|&v| v as f64).sum::<f64>() / plane as f64) as f32
+                }
+            })
+            .collect();
+        return Ok(Tensor::new(x.c, 1, 1, data));
+    }
+    let [kh, kw] = p.k;
+    let [sh, sw] = p.stride;
+    let [pt, pl, pb, pr] = p.pad;
+    let oh = conv_out(x.h, pt, pb, kh, 1, sh)?;
+    let ow = conv_out(x.w, pl, pr, kw, 1, sw)?;
+    let mut out = Tensor::zeros(x.c, oh, ow);
+    for c in 0..x.c {
+        let s = &x.data[c * plane..(c + 1) * plane];
+        for oy in 0..oh {
+            for ox in 0..ow {
+                let (mut acc, mut n, mut m) = (0f64, 0usize, f32::NEG_INFINITY);
+                for ky in 0..kh {
+                    for kx in 0..kw {
+                        let iy = (oy * sh + ky) as isize - pt as isize;
+                        let ix = (ox * sw + kx) as isize - pl as isize;
+                        if iy < 0 || ix < 0 || iy >= x.h as isize || ix >= x.w as isize {
+                            continue;
+                        }
+                        let v = s[iy as usize * x.w + ix as usize];
+                        acc += v as f64;
+                        n += 1;
+                        m = m.max(v);
+                    }
+                }
+                let d = if p.count_include_pad { kh * kw } else { n.max(1) };
+                out.data[(c * oh + oy) * ow + ox] = if p.max { m } else { (acc / d as f64) as f32 };
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// ncnn PReLU: `y = x >= 0 ? x : slope[c] * x`, with a shared slope when `slope.len() == 1`.
@@ -1122,6 +1219,37 @@ mod tests {
         let c = conv(2, 2, [1, 1], 1, [0; 4], &[10., 20., 30., 40.], &[0., 0.], None);
         let y = conv2d(&t(2, 1, 1, &[1., 2.]), &c).unwrap();
         assert_eq!(y.data, [50., 110.]);
+    }
+
+    #[test]
+    fn hard_activations_and_clip() {
+        assert_eq!(Act::Clip(0.0, 6.0).apply(7.0), 6.0);
+        assert_eq!(Act::HardSigmoid(0.2, 0.5).apply(1.0), 0.7);
+        assert_eq!(Act::HardSigmoid(0.2, 0.5).apply(-5.0), 0.0);
+        assert_eq!(Act::HardSwish(1.0 / 6.0, 0.5).apply(6.0), 6.0);
+        assert_eq!(Act::HardSwish(1.0 / 6.0, 0.5).apply(-3.0), 0.0);
+        assert!((Act::HardSwish(1.0 / 6.0, 0.5).apply(1.0) - 2.0 / 3.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn pooling_global_and_windows() {
+        let x = t(2, 2, 3, &[1., 2., 3., 4., 5., 6., -1., -2., -3., -4., -5., -6.]);
+        let g = |max| PoolOp { max, global: true, k: [1, 1], stride: [1, 1], pad: [0; 4], count_include_pad: false };
+        assert_eq!(pool(&x, &g(false)).unwrap().data, [3.5, -3.5]);
+        assert_eq!(pool(&x, &g(true)).unwrap().data, [6.0, -1.0]);
+        // 2x2 stride 1 avg, then pad 1 on the left: the padded column is not counted, or counted as 0
+        let mut p = PoolOp { max: false, global: false, k: [2, 2], stride: [1, 1], pad: [0; 4], count_include_pad: false };
+        let y = pool(&x, &p).unwrap();
+        assert_eq!((y.h, y.w), (1, 2));
+        assert_eq!(&y.data[..2], &[3.0, 4.0]);
+        p.pad = [0, 1, 0, 0];
+        assert_eq!(&pool(&x, &p).unwrap().data[..3], &[2.5, 3.0, 4.0]);
+        p.count_include_pad = true;
+        assert_eq!(&pool(&x, &p).unwrap().data[..3], &[1.25, 3.0, 4.0]);
+        // 3x4 window stride 2x4 on 5x8 (the adaptive 2x2 bins of 5x8 that pnnx writes as a fixed window)
+        let x = t(1, 5, 8, &(0..40).map(|v| v as f32).collect::<Vec<_>>());
+        let p = PoolOp { max: true, global: false, k: [3, 4], stride: [2, 4], pad: [0; 4], count_include_pad: false };
+        assert_eq!(pool(&x, &p).unwrap().data, [19., 23., 35., 39.]);
     }
 
     #[test]

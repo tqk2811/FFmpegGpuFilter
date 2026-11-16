@@ -88,6 +88,7 @@ pub enum OpParams {
     Warp(WarpParams),
     Prelu(PreluParams),
     Clip(ClipParams),
+    Pool(PoolParams),
 }
 
 impl Op {
@@ -111,6 +112,7 @@ impl OpParams {
             OpParams::Warp(_) => "warp",
             OpParams::Prelu(_) => "prelu",
             OpParams::Clip(_) => "clip",
+            OpParams::Pool(_) => "pool",
         }
     }
 }
@@ -119,8 +121,25 @@ impl OpParams {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Activation {
     Relu,
-    LeakyRelu { slope: f32 },
+    LeakyRelu {
+        slope: f32,
+    },
     Sigmoid,
+    /// `clamp(x, min, max)` (ReLU6 is `[0, 6]`)
+    Clip {
+        min: f32,
+        max: f32,
+    },
+    /// `clamp(alpha * x + beta, 0, 1)`
+    HardSigmoid {
+        alpha: f32,
+        beta: f32,
+    },
+    /// `x * clamp(alpha * x + beta, 0, 1)`
+    HardSwish {
+        alpha: f32,
+        beta: f32,
+    },
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -257,4 +276,24 @@ pub struct PreluParams {
 pub struct ClipParams {
     pub min: f32,
     pub max: f32,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PoolKind {
+    Max,
+    Avg,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PoolParams {
+    pub kind: PoolKind,
+    /// Over the whole plane: the output is `C x 1 x 1` (kernel, stride and pad unused).
+    pub global: bool,
+    pub kernel: [u32; 2],
+    pub stride: [u32; 2],
+    /// top, left, bottom, right
+    pub pad: [u32; 4],
+    /// Average pooling divides by the whole kernel (padding included) rather than by the pixels inside.
+    pub count_include_pad: bool,
 }

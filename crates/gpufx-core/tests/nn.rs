@@ -227,6 +227,38 @@ fn depthwise_convolutions_match_the_reference() {
     check_with(&ctx, &json, &w.0, &[("x", [7, 19, 26])], &mut r, Precision::Auto, 4e-3);
 }
 
+/// The ops of the matting models (MODNet, PP-HumanSeg): fused clip / hard activations in convolutions, the same
+/// as ops, an SE block (global average pooling, 1x1 convolutions on `C x 1 x 1`, broadcast multiply) and
+/// windowed pooling.
+#[test]
+fn pooling_and_hard_activations_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(12));
+    let relu6 = r#"{"type":"clip","min":0,"max":0.5}"#;
+    let hsw = r#"{"type":"hard_swish","alpha":0.1666667,"beta":0.5}"#;
+    let ops = vec![
+        conv(&mut w, &mut r, "conv2d", "a", "x", 6, 12, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], relu6),
+        conv(&mut w, &mut r, "conv2d", "b", "a", 12, 12, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], hsw),
+        dw(&mut w, &mut r, "c", "b", 12, 3, 2, [1, 1, 1, 1], r#"{"type":"hard_sigmoid","alpha":0.2,"beta":0.5}"#),
+        // SE: gap -> fc relu -> fc -> hard sigmoid (op) -> scale
+        op("pool", "g", &["c"], r#""kind":"avg","global":true,"kernel":[1,1],"stride":[1,1],"pad":[0,0,0,0]"#),
+        conv(&mut w, &mut r, "conv2d", "f1", "g", 12, 3, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], r#"{"type":"relu"}"#),
+        conv(&mut w, &mut r, "conv2d", "f2", "f1", 3, 12, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        op("activation", "hs", &["f2"], r#""type":"hard_sigmoid","alpha":0.2,"beta":0.5"#),
+        op("binary", "se", &["c", "hs"], r#""kind":"mul","scalar":null"#),
+        op("activation", "sw", &["se"], r#""type":"hard_swish","alpha":0.1666667,"beta":0.5"#),
+        op("activation", "cl", &["x"], r#""type":"clip","min":-0.25,"max":0.5"#),
+        op("pool", "gm", &["x"], r#""kind":"max","global":true,"kernel":[1,1],"stride":[1,1],"pad":[0,0,0,0]"#),
+        op("pool", "p1", &["sw"], r#""kind":"avg","global":false,"kernel":[3,4],"stride":[2,4],"pad":[0,0,0,0]"#),
+        op("pool", "p2", &["x"], r#""kind":"avg","global":false,"kernel":[3,3],"stride":[2,2],"pad":[1,1,1,1],"count_include_pad":false"#),
+        op("pool", "p3", &["x"], r#""kind":"avg","global":false,"kernel":[3,3],"stride":[2,2],"pad":[1,1,1,1],"count_include_pad":true"#),
+        op("pool", "p4", &["x"], r#""kind":"max","global":false,"kernel":[2,2],"stride":[1,2],"pad":[0,1,1,0]"#),
+    ];
+    let json = model(&["x"], &["sw", "cl", "gm", "p1", "p2", "p3", "p4"], &ops);
+    check(&ctx, &json, &w.0, &[("x", [6, 17, 30])], &mut r);
+    check_with(&ctx, &json, &w.0, &[("x", [6, 17, 30])], &mut r, Precision::Auto, 4e-3);
+}
+
 #[test]
 fn deconvolutions_match_the_reference() {
     let Some(ctx) = gpu() else { return };

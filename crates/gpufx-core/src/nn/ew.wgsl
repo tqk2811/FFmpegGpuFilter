@@ -75,6 +75,9 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u, @
         // prelu: slopes at wf[b_off], bc of them (1: shared)
         case 15u: { v = select(wf[p.b_off + select(c, 0u, p.bc == 1u)] * a, a, a >= 0.0); }
         case 16u: { v = clamp(a, p.ca, p.cb); }
+        // hard sigmoid / hard swish: alpha ca, beta cb
+        case 17u: { v = clamp(p.ca * a + p.cb, 0.0, 1.0); }
+        case 18u: { v = a * clamp(p.ca * a + p.cb, 0.0, 1.0); }
         default: { }
     }
     dst[p.out_off + i] = v;

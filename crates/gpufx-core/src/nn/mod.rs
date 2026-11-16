@@ -444,6 +444,7 @@ impl NnModel {
                 OpKind::Resize { .. } => Kernel::Fixed(Fixed::Resize),
                 OpKind::Warp => Kernel::Fixed(Fixed::Warp),
                 OpKind::PixelShuffle(_) => Kernel::Fixed(Fixed::PixelShuffle),
+                OpKind::Pool { .. } => Kernel::Fixed(Fixed::Pool),
                 OpKind::Eltwise { coeffs, .. } => {
                     let n = op.inputs.len();
                     if n == 0 || n > 2 {

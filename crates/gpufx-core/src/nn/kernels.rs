@@ -120,7 +120,8 @@ const COMMON: &str = "
 @group(0) @binding(5) var<storage, read_write> dst: array<f32>;
 
 // The activation of output channels co..co + 4: 0 none, 1 relu, 2 leaky relu (slope a), 3 sigmoid, 4 prelu
-// (slopes at wf[soff + c], one shared slope when sn == 1), 5 clip to [a, b].
+// (slopes at wf[soff + c], one shared slope when sn == 1), 5 clip to [a, b], 6 hard sigmoid
+// clamp(a x + b, 0, 1), 7 hard swish x clamp(a x + b, 0, 1).
 fn act(v: vec4f, kind: u32, a: f32, b: f32, soff: u32, sn: u32, co: u32) -> vec4f {
     switch kind {
         case 1u: { return max(v, vec4f(0.0)); }
@@ -136,6 +137,8 @@ fn act(v: vec4f, kind: u32, a: f32, b: f32, soff: u32, sn: u32, co: u32) -> vec4
             return select(s * v, v, v >= vec4f(0.0));
         }
         case 5u: { return clamp(v, vec4f(a), vec4f(b)); }
+        case 6u: { return clamp(a * v + b, vec4f(0.0), vec4f(1.0)); }
+        case 7u: { return v * clamp(a * v + b, vec4f(0.0), vec4f(1.0)); }
         default: { return v; }
     }
 }
@@ -680,6 +683,7 @@ pub(crate) enum Fixed {
     Resize,
     Warp,
     PixelShuffle,
+    Pool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -839,6 +843,7 @@ impl Kernels {
             Kernel::Fixed(Fixed::Resize) => ("gpufx nn resize", include_str!("resize.wgsl").to_string()),
             Kernel::Fixed(Fixed::Warp) => ("gpufx nn warp", include_str!("warp.wgsl").to_string()),
             Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
+            Kernel::Fixed(Fixed::Pool) => ("gpufx nn pool", include_str!("pool.wgsl").to_string()),
             Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
             Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
             Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
@@ -911,6 +916,7 @@ mod tests {
             include_str!("resize.wgsl"),
             include_str!("warp.wgsl"),
             include_str!("pixel_shuffle.wgsl"),
+            include_str!("pool.wgsl"),
             include_str!("upscale_in.wgsl"),
             include_str!("upscale_out.wgsl"),
         ] {

@@ -24,6 +24,9 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
     let mut consumed: HashSet<String> = HashSet::new();
     let mut inputs = Vec::new();
     let mut ops: Vec<Op> = Vec::new();
+    // blobs that are a `C x 1 x 1` vector (global pooling, InnerProduct): only these feed an InnerProduct or a
+    // Reshape, which are then a 1x1 convolution and an alias
+    let mut vectors: HashSet<String> = HashSet::new();
 
     for layer in &layers {
         let ty = layer.ty.as_str();
@@ -54,6 +57,61 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 }
                 continue;
             }
+            "Reshape" => {
+                // a vector reshaped to `w = 1, h = 1, c = n` (ncnn keys 0 and 1, or a pnnx expression starting
+                // "1,1,") stays the same `C x 1 x 1` tensor
+                arity(layer, 1, 1)?;
+                let src = resolve(&aliases, &layer.inputs[0]);
+                let p = &layer.params;
+                p.expect_only(&[0, 1, 2, 6, 11, 12, 13]).map_err(|e| layer.err(e))?;
+                let expr = p.string(6).map(|s| s.trim_matches('"').to_string());
+                let to_vector = match &expr {
+                    Some(e) => e.starts_with("1,1,"),
+                    None => p.int(0, -233).map_err(|e| layer.err(e))? == 1 && p.int(1, -233).map_err(|e| layer.err(e))? == 1,
+                };
+                if !to_vector || !vectors.contains(&src) {
+                    return Err(layer.err("only a reshape of a C x 1 x 1 vector to w = 1, h = 1 is supported"));
+                }
+                let out = &layer.outputs[0];
+                if !produced.insert(out.clone()) {
+                    return Err(layer.err(format!("blob '{out}' is produced twice")));
+                }
+                aliases.insert(out.clone(), src.clone());
+                continue;
+            }
+            "Slice" => {
+                // channel slices: one slice op per output
+                let p = &layer.params;
+                p.expect_only(&[-23300, 1]).map_err(|e| layer.err(e))?;
+                if p.int(1, 0).map_err(|e| layer.err(e))? != 0 {
+                    return Err(layer.err("only the channel axis (0) is supported"));
+                }
+                let sizes = p.int_array(-23300).map_err(|e| layer.err(e))?.ok_or_else(|| layer.err("needs the slice sizes (-23300)"))?;
+                if layer.inputs.len() != 1 || sizes.len() != layer.outputs.len() {
+                    return Err(layer.err("one input and one output per slice size"));
+                }
+                let src = resolve(&aliases, &layer.inputs[0]);
+                if !produced.contains(&src) {
+                    return Err(layer.err(format!("input blob '{src}' is not produced by an earlier layer")));
+                }
+                let mut start = 0u32;
+                for (k, (out, &n)) in layer.outputs.iter().zip(&sizes).enumerate() {
+                    let end = match n {
+                        // the rest, only last
+                        -233 if k + 1 == sizes.len() => None,
+                        n if n > 0 => Some(start + u32::try_from(n).map_err(|_| layer.err("slice size out of range"))?),
+                        n => return Err(layer.err(format!("unsupported slice size {n}"))),
+                    };
+                    if !produced.insert(out.clone()) {
+                        return Err(layer.err(format!("blob '{out}' is produced twice")));
+                    }
+                    consumed.insert(src.clone());
+                    let name = format!("{}_{k}", layer.name);
+                    ops.push(Op::new(&name, vec![src.clone()], out, OpParams::Slice(SliceParams { axis: 0, start, end })));
+                    start = end.unwrap_or(start);
+                }
+                continue;
+            }
             _ => {}
         }
         if nout != 1 {
@@ -81,6 +139,33 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 arity(layer, 1, 1)?;
                 OpParams::Activation(Activation::Sigmoid)
             }
+            "HardSigmoid" | "HardSwish" => {
+                p.expect_only(&[0, 1]).map_err(|e| layer.err(e))?;
+                arity(layer, 1, 1)?;
+                // ncnn defaults: alpha 0.2, beta 0.5
+                let alpha = p.float(0, 0.2).map_err(|e| layer.err(e))?;
+                let beta = p.float(1, 0.5).map_err(|e| layer.err(e))?;
+                OpParams::Activation(if ty == "HardSigmoid" {
+                    Activation::HardSigmoid { alpha, beta }
+                } else {
+                    Activation::HardSwish { alpha, beta }
+                })
+            }
+            "Pooling" => {
+                let pool = pooling(layer)?;
+                if pool.global {
+                    vectors.insert(output.clone());
+                }
+                OpParams::Pool(pool)
+            }
+            "InnerProduct" => {
+                if !vectors.contains(&input_names[0]) {
+                    return Err(layer.err("only an InnerProduct of a C x 1 x 1 vector (after global pooling) is supported"));
+                }
+                vectors.insert(output.clone());
+                OpParams::Conv2d(inner_product(layer, &mut cx)?)
+            }
+            "BatchNorm" => OpParams::Conv2d(batch_norm(layer, &mut cx)?),
             "BinaryOp" => OpParams::Binary(binary(layer)?),
             "Eltwise" => {
                 p.expect_only(&[0, -23301]).map_err(|e| layer.err(e))?;
@@ -272,23 +357,28 @@ fn geometry(layer: &Layer, deconv: bool) -> Result<Geometry> {
     let dh = uint(p, 12, dw as i64, layer)?;
     let sw = uint(p, 3, 1, layer)?;
     let sh = uint(p, 13, sw as i64, layer)?;
-    let left = uint(p, 4, 0, layer)?;
-    let top = uint(p, 14, left as i64, layer)?;
-    let right = uint(p, 15, left as i64, layer)?;
-    let bottom = uint(p, 16, top as i64, layer)?;
+    let same = matches!(p.int(4, 0).map_err(|e| layer.err(e))?, -233 | -234);
     if [out_channels, kw, kh, dw, dh, sw, sh].contains(&0) {
         return Err(layer.err("channels, kernel, dilation and stride must be positive"));
     }
-    let activation = match p.int(9, 0).map_err(|e| layer.err(e))? {
-        0 => None,
-        1 => Some(Activation::Relu),
-        2 => {
-            let slope = p.float_array(-23310).map_err(|e| layer.err(e))?.and_then(|a| a.first().copied());
-            Some(Activation::LeakyRelu { slope: slope.ok_or_else(|| layer.err("leaky relu without a slope"))? })
+    let (left, top, right, bottom) = if same {
+        // SAME padding of stride 1 and an odd kernel span is the symmetric (span - 1) / 2 on any input size
+        let (spw, sph) = (dw * (kw - 1), dh * (kh - 1));
+        if deconv || sw != 1 || sh != 1 || spw % 2 != 0 || sph % 2 != 0 || [14, 15, 16].iter().any(|&k| p.has(k)) {
+            return Err(layer.err("SAME padding is supported for stride 1 and odd kernels only"));
         }
-        4 => Some(Activation::Sigmoid),
-        v => return Err(layer.err(format!("unsupported activation_type {v}"))),
+        (spw / 2, sph / 2, spw / 2, sph / 2)
+    } else {
+        let left = uint(p, 4, 0, layer)?;
+        let top = uint(p, 14, left as i64, layer)?;
+        let right = uint(p, 15, left as i64, layer)?;
+        let bottom = uint(p, 16, top as i64, layer)?;
+        (left, top, right, bottom)
     };
+    if [out_channels, kw, kh, dw, dh, sw, sh].contains(&0) {
+        return Err(layer.err("channels, kernel, dilation and stride must be positive"));
+    }
+    let activation = fused_activation(layer, 9, -23310)?;
     let weight_count = uint(p, 6, 0, layer)? as usize;
     let kernel_size = out_channels as usize * kh as usize * kw as usize;
     if weight_count == 0 || weight_count % kernel_size != 0 {
@@ -308,6 +398,128 @@ fn geometry(layer: &Layer, deconv: bool) -> Result<Geometry> {
         bias: p.int(5, 0).map_err(|e| layer.err(e))? != 0,
         groups,
     })
+}
+
+/// The activation of a convolution or InnerProduct: `activation_type` at `key`, its parameters at `params`.
+fn fused_activation(layer: &Layer, key: i32, params: i32) -> Result<Option<Activation>> {
+    let p = &layer.params;
+    let args = p.float_array(params).map_err(|e| layer.err(e))?.unwrap_or_default();
+    let arg = |i: usize, what: &str| args.get(i).copied().ok_or_else(|| layer.err(format!("activation without {what}")));
+    Ok(match p.int(key, 0).map_err(|e| layer.err(e))? {
+        0 => None,
+        1 => Some(Activation::Relu),
+        2 => Some(Activation::LeakyRelu { slope: arg(0, "a slope")? }),
+        3 => Some(Activation::Clip { min: arg(0, "a minimum")?, max: arg(1, "a maximum")? }),
+        4 => Some(Activation::Sigmoid),
+        6 => Some(Activation::HardSwish { alpha: arg(0, "alpha")?, beta: arg(1, "beta")? }),
+        v => return Err(layer.err(format!("unsupported activation_type {v}"))),
+    })
+}
+
+/// ncnn InnerProduct of a `C x 1 x 1` vector: a 1x1 convolution (weights `[out][in]` are `[out][in][1][1]`).
+fn inner_product(layer: &Layer, cx: &mut Context) -> Result<ConvParams> {
+    let p = &layer.params;
+    p.expect_only(&[0, 1, 2, 9, -23310]).map_err(|e| layer.err(e))?;
+    arity(layer, 1, 1)?;
+    let out_channels = uint(p, 0, 0, layer)?;
+    let count = uint(p, 2, 0, layer)? as usize;
+    if out_channels == 0 || count == 0 || !count.is_multiple_of(out_channels as usize) {
+        return Err(layer.err(format!("weight_data_size {count} does not fit {out_channels} outputs")));
+    }
+    let activation = fused_activation(layer, 9, -23310)?;
+    let weight = cx.read_weight(layer, count)?;
+    let bias = if p.int(1, 0).map_err(|e| layer.err(e))? != 0 { Some(cx.read_bias(layer, out_channels as usize)?) } else { None };
+    Ok(ConvParams {
+        in_channels: (count / out_channels as usize) as u32,
+        out_channels,
+        kernel: [1, 1],
+        stride: [1, 1],
+        dilation: [1, 1],
+        pad: [0; 4],
+        groups: 1,
+        activation,
+        weight,
+        bias,
+    })
+}
+
+/// ncnn BatchNorm (inference): `y = slope * (x - mean) / sqrt(var + eps) + bias` per channel, as a depthwise 1x1
+/// convolution with weight `slope / sqrt(var + eps)` and bias `bias - mean * weight` (computed in f64).
+fn batch_norm(layer: &Layer, cx: &mut Context) -> Result<ConvParams> {
+    let p = &layer.params;
+    p.expect_only(&[0, 1]).map_err(|e| layer.err(e))?;
+    arity(layer, 1, 1)?;
+    let c = uint(p, 0, 0, layer)? as usize;
+    if c == 0 {
+        return Err(layer.err("channels must be positive"));
+    }
+    let eps = p.float(1, 0.0).map_err(|e| layer.err(e))? as f64;
+    // slope, mean, var, bias: raw f32 (ModelBin type 1, no tag)
+    let read = |cx: &mut Context| -> Result<Vec<f64>> {
+        let b = cx.take(layer, c * 4, c * 4)?;
+        Ok(b.as_chunks::<4>().0.iter().map(|q| f32::from_le_bytes(*q) as f64).collect())
+    };
+    let (slope, mean, var, bias) = (read(cx)?, read(cx)?, read(cx)?, read(cx)?);
+    let mut w = Vec::with_capacity(c * 4);
+    let mut b = Vec::with_capacity(c * 4);
+    for i in 0..c {
+        let k = slope[i] / (var[i] + eps).sqrt();
+        w.extend((k as f32).to_le_bytes());
+        b.extend(((bias[i] - mean[i] * k) as f32).to_le_bytes());
+    }
+    let weight = cx.push(&w, c, Dtype::F32);
+    let bias = cx.push(&b, c, Dtype::F32);
+    Ok(ConvParams {
+        in_channels: c as u32,
+        out_channels: c as u32,
+        kernel: [1, 1],
+        stride: [1, 1],
+        dilation: [1, 1],
+        pad: [0; 4],
+        groups: c as u32,
+        activation: None,
+        weight,
+        bias: Some(bias),
+    })
+}
+
+/// ncnn Pooling: max or average, global or with a kernel; `pad_mode` 1 (valid, explicit pads) only, and not
+/// adaptive.
+fn pooling(layer: &Layer) -> Result<PoolParams> {
+    let p = &layer.params;
+    p.expect_only(&[0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 15]).map_err(|e| layer.err(e))?;
+    arity(layer, 1, 1)?;
+    let kind = match p.int(0, 0).map_err(|e| layer.err(e))? {
+        0 => PoolKind::Max,
+        1 => PoolKind::Avg,
+        v => return Err(layer.err(format!("unsupported pooling_type {v}"))),
+    };
+    if p.int(7, 0).map_err(|e| layer.err(e))? != 0 {
+        return Err(layer.err("adaptive pooling is not supported"));
+    }
+    let global = p.int(4, 0).map_err(|e| layer.err(e))? != 0;
+    let count_include_pad = p.int(6, 0).map_err(|e| layer.err(e))? != 0;
+    if global {
+        return Ok(PoolParams { kind, global, kernel: [1, 1], stride: [1, 1], pad: [0; 4], count_include_pad });
+    }
+    if p.int(5, 0).map_err(|e| layer.err(e))? != 1 {
+        return Err(layer.err("only pad_mode 1 (valid, explicit padding) is supported"));
+    }
+    let kw = uint(p, 1, 0, layer)?;
+    let kh = uint(p, 11, kw as i64, layer)?;
+    let sw = uint(p, 2, 1, layer)?;
+    let sh = uint(p, 12, sw as i64, layer)?;
+    let left = uint(p, 3, 0, layer)?;
+    let top = uint(p, 13, left as i64, layer)?;
+    let right = uint(p, 14, left as i64, layer)?;
+    let bottom = uint(p, 15, top as i64, layer)?;
+    if [kw, kh, sw, sh].contains(&0) {
+        return Err(layer.err("kernel and stride must be positive"));
+    }
+    if left >= kw || right >= kw || top >= kh || bottom >= kh {
+        return Err(layer.err("padding must be smaller than the kernel"));
+    }
+    Ok(PoolParams { kind, global, kernel: [kh, kw], stride: [sh, sw], pad: [top, left, bottom, right], count_include_pad })
 }
 
 struct ConvBlobs {
@@ -588,6 +800,64 @@ Convolution c 1 1 in0 out0 0=1 1=1 6=3
         // a group count that does not divide the outputs fails
         let bad = param.replace("0=2 1=1 6=4 7=2", "0=3 1=1 6=6 7=2");
         assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("groups"));
+    }
+
+    /// The layers of MODNet and PP-HumanSeg as pnnx writes them: Slice with two outputs, BatchNorm, SE block
+    /// (global pooling, InnerProduct, Reshape, broadcast mul), hard activations, SAME padding, windowed pooling.
+    #[test]
+    fn converts_matting_layers() {
+        let param = "7767517
+11 13
+Input in0 0 1 in0
+Slice sl 1 2 in0 a b -23300=2,1,-233 1=0
+BatchNorm bn 1 1 a an 0=1 1=1.000000e-05
+Concat cat 2 1 an b x 0=0
+Pooling gap 1 1 x g 0=1 4=1
+InnerProduct fc 1 1 g f 0=3 1=1 2=9 9=1
+Reshape rs 1 1 f r 12=0 13=0 6=\"1,1,//(3,0n),0n\"
+HardSigmoid hs 1 1 r h 0=1.666667e-01 1=5.000000e-01
+Convolution c 1 1 x y 0=3 1=3 4=-233 6=27 9=3 -23310=2,0.0,6.0
+BinaryOp mul 2 1 y h z 0=2
+Pooling ap 1 1 z out0 0=1 1=2 11=3 2=2 12=1 5=1
+";
+        let mut b = Vec::new();
+        for v in [2.0f32, 1.0, 4.0, 0.5] {
+            b.extend(v.to_le_bytes()); // BatchNorm slope, mean, var, bias
+        }
+        b.extend(TAG_F32.to_le_bytes());
+        b.extend([0u8; 9 * 4]); // InnerProduct weights
+        b.extend([0u8; 3 * 4]); // and bias
+        b.extend(TAG_F32.to_le_bytes());
+        b.extend([0u8; 27 * 4]); // Convolution weights
+        let c = convert_ncnn(param, &b, "t").unwrap();
+        let v: serde_json::Value = serde_json::to_value(&c.model).unwrap();
+        let ops = v["ops"].as_array().unwrap();
+        let kinds: Vec<&str> = ops.iter().map(|o| o["op"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["slice", "slice", "conv2d", "concat", "pool", "conv2d", "activation", "conv2d", "binary", "pool"]);
+        assert_eq!((ops[0]["name"].as_str(), ops[0]["end"].as_u64()), (Some("sl_0"), Some(1)));
+        assert_eq!((ops[1]["start"].as_u64(), ops[1]["end"].is_null()), (Some(1), true));
+        // BatchNorm: weight 2 / sqrt(4 + 1e-5), bias 0.5 - 1 * weight
+        assert_eq!(ops[2]["in_channels"], 1);
+        let w = f32::from_le_bytes(c.weights[ops[2]["weight"]["offset"].as_u64().unwrap() as usize..][..4].try_into().unwrap());
+        assert!((w - 2.0 / (4.0f64 + 1e-5).sqrt() as f32).abs() < 1e-7);
+        assert_eq!(ops[4]["global"], true);
+        assert_eq!((ops[5]["in_channels"].as_u64(), ops[5]["kernel"].clone()), (Some(3), serde_json::json!([1, 1])));
+        assert_eq!(ops[5]["activation"]["type"], "relu");
+        // the Reshape is an alias: the activation reads the InnerProduct output
+        assert_eq!(ops[6]["inputs"], serde_json::json!(["f"]));
+        assert_eq!(ops[6]["type"], "hard_sigmoid");
+        assert_eq!(ops[7]["pad"], serde_json::json!([1, 1, 1, 1]));
+        assert_eq!(ops[7]["activation"], serde_json::json!({"type": "clip", "min": 0.0, "max": 6.0}));
+        assert_eq!(ops[8]["inputs"], serde_json::json!(["y", "h"]));
+        assert_eq!((ops[9]["kernel"].clone(), ops[9]["stride"].clone()), (serde_json::json!([3, 2]), serde_json::json!([1, 2])));
+
+        // an InnerProduct or Reshape of a full tensor, SAME padding with stride 2, pad_mode full: refused
+        let bad = param.replace("InnerProduct fc 1 1 g f", "InnerProduct fc 1 1 x f");
+        assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("vector"));
+        let bad = param.replace("0=3 1=3 4=-233", "0=3 1=3 3=2 4=-233");
+        assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("SAME"));
+        let bad = param.replace("12=1 5=1", "12=1 5=0");
+        assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("pad_mode"));
     }
 
     #[test]
