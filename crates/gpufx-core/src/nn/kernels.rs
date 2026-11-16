@@ -684,6 +684,7 @@ pub(crate) enum Fixed {
     Warp,
     PixelShuffle,
     Pool,
+    InstanceNorm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -844,6 +845,7 @@ impl Kernels {
             Kernel::Fixed(Fixed::Warp) => ("gpufx nn warp", include_str!("warp.wgsl").to_string()),
             Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
             Kernel::Fixed(Fixed::Pool) => ("gpufx nn pool", include_str!("pool.wgsl").to_string()),
+            Kernel::Fixed(Fixed::InstanceNorm) => ("gpufx nn instance_norm", include_str!("instance_norm.wgsl").to_string()),
             Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
             Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
             Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
@@ -917,6 +919,7 @@ mod tests {
             include_str!("warp.wgsl"),
             include_str!("pixel_shuffle.wgsl"),
             include_str!("pool.wgsl"),
+            include_str!("instance_norm.wgsl"),
             include_str!("upscale_in.wgsl"),
             include_str!("upscale_out.wgsl"),
         ] {

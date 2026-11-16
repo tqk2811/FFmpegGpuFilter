@@ -170,6 +170,13 @@ pub enum OpKind {
         min: f32,
         max: f32,
     },
+    /// `(x - mean) / sqrt(var + eps) * gamma + beta` per channel over its plane.
+    InstanceNorm {
+        channels: u32,
+        eps: f32,
+        /// gamma and beta (f32 blobs of `channels` values)
+        affine: Option<(BlobRef, BlobRef)>,
+    },
     /// Max or average pooling; `global` over the whole plane (`C x 1 x 1`).
     Pool {
         kind: PoolKind,
@@ -289,6 +296,19 @@ fn parse_op(raw: RawOp) -> Result<Op, Error> {
                 return Err(err(format!("clip [{min}, {max}] is not a range")));
             }
             OpKind::Clip { min, max }
+        }
+        "instance_norm" => {
+            let channels: u32 = field(p, "channels")?;
+            let eps: f32 = field(p, "eps")?;
+            let affine = match (field::<Option<BlobRef>>(p, "gamma")?, field::<Option<BlobRef>>(p, "beta")?) {
+                (Some(g), Some(b)) if g.count == channels as u64 && b.count == channels as u64 => Some((g, b)),
+                (None, None) => None,
+                _ => return Err(err("instance_norm needs both gamma and beta of `channels` values, or neither")),
+            };
+            if channels == 0 || eps.is_nan() || eps < 0.0 {
+                return Err(err("instance_norm needs channels and a non-negative eps"));
+            }
+            OpKind::InstanceNorm { channels, eps, affine }
         }
         "pool" => {
             let global = field::<Option<bool>>(p, "global")?.unwrap_or(false);

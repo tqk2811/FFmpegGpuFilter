@@ -50,7 +50,8 @@ pub struct NnModel {
     pub(crate) weights: wgpu::Buffer,
     /// Per conv/deconv op index: offset of its weights in `vec4` units and of its bias in `f32` units.
     pub(crate) conv_weights: HashMap<usize, (u32, u32)>,
-    /// Per prelu op index: offset of its slopes in `f32` units and their count.
+    /// Per prelu op index: offset of its slopes in `f32` units and their count. Per affine instance_norm op:
+    /// offset of its gamma and the channel count, beta following gamma.
     pub(crate) slopes: HashMap<usize, (u32, u32)>,
     /// The conv ops that run the tensor core kernel: their weights are in `weights_h` (offset in f16 units).
     pub(crate) coop_ops: std::collections::HashSet<usize>,
@@ -445,6 +446,16 @@ impl NnModel {
                 OpKind::Warp => Kernel::Fixed(Fixed::Warp),
                 OpKind::PixelShuffle(_) => Kernel::Fixed(Fixed::PixelShuffle),
                 OpKind::Pool { .. } => Kernel::Fixed(Fixed::Pool),
+                OpKind::InstanceNorm { channels, affine, .. } => {
+                    if let Some((g, b)) = affine {
+                        let off = blob.len();
+                        blob.extend(read_blob(g, weights).map_err(fail)?);
+                        blob.extend(read_blob(b, weights).map_err(fail)?);
+                        blob.resize(blob.len().div_ceil(4) * 4, 0.0);
+                        slopes.insert(i, (off as u32, *channels));
+                    }
+                    Kernel::Fixed(Fixed::InstanceNorm)
+                }
                 OpKind::Eltwise { coeffs, .. } => {
                     let n = op.inputs.len();
                     if n == 0 || n > 2 {

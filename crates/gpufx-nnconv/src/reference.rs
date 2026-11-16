@@ -163,6 +163,7 @@ enum Kind {
     Prelu { slope: Vec<f32> },
     Clip { min: f32, max: f32 },
     Pool(PoolOp),
+    InstanceNorm { eps: f32, affine: Option<(Vec<f32>, Vec<f32>)> },
 }
 
 #[derive(Clone, Debug)]
@@ -514,6 +515,21 @@ fn parse_op(o: &Value, weights: &[u8]) -> Result<RefOp> {
             }
             Kind::Pool(p)
         }
+        "instance_norm" => {
+            let c = usize_of(o, "channels")?;
+            let opt = |key: &str| -> Result<Option<Vec<f32>>> {
+                match o.get(key) {
+                    Some(b) if !b.is_null() => blob(b, weights).map(Some),
+                    _ => Ok(None),
+                }
+            };
+            let affine = match (opt("gamma")?, opt("beta")?) {
+                (Some(g), Some(b)) if g.len() == c && b.len() == c => Some((g, b)),
+                (None, None) => None,
+                _ => return fail("instance_norm needs both gamma and beta of `channels` values, or neither"),
+            };
+            Kind::InstanceNorm { eps: f32_of(o, "eps")?, affine }
+        }
         k => return fail(format!("unknown op \"{k}\"")),
     };
     Ok(RefOp { name, inputs, output, kind })
@@ -742,6 +758,7 @@ fn exec(kind: &Kind, args: &[&Tensor]) -> Result<Tensor> {
         },
         Kind::Prelu { slope } => prelu(one(args)?, slope),
         Kind::Pool(p) => pool(one(args)?, p),
+        Kind::InstanceNorm { eps, affine } => instance_norm(one(args)?, *eps, affine.as_ref()),
         Kind::Clip { min, max } => {
             let x = one(args)?;
             Ok(Tensor::new(x.c, x.h, x.w, x.data.iter().map(|&v| v.clamp(*min, *max)).collect()))
@@ -794,6 +811,27 @@ fn pool(x: &Tensor, p: &PoolOp) -> Result<Tensor> {
                 let d = if p.count_include_pad { kh * kw } else { n.max(1) };
                 out.data[(c * oh + oy) * ow + ox] = if p.max { m } else { (acc / d as f64) as f32 };
             }
+        }
+    }
+    Ok(out)
+}
+
+/// Instance normalization: per channel `(x - mean) / sqrt(var + eps)` (biased variance around the mean, in f64),
+/// then `* gamma[c] + beta[c]` when affine.
+fn instance_norm(x: &Tensor, eps: f32, affine: Option<&(Vec<f32>, Vec<f32>)>) -> Result<Tensor> {
+    if affine.is_some_and(|(g, _)| g.len() != x.c) {
+        return fail(format!("instance_norm of {} channels on {}", affine.map_or(0, |a| a.0.len()), x.shape()));
+    }
+    let p = x.plane_len();
+    let mut out = x.clone();
+    for c in 0..x.c {
+        let s = &mut out.data[c * p..(c + 1) * p];
+        let mean = s.iter().map(|&v| v as f64).sum::<f64>() / p as f64;
+        let var = s.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / p as f64;
+        let k = 1.0 / (var + eps as f64).sqrt();
+        let (g, b) = affine.map_or((1.0, 0.0), |(g, b)| (g[c] as f64, b[c] as f64));
+        for v in s.iter_mut() {
+            *v = ((*v as f64 - mean) * k * g + b) as f32;
         }
     }
     Ok(out)
@@ -1250,6 +1288,19 @@ mod tests {
         let x = t(1, 5, 8, &(0..40).map(|v| v as f32).collect::<Vec<_>>());
         let p = PoolOp { max: true, global: false, k: [3, 4], stride: [2, 4], pad: [0; 4], count_include_pad: false };
         assert_eq!(pool(&x, &p).unwrap().data, [19., 23., 35., 39.]);
+    }
+
+    #[test]
+    fn instance_norm_per_channel() {
+        let x = t(2, 1, 4, &[1., 2., 3., 4., 5., 5., 5., 5.]);
+        let y = instance_norm(&x, 0.0, None).unwrap();
+        let k = 1.0 / 1.25f64.sqrt();
+        for (g, w) in y.data[..4].iter().zip([-1.5 * k, -0.5 * k, 0.5 * k, 1.5 * k]) {
+            assert!((*g as f64 - w).abs() < 1e-6);
+        }
+        // a constant channel: 0 with eps, then the affine shift
+        let y = instance_norm(&x, 1e-5, Some(&(vec![1.0, 2.0], vec![0.0, 3.0]))).unwrap();
+        assert_eq!(&y.data[4..], &[3.0; 4]);
     }
 
     #[test]

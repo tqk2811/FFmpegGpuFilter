@@ -89,6 +89,7 @@ pub enum OpParams {
     Prelu(PreluParams),
     Clip(ClipParams),
     Pool(PoolParams),
+    InstanceNorm(InstanceNormParams),
 }
 
 impl Op {
@@ -113,6 +114,7 @@ impl OpParams {
             OpParams::Prelu(_) => "prelu",
             OpParams::Clip(_) => "clip",
             OpParams::Pool(_) => "pool",
+            OpParams::InstanceNorm(_) => "instance_norm",
         }
     }
 }
@@ -296,4 +298,13 @@ pub struct PoolParams {
     pub pad: [u32; 4],
     /// Average pooling divides by the whole kernel (padding included) rather than by the pixels inside.
     pub count_include_pad: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct InstanceNormParams {
+    pub channels: u32,
+    pub eps: f32,
+    /// Per-channel scale and shift (f32 blobs of `channels` values), both or neither.
+    pub gamma: Option<BlobRef>,
+    pub beta: Option<BlobRef>,
 }

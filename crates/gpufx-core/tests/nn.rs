@@ -259,6 +259,27 @@ fn pooling_and_hard_activations_match_the_reference() {
     check_with(&ctx, &json, &w.0, &[("x", [6, 17, 30])], &mut r, Precision::Auto, 4e-3);
 }
 
+/// MODNet's IBNorm: a slice of the channels through instance norm (no affine, and affine), concatenated.
+#[test]
+fn instance_norm_matches_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(13));
+    let gamma = w.add(&r.vec(3), false);
+    let beta = w.add(&r.vec(3), false);
+    let ops = vec![
+        op("slice", "a", &["x"], r#""axis":0,"start":0,"end":2"#),
+        op("slice", "b", &["x"], r#""axis":0,"start":2,"end":null"#),
+        op("instance_norm", "na", &["a"], r#""channels":2,"eps":1e-5,"gamma":null,"beta":null"#),
+        op("instance_norm", "nb", &["b"], &format!(r#""channels":3,"eps":1e-5,"gamma":{gamma},"beta":{beta}"#)),
+        op("concat", "cat", &["na", "nb"], r#""axis":0"#),
+        op("activation", "y", &["cat"], r#""type":"relu""#),
+    ];
+    let json = model(&["x"], &["y"], &ops);
+    // a plane above 256 pixels per thread and one below a workgroup
+    check_with(&ctx, &json, &w.0, &[("x", [5, 300, 301])], &mut r, Precision::F32, 1e-4);
+    check_with(&ctx, &json, &w.0, &[("x", [5, 7, 9])], &mut r, Precision::F32, 1e-4);
+}
+
 #[test]
 fn deconvolutions_match_the_reference() {
     let Some(ctx) = gpu() else { return };

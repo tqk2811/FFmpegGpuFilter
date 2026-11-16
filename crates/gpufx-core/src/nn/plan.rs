@@ -217,6 +217,13 @@ fn infer(kind: &OpKind, ins: &[[u32; 3]]) -> Result<[u32; 3], String> {
             }
             [c / (r * r), h * r, w * r]
         }
+        OpKind::InstanceNorm { channels, .. } => {
+            let s = one()?;
+            if s[0] != *channels {
+                return Err(format!("instance_norm of {channels} channels on {} channels", s[0]));
+            }
+            s
+        }
         OpKind::Pool { global: true, .. } => [one()?[0], 1, 1],
         OpKind::Pool { kernel, stride, pad, .. } => {
             let [c, h, w] = one()?;
@@ -729,6 +736,22 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f
                     src1: x.slot,
                     dst: out.slot,
                     groups: (gx, gy, 1),
+                });
+            }
+            OpKind::InstanceNorm { eps, affine, .. } => {
+                let x = &ins[0];
+                // gamma at `off`, beta right after it (see `NnModel::slopes`)
+                let (g_off, n) = affine.map_or((0, 0), |_| m.slopes[&orig[step.op]]);
+                let words =
+                    Words::default().u(x.c).u(x.plane()).u(x.offset).u(out.offset).u(affine.is_some() as u32).u(g_off).u(g_off + n).f(*eps);
+                pend.push(Pending {
+                    label: "instance_norm",
+                    kernel: Kernel::Fixed(Fixed::InstanceNorm),
+                    words,
+                    src0: x.slot,
+                    src1: x.slot,
+                    dst: out.slot,
+                    groups: (x.c, 1, 1),
                 });
             }
             OpKind::Pool { kind, global, kernel, stride, pad, count_include_pad } => {

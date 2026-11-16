@@ -166,6 +166,22 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 OpParams::Conv2d(inner_product(layer, &mut cx)?)
             }
             "BatchNorm" => OpParams::Conv2d(batch_norm(layer, &mut cx)?),
+            "InstanceNorm" => {
+                p.expect_only(&[0, 1, 2]).map_err(|e| layer.err(e))?;
+                arity(layer, 1, 1)?;
+                let channels = uint(p, 0, 0, layer)?;
+                if channels == 0 {
+                    return Err(layer.err("channels must be positive"));
+                }
+                let eps = p.float(1, 0.001).map_err(|e| layer.err(e))?;
+                // gamma, beta: raw f32 (ModelBin type 1) when affine
+                let (gamma, beta) = if p.int(2, 1).map_err(|e| layer.err(e))? != 0 {
+                    (Some(cx.read_f32_raw(layer, channels as usize)?), Some(cx.read_f32_raw(layer, channels as usize)?))
+                } else {
+                    (None, None)
+                };
+                OpParams::InstanceNorm(InstanceNormParams { channels, eps, gamma, beta })
+            }
             "BinaryOp" => OpParams::Binary(binary(layer)?),
             "Eltwise" => {
                 p.expect_only(&[0, -23301]).map_err(|e| layer.err(e))?;
@@ -858,6 +874,25 @@ Pooling ap 1 1 z out0 0=1 1=2 11=3 2=2 12=1 5=1
         assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("SAME"));
         let bad = param.replace("12=1 5=1", "12=1 5=0");
         assert!(convert_ncnn(&bad, &b, "t").unwrap_err().0.contains("pad_mode"));
+    }
+
+    #[test]
+    fn converts_instance_norm() {
+        let param = "7767517\n3 3\nInput in0 0 1 in0\nInstanceNorm a 1 1 in0 x 0=2 1=1.000000e-05 2=0\nInstanceNorm b 1 1 x out0 0=2 2=1\n";
+        let mut b = Vec::new();
+        for v in [1.0f32, 2.0, 0.5, -0.5] {
+            b.extend(v.to_le_bytes());
+        }
+        let c = convert_ncnn(param, &b, "t").unwrap();
+        let v = serde_json::to_value(&c.model).unwrap();
+        let ops = v["ops"].as_array().unwrap();
+        assert_eq!(
+            ops[0],
+            serde_json::json!({"op": "instance_norm", "name": "a", "inputs": ["in0"], "output": "x", "channels": 2, "eps": 1e-5f32, "gamma": null, "beta": null})
+        );
+        assert_eq!(ops[1]["gamma"], serde_json::json!({"offset": 0, "count": 2, "dtype": "f32"}));
+        assert_eq!(ops[1]["beta"], serde_json::json!({"offset": 256, "count": 2, "dtype": "f32"}));
+        assert_eq!(ops[1]["eps"].as_f64().unwrap() as f32, 0.001);
     }
 
     #[test]
