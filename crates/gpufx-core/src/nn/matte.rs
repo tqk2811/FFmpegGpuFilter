@@ -29,16 +29,21 @@ pub enum MatteSize {
 }
 
 impl MatteSize {
-    /// The model input size `(w, h)` for a `w x h` frame.
-    pub fn model_size(&self, w: u32, h: u32) -> (u32, u32) {
-        match *self {
-            MatteSize::Fixed { height, width } => (width, height),
+    /// The model input size `(w, h)` for a `w x h` frame, each side at most `max_side`; a frame whose long side
+    /// would pass it (an extreme aspect ratio) is an error.
+    pub fn model_size(&self, w: u32, h: u32, max_side: u32) -> Result<(u32, u32), Error> {
+        let (mw, mh) = match *self {
+            MatteSize::Fixed { height, width } => (width as u64, height as u64),
             MatteSize::ShortSide { short_side, multiple } => {
                 let s = short_side as f64 / w.min(h).max(1) as f64;
-                let side = |v: u32| (((v as f64 * s) / multiple as f64).round() as u32).max(1) * multiple;
+                let side = |v: u32| ((((v as f64 * s) / multiple as f64).round() as u64).max(1)) * multiple as u64;
                 (side(w), side(h))
             }
+        };
+        if mw > max_side as u64 || mh > max_side as u64 {
+            return Err(Error::Frame(format!("a {w}x{h} frame needs a {mw}x{mh} model input, above the {max_side} pixel limit")));
         }
+        Ok((mw as u32, mh as u32))
     }
 }
 
@@ -100,7 +105,10 @@ impl MatteIo {
             _ => return Err(bad("size.mode must be \"short_side\" or \"fixed\"")),
         };
         let m = &io["matte"];
-        let channel = m.get("channel").and_then(|c| c.as_u64()).unwrap_or(0).min(u32::MAX as u64) as u32;
+        let channel = match m.get("channel") {
+            None | Some(serde_json::Value::Null) => 0,
+            Some(c) => c.as_u64().and_then(|c| u32::try_from(c).ok()).ok_or_else(|| bad("matte.channel must be a non-negative integer"))?,
+        };
         let matte = match m["type"].as_str() {
             Some("alpha") => MatteType::Alpha { channel },
             Some("sigmoid") => MatteType::Sigmoid { channel },
@@ -157,6 +165,9 @@ pub struct FrameMatte {
 fn words(v: &[u32]) -> Vec<u8> {
     v.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
+
+/// The largest side of a model input [`FrameMatte`] accepts.
+pub const MAX_MODEL_SIDE: u32 = 8192;
 
 /// The texture formats [`FrameMatte::draw`] renders into.
 pub const MATTE_FORMATS: [wgpu::TextureFormat; 3] =
@@ -258,9 +269,11 @@ impl FrameMatte {
         &self.model
     }
 
-    /// The model input size `(w, h)` for a `w x h` frame.
-    pub fn model_size(&self, w: u32, h: u32) -> (u32, u32) {
-        self.io.size.model_size(w, h)
+    /// The model input size `(w, h)` for a `w x h` frame: at most [`MAX_MODEL_SIDE`] and the device's 2D texture
+    /// limit per side, and its largest tensor within the storage buffer limits (checked when the plan is made).
+    pub fn model_size(&self, w: u32, h: u32) -> Result<(u32, u32), Error> {
+        let limit = self.model.ctx.device.limits().max_texture_dimension_2d.min(MAX_MODEL_SIDE);
+        self.io.size.model_size(w, h, limit)
     }
 
     /// Lays the model out for `w x h` frames (done by [`FrameMatte::encode`] when the size changes); returns the
@@ -272,7 +285,7 @@ impl FrameMatte {
         if w == 0 || h == 0 {
             return Err(Error::Frame("empty frame".into()));
         }
-        let (mw, mh) = self.model_size(w, h);
+        let (mw, mh) = self.model_size(w, h)?;
         // the plan depends only on the model size: keep it when only the frame size changed
         let old = self.sized.take().filter(|s| s.mw == mw && s.mh == mh);
         let (plan, alpha) = match old {
@@ -549,11 +562,14 @@ mod tests {
     #[test]
     fn model_sizes() {
         let s = MatteSize::ShortSide { short_side: 512, multiple: 32 };
-        assert_eq!(s.model_size(1920, 1080), (896, 512));
-        assert_eq!(s.model_size(1080, 1920), (512, 896));
-        assert_eq!(s.model_size(640, 480), (672, 512));
-        assert_eq!(s.model_size(512, 512), (512, 512));
-        assert_eq!(MatteSize::Fixed { height: 144, width: 256 }.model_size(1920, 1080), (256, 144));
+        assert_eq!(s.model_size(1920, 1080, 8192).unwrap(), (896, 512));
+        assert_eq!(s.model_size(1080, 1920, 8192).unwrap(), (512, 896));
+        assert_eq!(s.model_size(640, 480, 8192).unwrap(), (672, 512));
+        assert_eq!(s.model_size(512, 512, 8192).unwrap(), (512, 512));
+        assert_eq!(MatteSize::Fixed { height: 144, width: 256 }.model_size(1920, 1080, 8192).unwrap(), (256, 144));
+        // an extreme aspect ratio: 8192x16 would need a 262144 pixel side
+        assert!(s.model_size(8192, 16, 8192).is_err());
+        assert!(s.model_size(u32::MAX, 1, 8192).is_err());
     }
 
     #[test]
@@ -574,8 +590,13 @@ mod tests {
         let mut bad = io.clone();
         bad["kind"] = serde_json::json!("super_resolution");
         assert!(MatteIo::parse(&bad).is_err());
-        let mut bad = io;
+        let mut bad = io.clone();
         bad["matte"] = serde_json::json!({"type": "argmax"});
         assert!(MatteIo::parse(&bad).is_err());
+        for ch in [serde_json::json!(-1), serde_json::json!(1.5), serde_json::json!("1")] {
+            let mut bad = io.clone();
+            bad["matte"] = serde_json::json!({"type": "softmax", "channel": ch});
+            assert!(MatteIo::parse(&bad).is_err(), "{ch}");
+        }
     }
 }
