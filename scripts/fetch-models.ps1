@@ -9,7 +9,8 @@
 # sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/packages/<filter>/<name>.zip.
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
 # filters the model is for) is passed to gpufx-nnconv --used-for. A flat source.json may name a
-# "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite.
+# "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite. A source.json with "convert" (the
+# gpufx_ai_matting models, which have no ncnn release) is skipped: scripts/convert-matting-models.py builds it.
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Bin = '',
@@ -61,6 +62,11 @@ foreach ($name in $Names) {
     $srcFile = Join-Path $mdir 'source.json'
     $out = Join-Path $root "build/packages/$(Split-Path -Leaf (Split-Path -Parent $mdir))"
     $src = Get-Content -Raw $srcFile | ConvertFrom-Json
+    if ($src.convert) {
+        # no ncnn release: exported from the upstream files by a Python script (torch, paddle, pnnx)
+        Write-Host "skip $name`: built by scripts/convert-matting-models.py"
+        continue
+    }
     $dir = Join-Path $out $name
     New-Item -ItemType Directory -Force $dir | Out-Null
     $usedFor = @($src.used_for) -join ','

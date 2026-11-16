@@ -10,7 +10,8 @@
 # sha256_param, url_bin and sha256_bin; the variants are converted and bundled into build/packages/<filter>/<name>.zip.
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
 # filters the model is for) is passed to gpufx-nnconv --used-for. A flat source.json may name a
-# "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite.
+# "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite. A source.json with "convert" (the
+# gpufx_ai_matting models, which have no ncnn release) is skipped: scripts/convert-matting-models.py builds it.
 
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -107,6 +108,11 @@ for name in "$@"; do
     mdir=$(model_dir "$name")
     [ -n "$mdir" ] || { echo "$name: no packages/gpufx_ai_*/$name/source.json" >&2; exit 1; }
     src=$mdir/source.json
+    if [ -n "$(json_get "$src" convert)" ]; then
+        # no ncnn release: exported from the upstream files by a Python script (torch, paddle, pnnx)
+        echo "skip $name: built by scripts/convert-matting-models.py"
+        continue
+    fi
     out=$ROOT/build/packages/$(basename "$(dirname "$mdir")")
     dir=$out/$name
     mkdir -p "$dir"

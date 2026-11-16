@@ -12,6 +12,12 @@
 - **Vì sao**: nên chia slot theo tensor hoặc chia ảnh thành tile; hoặc báo lỗi kèm gợi ý hạ `scale`.
 - **Ngày ghi**: 2026-10-19
 
+### [Vừa] Matting: package chưa tải được lúc dùng lần đầu, chỉ build được bằng script Python
+- **Vấn đề**: MODNet và PP-HumanSeg không có bản ncnn phát hành. `source.json` ghim file gốc (checkpoint PyTorch trên mirror OpenVINO Open Model Zoo của Intel, bản gốc nằm trên Google Drive; zip Paddle trên `paddleseg.bj.bcebos.com`, link chính thức trong README PaddleSeg nhưng host không có version), và `scripts/convert-matting-models.py` cần torch, paddlepaddle, paddle2onnx, pnnx để đổi ra gpufx-nn. Editor không chạy được chuỗi đó, nên "tải weights khi dùng lần đầu" cần nơi host sẵn file đã convert (`model.param`/`model.bin` hoặc zip gpufx-nn, sha256 đã ghi trong `source.json`), vd một GitHub release của user. Việc tạo release cần user quyết.
+- **Vị trí**: [convert-matting-models.py:155](../scripts/convert-matting-models.py#L155), `packages/gpufx_ai_matting/*/source.json`
+- **Vì sao**: không có file host sẵn thì máy người dùng phải tự cài môi trường Python nặng; URL OMZ/bcebos còn có thể đổi hoặc mất.
+- **Ngày ghi**: 2026-11-17
+
 ### [Vừa] Test `d3d12_dxil_cache_gives_the_pixels_of_the_normal_path` đỏ vì FXC không biên dịch được một shader
 - **Vấn đề**: khi không dùng cache, FXC báo `error X3500: array reference cannot be used as an l-value` ở `shaders/draw.wgsl`, pass 1, dòng HLSL 147, và test panic. Lỗi có sẵn trên 9f751c8, không do đổi submit lock.
 - **Vị trí**: [shader_cache.rs:184](../crates/gpufx-core/tests/shader_cache.rs#L184)
@@ -65,6 +71,18 @@
 - **Vị trí**: [kernels.rs](../crates/gpufx-core/src/nn/kernels.rs) (`CoopConfig`, `coop_available`, `coop_source`), [mod.rs](../crates/gpufx-core/src/nn/mod.rs) (`push_coop_weights`)
 - **Vì sao**: phần lớn thời gian upscale/RIFE nằm ở conv; mỗi bước trên gỡ thêm tốc độ hoặc mở rộng GPU dùng được.
 - **Ngày ghi**: 2026-10-21
+
+### [Thấp] Matting: các phần để sau của `FrameMatte`
+- **Vấn đề**: (1) resize khung xuống kích thước model là bilinear không antialias (demo MODNet dùng `INTER_AREA`): khung 4K xuống 512 bị răng cưa, có thể làm alpha rung; (2) PP-HumanSeg kéo giãn mọi khung về 256x144, khung dọc bị méo, có thể letterbox; (3) chưa có làm mượt theo thời gian (MODNet webcam không có), video có thể nhấp nháy viền; (4) chưa có filter FFmpeg / FFI cho `gpufx_ai_matting`, tên filter mới chỉ dùng để gắn `used_for`; (5) `draw` tạo uniform buffer và bind group mỗi lần gọi.
+- **Vị trí**: [matte_in.wgsl:30](../crates/gpufx-core/src/nn/matte_in.wgsl#L30), [matte.rs:262](../crates/gpufx-core/src/nn/matte.rs#L262), [matte.rs:418](../crates/gpufx-core/src/nn/matte.rs#L418), [used_for.rs:15](../crates/gpufx-core/src/used_for.rs#L15)
+- **Vì sao**: chất lượng alpha trên video thật và tích hợp vào editor.
+- **Ngày ghi**: 2026-11-17
+
+### [Thấp] Runtime nn: pooling global và instance_norm chưa tối ưu
+- **Vấn đề**: `pool.wgsl` cho mỗi phần tử ra một thread, pooling global nên một thread cộng cả mặt channel; `instance_norm.wgsl` một workgroup mỗi channel (MODNet chỉ 8 đến 48 channel, ít workgroup trên mặt lớn). MODNet f16 ở 896x512 mất ~14,6 ms/frame trên RTX 4060 Laptop, chưa profile xem hai op này chiếm bao nhiêu.
+- **Vị trí**: [pool.wgsl:28](../crates/gpufx-core/src/nn/pool.wgsl#L28), [instance_norm.wgsl:38](../crates/gpufx-core/src/nn/instance_norm.wgsl#L38)
+- **Vì sao**: chia mặt cho nhiều workgroup (reduce hai tầng) nếu profile cho thấy đáng.
+- **Ngày ghi**: 2026-11-17
 
 ### [Thấp] gpufx-nnconv: các finding review bước 1 của AI upscale để sau
 - **Vấn đề**: (1) bundle realesr-animevideov3 lưu 3 bản `weights.bin` giống hệt nhau (x2/x3/x4 cùng sha256), zip to gấp ~3 lần; nên cho biến thể trỏ chung một file weights trong khi format còn pre-release. (2) `fetch-models.sh` đọc `source.json` bằng awk, chỉ chạy đúng khi mỗi key một dòng. (3) converter chưa đối chiếu `num_slope` của PReLU với số channel; runtime GPU phải tự kiểm để khỏi đọc quá blob. (4) reference CPU chạy cả frame, không có chế độ chia tile để làm mẫu đối chiếu cho tile ở runtime GPU. (5) `run-ref` nhận cả `--input` lẫn `--frame0` mà không báo lỗi.
