@@ -74,6 +74,9 @@ pub struct ConvParams {
     pub pad: [u32; 4],
     #[serde(default)]
     pub output_pad: [u32; 2],
+    /// Channel groups (1 when left out); the runtime runs 1 and depthwise (`groups == in == out`).
+    #[serde(default = "one_u32")]
+    pub groups: u32,
     pub activation: Option<Activation>,
     pub weight: BlobRef,
     pub bias: Option<BlobRef>,
@@ -181,8 +184,12 @@ fn parse_op(raw: RawOp) -> Result<Op, Error> {
             if c.in_channels == 0 || c.out_channels == 0 || k == 0 || c.stride.contains(&0) || c.dilation.contains(&0) {
                 return Err(err("empty kernel, channels, stride or dilation"));
             }
-            if c.weight.count != c.in_channels as u64 * c.out_channels as u64 * k {
-                return Err(err(format!("weight has {} elements, expected in x out x kh x kw", c.weight.count)));
+            let g = c.groups;
+            if g == 0 || !c.in_channels.is_multiple_of(g) || !c.out_channels.is_multiple_of(g) || (raw.op == "deconv2d" && g != 1) {
+                return Err(err(format!("{g} groups for {} inputs and {} outputs", c.in_channels, c.out_channels)));
+            }
+            if c.weight.count != (c.in_channels / g) as u64 * c.out_channels as u64 * k {
+                return Err(err(format!("weight has {} elements, expected in / groups x out x kh x kw", c.weight.count)));
             }
             if c.bias.is_some_and(|b| b.count != c.out_channels as u64) {
                 return Err(err("bias count is not out_channels"));
@@ -368,6 +375,10 @@ struct RawParam {
 
 fn one() -> f32 {
     1.0
+}
+
+fn one_u32() -> u32 {
+    1
 }
 
 /// `{"param": name, "mul": k, "pow": p}` in place of an f32 constant: `k * value ^ p`.

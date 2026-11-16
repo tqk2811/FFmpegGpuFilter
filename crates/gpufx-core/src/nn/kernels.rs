@@ -477,6 +477,74 @@ pub(crate) fn coop_source(s: &ConvShape, c: &CoopConfig) -> String {
     o
 }
 
+/// Threads per workgroup of the depthwise convolution.
+pub(crate) const DW_WG: u32 = 64;
+
+/// The depthwise convolution (`groups == in == out`): a thread computes one output pixel of 4 channels (a
+/// `vec4`), neighbouring threads neighbouring pixels. Weights are laid out `[channel / 4][kh * kw]` as `vec4`s
+/// (see `push_dw_weights`), the taps unrolled. With `f16` the inputs, weights and sums are `f16` like
+/// [`conv_source`] (bias, activations and residual in f32).
+pub(crate) fn dw_source(s: &ConvShape, f16: bool) -> String {
+    let k = s.kh * s.kw;
+    let hv = if f16 { "vec4<f16>" } else { "vec4f" };
+    let mut o = String::new();
+    if f16 {
+        o.push_str("enable f16;\n");
+    }
+    o.push_str(CONV_PARAMS);
+    o.push_str(COMMON);
+    let _ = writeln!(o, "@compute @workgroup_size({DW_WG})");
+    o.push_str(
+        "fn main(@builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u, @builtin(local_invocation_index) li: u32) {\n",
+    );
+    o.push_str("    let plane = p.oh * p.ow;\n");
+    let _ = writeln!(o, "    let i = (wg.y * nwg.x + wg.x) * {DW_WG}u + li;");
+    o.push_str("    let cb = i / plane;\n");
+    o.push_str("    let pix = i % plane;\n");
+    o.push_str("    if (cb * 4u >= p.cout) { return; }\n");
+    o.push_str("    let oy = pix / p.ow;\n");
+    o.push_str("    let ox = pix % p.ow;\n");
+    o.push_str("    let iplane = p.ih * p.iw;\n");
+    // channels past the last read the last one (not written)
+    o.push_str("    let l = p.cin - 1u;\n");
+    for j in 0..4 {
+        let _ = writeln!(o, "    let c{j} = p.in_off + min(cb * 4u + {j}u, l) * iplane;");
+    }
+    let _ = writeln!(o, "    let wb = p.w_off + cb * {k}u;");
+    let _ = writeln!(o, "    let iy0 = i32(oy * {}u) - i32(p.pad_t);", s.sh);
+    let _ = writeln!(o, "    let ix0 = i32(ox * {}u) - i32(p.pad_l);", s.sw);
+    let _ = writeln!(o, "    var acc = {hv}(0.0);");
+    for ky in 0..s.kh {
+        let _ = writeln!(o, "    {{");
+        let _ = writeln!(o, "        let iy = iy0 + {};", ky * s.dh);
+        let _ = writeln!(o, "        if (iy >= 0 && iy < i32(p.ih)) {{");
+        for kx in 0..s.kw {
+            let kk = ky * s.kw + kx;
+            let _ = writeln!(o, "            {{");
+            let _ = writeln!(o, "                let ix = ix0 + {};", kx * s.dw);
+            let _ = writeln!(o, "                if (ix >= 0 && ix < i32(p.iw)) {{");
+            o.push_str("                    let q = u32(iy) * p.iw + u32(ix);\n");
+            o.push_str("                    let x = vec4f(src0[c0 + q], src0[c1 + q], src0[c2 + q], src0[c3 + q]);\n");
+            if f16 {
+                // beyond the f16 range the value would become infinite
+                let _ = writeln!(
+                    o,
+                    "                    acc = fma({hv}(wv[wb + {kk}u]), {hv}(clamp(x, vec4f(-65504.0), vec4f(65504.0))), acc);"
+                );
+            } else {
+                let _ = writeln!(o, "                    acc = fma(wv[wb + {kk}u], x, acc);");
+            }
+            let _ = writeln!(o, "                }}");
+            let _ = writeln!(o, "            }}");
+        }
+        let _ = writeln!(o, "        }}");
+        let _ = writeln!(o, "    }}");
+    }
+    epilogue(&mut o, "vec4f(acc)", "cb * 4u", "pix");
+    o.push_str("}\n");
+    o
+}
+
 /// Transposed convolution as a gather, split by output phase: a thread computes the `sh x sw` output pixels
 /// `(by * sh + r, bx * sw + c)`. Output row `y` takes input row `i` through tap `ky` when
 /// `y + pad_top - ky * dh = i * sh` (the scatter of `docs/NN_MODEL_FORMAT.md` turned around); with
@@ -622,6 +690,8 @@ pub(crate) enum Kernel {
     Coop(ConvShape, CoopConfig),
     /// shape, pad top and left modulo the stride
     Deconv(ConvShape, u32, u32),
+    /// The depthwise convolution of a shape.
+    Dw(ConvShape),
 }
 
 /// Pipelines of one device, made on first use.
@@ -772,6 +842,7 @@ impl Kernels {
             Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
             Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
             Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),
+            Kernel::Dw(s) => ("gpufx nn depthwise", dw_source(&s, self.f16)),
         };
         let (layout, entries) = match (kernel, &self.coop_pipeline_layout) {
             (Kernel::Coop(..), Some(l)) => (l, &COOP_ENTRIES[..]),
@@ -821,6 +892,8 @@ mod tests {
             for r in 0..s {
                 parse(&deconv_source(&shape, r, (r + 1) % s));
             }
+            parse(&dw_source(&shape, false));
+            parse(&dw_source(&shape, true));
         }
         // tensor core kernels: naga takes cooperative matrix loads from workgroup memory
         for (k, d) in [(3, 1), (1, 1), (3, 2)] {

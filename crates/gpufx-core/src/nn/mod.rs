@@ -253,6 +253,24 @@ fn push_conv_weights(blob: &mut Vec<f32>, c: &model::ConvParams, w: &[f32], bias
     ((w_off / 4) as u32, b_off as u32)
 }
 
+/// Appends the weights of a depthwise convolution (`[c][1][kh][kw]`) laid out as `[c / 4][kh * kw][4]` (zero
+/// filled past `c`), then the bias padded to a multiple of 4. Returns the offsets (`vec4` units, `f32` units).
+fn push_dw_weights(blob: &mut Vec<f32>, c: &model::ConvParams, w: &[f32], bias: &[f32]) -> (u32, u32) {
+    let (ch, k) = (c.out_channels as usize, (c.kernel[0] * c.kernel[1]) as usize);
+    let blocks = ch.div_ceil(4);
+    let w_off = blob.len();
+    blob.resize(w_off + blocks * k * 4, 0.0);
+    for co in 0..ch {
+        for kk in 0..k {
+            blob[w_off + ((co / 4) * k + kk) * 4 + co % 4] = w[co * k + kk];
+        }
+    }
+    let b_off = blob.len();
+    blob.extend_from_slice(bias);
+    blob.resize(b_off + blocks * 4, 0.0);
+    ((w_off / 4) as u32, b_off as u32)
+}
+
 /// f32 to f16 bits, rounding to nearest even (overflow to infinity, subnormals kept).
 fn f32_to_half(v: f32) -> u16 {
     let b = v.to_bits();
@@ -366,6 +384,21 @@ impl NnModel {
         for (i, op) in model.ops.iter().enumerate() {
             let fail = |e: Error| Error::Package(format!("op {}: {e}", op.name));
             let kernel = match &op.kind {
+                OpKind::Conv2d(c) if c.groups != 1 => {
+                    if c.groups != c.in_channels || c.groups != c.out_channels {
+                        return Err(Error::Unsupported(format!(
+                            "op {}: grouped convolution of {} groups ({} inputs, {} outputs); only depthwise runs",
+                            op.name, c.groups, c.in_channels, c.out_channels
+                        )));
+                    }
+                    let w = read_blob(&c.weight, weights).map_err(fail)?;
+                    let b = match &c.bias {
+                        Some(b) => read_blob(b, weights).map_err(fail)?,
+                        None => vec![0.0; c.out_channels as usize],
+                    };
+                    conv_weights.insert(i, push_dw_weights(&mut blob, c, &w, &b));
+                    Kernel::Dw(conv_shape(c))
+                }
                 OpKind::Conv2d(c) | OpKind::Deconv2d(c) => {
                     let shape = conv_shape(c);
                     let (kernel, ocb) = if matches!(op.kind, OpKind::Conv2d(_)) {

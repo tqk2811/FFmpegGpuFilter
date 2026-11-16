@@ -546,7 +546,19 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f
                     .u(post.4);
                 let shape = conv_shape(c);
                 let src1 = res.map_or(x.slot, |r| r.slot);
-                if m.coop_ops.contains(&orig[step.op]) {
+                if c.groups != 1 {
+                    // depthwise (other groups are refused when the model loads)
+                    let (gx, gy) = groups_1d(out.c.div_ceil(4) * out.plane(), kernels::DW_WG);
+                    pend.push(Pending {
+                        label: "depthwise",
+                        kernel: Kernel::Dw(shape),
+                        words,
+                        src0: x.slot,
+                        src1,
+                        dst: out.slot,
+                        groups: (gx, gy, 1),
+                    });
+                } else if m.coop_ops.contains(&orig[step.op]) {
                     let cfg = CoopConfig::choose(&shape, x.c, out.c)
                         .ok_or_else(|| Error::Unsupported(format!("op {}: kernel {:?} is too large", op.name, c.kernel)))?;
                     let groups = cfg.groups(out.w, out.h, out.c);

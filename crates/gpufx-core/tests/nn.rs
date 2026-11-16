@@ -196,6 +196,37 @@ fn convolutions_match_the_reference() {
     check(&ctx, &json, &w.0, &[("x", [7, 23, 37])], &mut r);
 }
 
+/// The JSON of a depthwise conv2d (`groups == channels`) with random weights.
+#[allow(clippy::too_many_arguments)]
+fn dw(w: &mut Weights, rng: &mut Rng, name: &str, input: &str, ch: u32, k: u32, stride: u32, pad: [u32; 4], act: &str) -> String {
+    let weight = w.add(&rng.vec((ch * k * k) as usize).iter().map(|v| v * 0.5).collect::<Vec<_>>(), true);
+    let bias = w.add(&rng.vec(ch as usize), false);
+    format!(
+        r#"{{"op":"conv2d","name":"{name}","inputs":["{input}"],"output":"{name}","in_channels":{ch},"out_channels":{ch},"groups":{ch},
+        "kernel":[{k},{k}],"stride":[{stride},{stride}],"dilation":[1,1],"pad":[{},{},{},{}],"activation":{act},"weight":{weight},"bias":{bias}}}"#,
+        pad[0], pad[1], pad[2], pad[3]
+    )
+}
+
+#[test]
+fn depthwise_convolutions_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(11));
+    let ops = vec![
+        // 3x3 stride 1 (channels not a multiple of 4), then a residual add and relu fused into its epilogue
+        dw(&mut w, &mut r, "a", "x", 7, 3, 1, [1, 1, 1, 1], "null"),
+        op("binary", "s", &["a", "x"], r#""kind":"add","scalar":null"#),
+        op("activation", "t", &["s"], r#""type":"relu""#),
+        // 3x3 stride 2 with relu, 5x5 stride 2, asymmetric pad
+        dw(&mut w, &mut r, "b", "t", 7, 3, 2, [1, 1, 1, 1], r#"{"type":"relu"}"#),
+        dw(&mut w, &mut r, "c", "x", 7, 5, 2, [2, 1, 1, 2], r#"{"type":"sigmoid"}"#),
+        dw(&mut w, &mut r, "d", "x", 7, 1, 1, [0, 0, 0, 0], "null"),
+    ];
+    let json = model(&["x"], &["b", "c", "d"], &ops);
+    check(&ctx, &json, &w.0, &[("x", [7, 19, 26])], &mut r);
+    check_with(&ctx, &json, &w.0, &[("x", [7, 19, 26])], &mut r, Precision::Auto, 4e-3);
+}
+
 #[test]
 fn deconvolutions_match_the_reference() {
     let Some(ctx) = gpu() else { return };
