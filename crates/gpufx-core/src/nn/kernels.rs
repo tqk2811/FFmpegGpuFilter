@@ -485,8 +485,8 @@ pub(crate) const DW_WG: u32 = 64;
 
 /// The depthwise convolution (`groups == in == out`): a thread computes one output pixel of 4 channels (a
 /// `vec4`), neighbouring threads neighbouring pixels. Weights are laid out `[channel / 4][kh * kw]` as `vec4`s
-/// (see `push_dw_weights`), the taps unrolled. With `f16` the inputs, weights and sums are `f16` like
-/// [`conv_source`] (bias, activations and residual in f32).
+/// (see `push_dw_weights`), the taps unrolled. With `f16` the inputs and weights are rounded to `f16` like
+/// [`conv_source`], the sums stay f32 (as bias, activations and residual).
 pub(crate) fn dw_source(s: &ConvShape, f16: bool) -> String {
     let k = s.kh * s.kw;
     let hv = if f16 { "vec4<f16>" } else { "vec4f" };
@@ -516,7 +516,8 @@ pub(crate) fn dw_source(s: &ConvShape, f16: bool) -> String {
     let _ = writeln!(o, "    let wb = p.w_off + cb * {k}u;");
     let _ = writeln!(o, "    let iy0 = i32(oy * {}u) - i32(p.pad_t);", s.sh);
     let _ = writeln!(o, "    let ix0 = i32(ox * {}u) - i32(p.pad_l);", s.sw);
-    let _ = writeln!(o, "    var acc = {hv}(0.0);");
+    // f32 sums: few terms per output, so cheap, and no overflow to inf
+    o.push_str("    var acc = vec4f(0.0);\n");
     for ky in 0..s.kh {
         let _ = writeln!(o, "    {{");
         let _ = writeln!(o, "        let iy = iy0 + {};", ky * s.dh);
@@ -532,7 +533,7 @@ pub(crate) fn dw_source(s: &ConvShape, f16: bool) -> String {
                 // beyond the f16 range the value would become infinite
                 let _ = writeln!(
                     o,
-                    "                    acc = fma({hv}(wv[wb + {kk}u]), {hv}(clamp(x, vec4f(-65504.0), vec4f(65504.0))), acc);"
+                    "                    acc = fma(vec4f({hv}(wv[wb + {kk}u])), vec4f({hv}(clamp(x, vec4f(-65504.0), vec4f(65504.0)))), acc);"
                 );
             } else {
                 let _ = writeln!(o, "                    acc = fma(wv[wb + {kk}u], x, acc);");
