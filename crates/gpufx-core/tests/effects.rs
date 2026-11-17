@@ -273,6 +273,30 @@ fn transition_modes_have_clean_endpoints_and_their_own_midpoint() {
     }
 }
 
+/// The gl-transitions ports (their endpoints are checked above): between the ends a frame is
+/// neither clip, and it is not mostly black, which is what a NaN in the shader writes.
+#[test]
+fn gl_transitions_show_a_new_frame_between_the_ends() {
+    let Some(ctx) = gpu() else { return };
+    let (w, h) = (67, 41);
+    let first = gradient(w, h);
+    let second: Vec<u8> = first.chunks(4).flat_map(|p| [255 - p[0], p[2], 255 - p[1], 255]).collect();
+    let inputs = [Image { data: &first, width: w, height: h, stride: w * 4 }, Image { data: &second, width: w, height: h, stride: w * 4 }];
+    let dirs: Vec<PathBuf> = example_dirs().into_iter().filter(|d| d.parent().is_some_and(|p| p.ends_with("gl-transitions"))).collect();
+    assert!(dirs.len() >= 18, "only {} gl-transitions packages found", dirs.len());
+    for dir in &dirs {
+        let mut fx = Effect::new(ctx.clone(), Package::open(dir).unwrap()).unwrap();
+        for progress in ["0.25", "0.5", "0.75"] {
+            fx.params_mut().set_str("progress", progress).unwrap();
+            let mut out = vec![0u8; (w * h * 4) as usize];
+            fx.process(&inputs, target(&mut out, w, h, w * 4), &FrameInfo::new(0.0, 0)).unwrap();
+            assert!(out != first && out != second, "{} at progress {progress} is one of the clips", dir.display());
+            let black = out.chunks(4).filter(|p| p[..3] == [0, 0, 0]).count();
+            assert!(black < (w * h / 2) as usize, "{} at progress {progress}: {black} black pixels (NaN?)", dir.display());
+        }
+    }
+}
+
 #[test]
 fn zero_strength_vignette_is_identity() {
     let Some(ctx) = gpu() else { return };
