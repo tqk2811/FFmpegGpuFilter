@@ -40,6 +40,7 @@ scripts/pack-packages.sh --check -o out my-fx    # compile the shaders on the GP
 | `name` | string | yes | Display name |
 | `used_for` | array | yes | The FFmpeg filters the package is for: `["gpufx"]` for an effect. An empty list or an unknown name (known: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) fails to load; the `gpufx` filter refuses a package whose list lacks `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | string | no | |
+| `hidden` | bool | no (`false`) | `true` keeps the package out of the lists a user picks effects from; it still loads and renders, e.g. as a building block of a clip animation |
 | `inputs` | array | no (`[{"name":"src"}]`) | The video inputs, in the filter's pad order, with their rules (see below) |
 | `outputs` | array | no (one output named after the main output of the last pass, every GPU format, the size of the first input) | The outputs of the effect, in the filter's pad order, with their rules (see below and [Several outputs](#several-outputs)) |
 | `params` | array | no | Parameters, see below. Their order is part of the effect's interface: values written without a key in `graph=` (`scale.zip=1280&-2`) take the parameters in this order, so reordering or inserting one before others breaks such graphs |

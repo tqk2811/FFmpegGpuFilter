@@ -24,6 +24,10 @@ pub struct Manifest {
     pub version: String,
     #[serde(default)]
     pub description: String,
+    /// Kept out of the lists a user picks effects from, for a package other packages use as a
+    /// building block (e.g. one a clip animation drives). It still loads and renders as any other.
+    #[serde(default)]
+    pub hidden: bool,
     /// Video inputs of the effect, in pad order. Defaults to a single `src` input.
     #[serde(default = "default_inputs")]
     pub inputs: Vec<InputDef>,
@@ -1305,6 +1309,12 @@ mod tests {
         m.check_output_format(0, "yuv420p").unwrap();
         m.check_output_format(0, "p010le").unwrap();
         assert!(m.check_output_format(0, "gray16le").is_err());
+    }
+
+    #[test]
+    fn hidden_is_read_and_defaults_to_false() {
+        assert!(!manifest(r#"[{"name":"src"}]"#, "").unwrap().hidden);
+        assert!(manifest(r#"[{"name":"src"}]"#, r#","hidden":true"#).unwrap().hidden);
     }
 
     #[test]

@@ -40,6 +40,7 @@ scripts/pack-packages.sh --check -o out my-fx    # biên dịch shader trên GPU
 | `name` | chuỗi | có | Tên hiển thị |
 | `used_for` | mảng | có | Các filter FFmpeg dùng package này: effect ghi `["gpufx"]`. Mảng rỗng hoặc tên lạ (tên hợp lệ: `gpufx`, `gpufx_ai_upscale`, `gpufx_ai_framerate`) thì không load được; filter `gpufx` từ chối package mà danh sách không có `gpufx` (`package <id> is for gpufx_ai_upscale, not gpufx`) |
 | `version`, `description` | chuỗi | không | |
+| `hidden` | bool | không (`false`) | `true` thì gói không hiện trong danh sách người dùng chọn hiệu ứng; gói vẫn nạp và render bình thường, vd làm thành phần của animation clip |
 | `inputs` | mảng | không (`[{"name":"src"}]`) | Các video input, theo thứ tự pad của filter, kèm quy tắc (xem bên dưới) |
 | `outputs` | mảng | không (một output mang tên output chính của pass cuối, mọi format GPU, kích thước input đầu) | Các output của effect, theo thứ tự output pad của filter, kèm quy tắc (xem bên dưới và [Nhiều output](#nhiều-output)) |
 | `params` | mảng | không | Tham số, xem bên dưới. Thứ tự của chúng là một phần interface của effect: giá trị viết không có key trong `graph=` (`scale.zip=1280&-2`) lấy parameter theo thứ tự này, nên đổi thứ tự hoặc chèn parameter lên trước sẽ làm hỏng các graph đó |
