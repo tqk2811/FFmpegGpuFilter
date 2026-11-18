@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Builds the tracker packages of packages/gpufx_ai_tracking/<name>/source.json from their upstream files.
 
+YuNet (`"convert": "yunet"`, the face detector of the automatic face censor) is one model: see build_yunet.
+It also needs pillow, and writes build/tracking-golden/<name>/ with a frame of a test picture, its raw outputs
+from onnxruntime and the decoded boxes (boxes.json).
+
 NanoTrack is published as two ONNX files (backbone and head). This script downloads the files source.json pins
 (sha256 checked), converts each ONNX to ncnn with pnnx (f32 weights), runs gpufx-nnconv on each into a gpufx-nn
 model, and zips both with tracker.json, README.md and the upstream LICENSE into
@@ -30,6 +34,11 @@ source.json of a tracker:
   "sha256_param", "sha256_bin"   per part, the ncnn files this script made with the tool versions above
   "sha256_zip"   the package zip of the published release (models-tracking-v1); the editor checks downloads
                  against it. Empty until the release exists
+
+source.json of a face detector (convert "yunet"): "upstream" (one ONNX), "cut" {"outputs"} (the ONNX tensors kept as
+the model outputs, out0.. in that order), "inputshape" and "inputshape2" (pnnx, two sizes so the resizes take a
+scale), "test_picture" {"file", "url", "sha256"} (the picture of the golden), "sha256_param", "sha256_bin" (one
+each) and "sha256_zip".
 """
 import argparse
 import hashlib
@@ -107,6 +116,7 @@ def golden(up, out):
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
     import onnx
+    import onnx.utils
 
     # the published backbone states a 255 x 255 input; the template goes through it at 127 x 127 (as OpenCV runs
     # it), so the spatial sizes are made free
@@ -132,8 +142,135 @@ def golden(up, out):
     print(f"wrote {out}")
 
 
+def yunet_decode(maps, io):
+    """Face boxes (x, y, w, h, score) in input pixels from the raw output maps, after NMS: the reference of
+    `FaceDetector` (gpufx-core) and `decode` there."""
+    import numpy as np
+
+    boxes = []
+    for head in io["heads"]:
+        s = head["stride"]
+        cls, obj, bb = maps[head["cls"]][0], maps[head["obj"]][0], maps[head["bbox"]]
+        score = np.sqrt(np.clip(1 / (1 + np.exp(-cls)) * (1 / (1 + np.exp(-obj))), 0, 1))
+        for r, c in zip(*np.nonzero(score >= io["score_threshold"])):
+            cx, cy = (c + bb[0, r, c]) * s, (r + bb[1, r, c]) * s
+            w, h = np.exp(bb[2, r, c]) * s, np.exp(bb[3, r, c]) * s
+            boxes.append([float(cx - w / 2), float(cy - h / 2), float(w), float(h), float(score[r, c])])
+    boxes.sort(key=lambda b: -b[4])
+
+    def iou(a, b):
+        ix = max(0.0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+        iy = max(0.0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+        inter = ix * iy
+        union = a[2] * a[3] + b[2] * b[3] - inter
+        return inter / union if union > 0 else 0.0
+
+    kept = []
+    for b in boxes:
+        if all(iou(b, k) <= io["nms_threshold"] for k in kept):
+            kept.append(b)
+    return kept
+
+
+def build_yunet(name, mdir, src, args):
+    """YuNet: one model. The graph is cut before the reshapes of its outputs (the raw maps are decoded by the
+    runtime), converted, and zipped with io.json, README.md and LICENSE. The golden is a frame of the test
+    picture, its raw maps from onnxruntime and the boxes `yunet_decode` finds in them."""
+    import numpy as np
+    import onnx
+    import onnxruntime as ort
+    from PIL import Image
+
+    out_root = ROOT / "build" / "packages" / FILTER
+    work = out_root / name
+    shutil.rmtree(work / "convert", ignore_errors=True)
+    up = work / "upstream"
+    for f in src["upstream"]:
+        fetch(f["url"], f["sha256"], up / f["file"])
+    lic = fetch(src["license_url"], src["sha256_license"], work / "LICENSE")
+    pic = src["test_picture"]
+    picture = fetch(pic["url"], pic["sha256"], up / pic["file"])
+    conv = work / "convert"
+    conv.mkdir(parents=True, exist_ok=True)
+    m = onnx.load(str(up / src["upstream"][0]["file"]))
+    cut = onnx.utils.Extractor(m).extract_model([m.graph.input[0].name], src["cut"]["outputs"])
+    # free spatial sizes: pnnx then writes resizes by scale, which run at any frame size
+    for d, n in zip(cut.graph.input[0].type.tensor_type.shape.dim[2:], ("h", "w")):
+        d.dim_param = n
+    del cut.graph.value_info[:]
+    for o in cut.graph.output:
+        for d in o.type.tensor_type.shape.dim[2:]:
+            d.dim_param = "o"
+    onnx.save(cut, str(conv / "yunet.onnx"))
+    exe = shutil.which("pnnx") or str(Path(sys.executable).parent / ("pnnx.exe" if os.name == "nt" else "pnnx"))
+    run([exe, "yunet.onnx", f"inputshape={src['inputshape']}", f"inputshape2={src['inputshape2']}", "fp16=0"],
+        cwd=conv, stdout=subprocess.DEVNULL)
+    param, binf = conv / "yunet.ncnn.param", conv / "yunet.ncnn.bin"
+    for key, f in (("sha256_param", param), ("sha256_bin", binf)):
+        want, got = src.get(key), sha256(f)
+        if want and want != got:
+            msg = f"{name}: {f.name} has sha256 {got}, source.json {key} is {want} (another pnnx version?)"
+            if args.strict:
+                raise SystemExit(msg)
+            print(f"warning: {msg}")
+    model = conv / "model"
+    conv_args = ["ncnn", "--param", param, "--bin", binf, "--io", mdir / "io.json", "--used-for", ",".join(src["used_for"]),
+                 "--name", name, "--license", lic, "--readme", mdir / "README.md", "-o", model]
+    if args.bin:
+        run([args.bin] + conv_args)
+    else:
+        run(["cargo", "run", "--release", "--quiet", "--manifest-path", ROOT / "Cargo.toml", "-p", "gpufx-nnconv", "--"] + conv_args)
+    zpath = out_root / f"{name}.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        def add(arc, data, compress=True):
+            info = zipfile.ZipInfo(arc, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
+            z.writestr(info, data)
+
+        for f in ("model.json", "io.json"):
+            add(f, (model / f).read_bytes())
+        add("weights.bin", (model / "weights.bin").read_bytes(), compress=False)
+        add("LICENSE", lic.read_bytes())
+        add("README.md", (mdir / "README.md").read_bytes())
+    print(f"wrote {zpath} (sha256 {sha256(zpath)})")
+    want = src.get("sha256_zip")
+    if want and want != sha256(zpath):
+        print(f"warning: {zpath.name} differs from sha256_zip of source.json (update it with the release)")
+
+    # golden: the lower right of the test picture (the larger faces) at 640 x 352, a multiple of 32 whose long
+    # side is input_size, so the frame is the model input as it is
+    io = json.loads((mdir / "io.json").read_text(encoding="utf-8"))
+    out = ROOT / "build" / "tracking-golden" / name
+    out.mkdir(parents=True, exist_ok=True)
+    img = Image.open(picture).convert("RGB")
+    w, h = img.size
+    box = (w - 998, h - 549, w, h)
+    frame = img.crop(box).resize((640, 352), Image.Resampling.BILINEAR)
+    rgb = np.asarray(frame, dtype=np.uint8)
+    rgba = np.concatenate([rgb, np.full(rgb.shape[:2] + (1,), 255, np.uint8)], axis=2)
+    (out / "frame.rgba").write_bytes(rgba.tobytes())
+    bgr = rgb[:, :, ::-1].transpose(2, 0, 1).astype(np.float32)
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    sess = ort.InferenceSession(cut.SerializeToString(), opts, providers=["CPUExecutionProvider"])
+    names = [o.name for o in sess.get_outputs()]
+    res = sess.run(None, {sess.get_inputs()[0].name: bgr[None]})
+    # the converted model names its outputs out0..out8 in the order of the cut
+    maps = {f"out{i}": res[names.index(o)][0] for i, o in enumerate(src["cut"]["outputs"])}
+    tensors = {"input": bgr, **maps}
+    for k, v in tensors.items():
+        np.ascontiguousarray(v, dtype="<f4").tofile(out / f"{k}.f32")
+    shapes = {k: list(v.shape) for k, v in tensors.items()}
+    (out / "shapes.json").write_text(json.dumps(shapes, indent=2) + "\n", encoding="utf-8", newline="\n")
+    boxes = yunet_decode(maps, io)
+    (out / "boxes.json").write_text(json.dumps(boxes, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(f"wrote {out} ({len(boxes)} faces)")
+
+
 def build(name, mdir, args):
     src = json.loads((mdir / "source.json").read_text(encoding="utf-8"))
+    if src["convert"] == "yunet":
+        return build_yunet(name, mdir, src, args)
     if src["convert"] != "nanotrack":
         raise SystemExit(f"{name}: unknown convert \"{src['convert']}\"")
     out_root = ROOT / "build" / "packages" / FILTER

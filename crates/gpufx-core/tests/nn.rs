@@ -1982,3 +1982,65 @@ fn nanotrack_follows_a_moving_object() {
         assert!(found.score > 0.5, "frame {i}: score {}", found.score);
     }
 }
+
+/// The YuNet package and its golden (a frame, onnxruntime outputs and decoded boxes), written by
+/// `scripts/convert-tracking-models.py` (not in git): `None` skips.
+fn yunet() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let build = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build");
+    let zip = build.join("packages/gpufx_ai_tracking/yunet-2023mar.zip");
+    let golden = build.join("tracking-golden/yunet-2023mar");
+    if zip.is_file() && golden.join("boxes.json").is_file() {
+        Some((zip, golden))
+    } else {
+        eprintln!("skipping: run scripts/convert-tracking-models.py first");
+        None
+    }
+}
+
+#[test]
+fn yunet_maps_match_onnxruntime() {
+    let Some(ctx) = gpu() else { return };
+    let Some((zip, golden)) = yunet() else { return };
+    let mut det = gpufx_core::nn::FaceDetector::open(ctx, &zip).unwrap();
+    let g = |n: &str| read_f32(&golden.join(format!("{n}.f32")));
+    let maps = det.run_raw(&g("input"), 640, 352).unwrap();
+    for i in 0..9 {
+        let name = format!("out{i}");
+        let err = rel_error(&maps[&name], &g(&name));
+        assert!(err < 1e-4, "{name}: {err}");
+    }
+}
+
+#[test]
+fn yunet_finds_the_faces_onnxruntime_finds() {
+    let Some(ctx) = gpu() else { return };
+    let Some((zip, golden)) = yunet() else { return };
+    let mut det = gpufx_core::nn::FaceDetector::open(ctx, &zip).unwrap();
+    let rgba = std::fs::read(golden.join("frame.rgba")).unwrap();
+    let want: Vec<[f32; 5]> = serde_json::from_slice(&std::fs::read(golden.join("boxes.json")).unwrap()).unwrap();
+    assert!(want.len() >= 5, "the golden frame has faces");
+    // the frame is 640 x 352: the model input as it is (scale 1, no padding)
+    let found = det.detect(&view(&rgba, 640, 352)).unwrap();
+    assert_eq!(found.len(), want.len(), "{found:?}");
+    for w in &want {
+        let wb = gpufx_core::nn::FaceBox { x: w[0], y: w[1], w: w[2], h: w[3], score: w[4] };
+        let best = found.iter().map(|f| gpufx_core::nn::face::iou(f, &wb)).fold(0f32, f32::max);
+        assert!(best > 0.95, "face {w:?}: best IoU {best}");
+    }
+    // a half size frame finds the large faces at the same place
+    let half: Vec<u8> = (0..176)
+        .flat_map(|y| (0..320).flat_map(move |x| [y * 2, x * 2]))
+        .collect::<Vec<_>>()
+        .chunks(2)
+        .flat_map(|p| {
+            let o = (p[0] * 640 + p[1]) * 4;
+            rgba[o..o + 4].to_vec()
+        })
+        .collect();
+    let small = det.detect(&view(&half, 320, 176)).unwrap();
+    let big = &want[0];
+    // in the half frame's pixels
+    let wb = gpufx_core::nn::FaceBox { x: big[0] / 2.0, y: big[1] / 2.0, w: big[2] / 2.0, h: big[3] / 2.0, score: big[4] };
+    let best = small.iter().map(|f| gpufx_core::nn::face::iou(f, &wb)).fold(0f32, f32::max);
+    assert!(best > 0.8, "the largest face at half size: best IoU {best} in {small:?}");
+}

@@ -236,6 +236,24 @@ A tracker package (filter name `gpufx_ai_tracking`, run by `NanoTrack`) is not a
   each at least 1); its centre moves the box and its size moves the box size by `size_rate * penalty * p`.
 - `scripts/convert-tracking-models.py` builds the package from `packages/gpufx_ai_tracking/*/source.json`.
 
+A face detector (`FaceDetector`, the automatic face censor) is a single model package of the same filter whose
+`io.json` has kind `tracking` and role `face_detector`:
+
+```json
+{ "kind": "tracking", "role": "face_detector", "family": "yunet", "inputs": { "image": "in0" }, "channels": "bgr",
+  "range": [0, 255], "input_size": 640, "multiple": 32,
+  "heads": [ { "stride": 8, "cls": "out0", "obj": "out3", "bbox": "out6" }, "..." ],
+  "score_threshold": 0.6, "nms_threshold": 0.3 }
+```
+
+- The frame is scaled so its long side is `input_size` (bilinear, half-pixel centres), padded with zeros at the
+  right and bottom to a multiple of `multiple`, values in [0, 255] in the order `channels`.
+- Each head gives `cls` and `obj` (1 channel logits) and `bbox` (4 channels) at `1 / stride` of the input. Cell
+  `(r, c)` scores `sqrt(sigmoid(cls) * sigmoid(obj))`; its box is centred at `((c + bbox0) * stride,
+  (r + bbox1) * stride)`, of size `(exp(bbox2) * stride, exp(bbox3) * stride)` in input pixels.
+- Boxes scoring at least `score_threshold` go through non-maximum suppression at `nms_threshold` (IoU), then are
+  scaled back to frame pixels.
+
 ## Bundles (several scales in one package)
 
 ```

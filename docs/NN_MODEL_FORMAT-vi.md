@@ -233,6 +233,24 @@ Package tracker (tên filter `gpufx_ai_tracking`, `NanoTrack` chạy) không ph�
   tâm ô dời khung, cỡ ô kéo cỡ khung theo `size_rate * penalty * p`.
 - `scripts/convert-tracking-models.py` dựng package từ `packages/gpufx_ai_tracking/*/source.json`.
 
+Bộ dò mặt (`FaceDetector`, dùng cho tự động che mặt) là package một model của cùng filter, `io.json` có kind
+`tracking` và role `face_detector`:
+
+```json
+{ "kind": "tracking", "role": "face_detector", "family": "yunet", "inputs": { "image": "in0" }, "channels": "bgr",
+  "range": [0, 255], "input_size": 640, "multiple": 32,
+  "heads": [ { "stride": 8, "cls": "out0", "obj": "out3", "bbox": "out6" }, "..." ],
+  "score_threshold": 0.6, "nms_threshold": 0.3 }
+```
+
+- Frame được co giãn để cạnh dài bằng `input_size` (bilinear, tâm nửa pixel), đệm số 0 bên phải và bên dưới tới
+  bội của `multiple`, giá trị trong [0, 255] theo thứ tự `channels`.
+- Mỗi head cho `cls` và `obj` (logit 1 kênh) và `bbox` (4 kênh) ở `1 / stride` kích thước ảnh vào. Ô `(r, c)` có
+  điểm `sqrt(sigmoid(cls) * sigmoid(obj))`; khung có tâm `((c + bbox0) * stride, (r + bbox1) * stride)`, cỡ
+  `(exp(bbox2) * stride, exp(bbox3) * stride)` tính theo pixel ảnh vào.
+- Khung có điểm từ `score_threshold` trở lên qua non-maximum suppression ở ngưỡng IoU `nms_threshold`, rồi đổi
+  về pixel của frame.
+
 ## Bundle (nhiều scale trong một package)
 
 ```

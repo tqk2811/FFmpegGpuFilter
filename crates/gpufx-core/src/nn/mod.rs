@@ -3,11 +3,13 @@
 //! [`NnPlan`] is that graph laid out for one set of input sizes (tensor buffers, one dispatch list), and
 //! [`FrameInterp`] drives a `frame_interp` package (RIFE) as its `io.json` describes, [`FrameUpscale`] a
 //! `super_resolution` package (Real-ESRGAN), in tiles, [`FrameMatte`] a `matting` package (MODNet, PP-HumanSeg),
-//! [`NanoTrack`] a tracker package (NanoTrack: two models, a backbone and a head).
+//! [`NanoTrack`] a tracker package (NanoTrack: two models, a backbone and a head), [`FaceDetector`] a face
+//! detector (YuNet).
 //!
 //! The CPU reference executor of `gpufx-nnconv` (`src/reference.rs`) pins the semantics of every op; the
 //! shaders follow it (same tap rules, same summation order where it matters).
 
+pub mod face;
 mod frames;
 mod interp;
 mod kernels;
@@ -22,6 +24,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+pub use face::{FaceBox, FaceConfig, FaceDetector};
 pub use frames::{auto_scale, InterpFrames, UpscaleFrames, AUTO_SCALE_MAX_PIXELS};
 pub use interp::FrameInterp;
 pub use matte::{FrameMatte, MatteIo, MatteSize, MatteType, MATTE_FORMATS};

@@ -64,3 +64,35 @@ fn nanotrack_v2_matches_onnxruntime() {
     assert!(rel_error(&cls.data, &want_cls.data) < 1e-4, "class scores: {}", rel_error(&cls.data, &want_cls.data));
     assert!(rel_error(&loc.data, &want_loc.data) < 1e-4, "box sides: {}", rel_error(&loc.data, &want_loc.data));
 }
+
+#[test]
+fn yunet_matches_onnxruntime() {
+    let zip = root().join("packages/gpufx_ai_tracking/yunet-2023mar.zip");
+    let golden = root().join("tracking-golden/yunet-2023mar");
+    if !zip.is_file() || !golden.join("shapes.json").is_file() {
+        eprintln!("skipping: run scripts/convert-tracking-models.py first");
+        return;
+    }
+    let shapes: HashMap<String, [usize; 3]> = serde_json::from_slice(&std::fs::read(golden.join("shapes.json")).unwrap()).unwrap();
+    let tensor = |name: &str| {
+        let [c, h, w] = shapes[name];
+        Tensor::new(c, h, w, read_f32(&golden.join(format!("{name}.f32"))))
+    };
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap();
+    let mut get = |name: &str| {
+        let mut bytes = Vec::new();
+        archive.by_name(name).unwrap().read_to_end(&mut bytes).unwrap();
+        bytes
+    };
+    let (model, weights, io) = (get("model.json"), get("weights.bin"), get("io.json"));
+    let r = Reference::from_parts(&model, &weights, Some(&io)).unwrap();
+    let out = r.run(HashMap::from([("in0".to_string(), tensor("input"))])).unwrap();
+    for i in 0..9 {
+        let name = format!("out{i}");
+        let want = tensor(&name);
+        let got = &out[&name];
+        assert_eq!((got.c, got.h, got.w), (want.c, want.h, want.w), "{name}");
+        let err = rel_error(&got.data, &want.data);
+        assert!(err < 1e-4, "{name}: {err}");
+    }
+}
