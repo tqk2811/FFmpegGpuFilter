@@ -109,7 +109,7 @@ See docs/NN_MODEL_FORMAT.md of the gpufx repository for the format.
 
 /// The filters `used_for` of a model may name, with the io.json `kind` each one runs.
 pub const FILTERS: &[(&str, &str)] =
-    &[("gpufx_ai_upscale", "super_resolution"), ("gpufx_ai_framerate", "frame_interp"), ("gpufx_ai_matting", "matting")];
+    &[("gpufx_ai_upscale", "super_resolution"), ("gpufx_ai_framerate", "frame_interp"), ("gpufx_ai_matting", "matting"), ("gpufx_ai_tracking", "tracking")];
 
 /// Parses `--used-for <filter>[,<filter>]`.
 pub fn parse_used_for(arg: &str) -> Vec<String> {

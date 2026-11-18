@@ -121,7 +121,7 @@ const COMMON: &str = "
 
 // The activation of output channels co..co + 4: 0 none, 1 relu, 2 leaky relu (slope a), 3 sigmoid, 4 prelu
 // (slopes at wf[soff + c], one shared slope when sn == 1), 5 clip to [a, b], 6 hard sigmoid
-// clamp(a x + b, 0, 1), 7 hard swish x clamp(a x + b, 0, 1).
+// clamp(a x + b, 0, 1), 7 hard swish x clamp(a x + b, 0, 1), 8 exp.
 fn act(v: vec4f, kind: u32, a: f32, b: f32, soff: u32, sn: u32, co: u32) -> vec4f {
     switch kind {
         case 1u: { return max(v, vec4f(0.0)); }
@@ -139,6 +139,7 @@ fn act(v: vec4f, kind: u32, a: f32, b: f32, soff: u32, sn: u32, co: u32) -> vec4
         case 5u: { return clamp(v, vec4f(a), vec4f(b)); }
         case 6u: { return clamp(a * v + b, vec4f(0.0), vec4f(1.0)); }
         case 7u: { return v * clamp(a * v + b, vec4f(0.0), vec4f(1.0)); }
+        case 8u: { return exp(v); }
         default: { return v; }
     }
 }
@@ -686,6 +687,7 @@ pub(crate) enum Fixed {
     PixelShuffle,
     Pool,
     InstanceNorm,
+    Correlation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -847,6 +849,7 @@ impl Kernels {
             Kernel::Fixed(Fixed::PixelShuffle) => ("gpufx nn pixel_shuffle", include_str!("pixel_shuffle.wgsl").to_string()),
             Kernel::Fixed(Fixed::Pool) => ("gpufx nn pool", include_str!("pool.wgsl").to_string()),
             Kernel::Fixed(Fixed::InstanceNorm) => ("gpufx nn instance_norm", include_str!("instance_norm.wgsl").to_string()),
+            Kernel::Fixed(Fixed::Correlation) => ("gpufx nn correlation", include_str!("correlation.wgsl").to_string()),
             Kernel::Conv(s, c) => ("gpufx nn conv", conv_source(&s, &c, self.f16)),
             Kernel::Coop(s, c) => ("gpufx nn conv coop", coop_source(&s, &c)),
             Kernel::Deconv(s, rt, rl) => ("gpufx nn deconv", deconv_source(&s, rt, rl)),

@@ -90,6 +90,7 @@ pub enum OpParams {
     Clip(ClipParams),
     Pool(PoolParams),
     InstanceNorm(InstanceNormParams),
+    Correlation(CorrelationParams),
 }
 
 impl Op {
@@ -115,6 +116,7 @@ impl OpParams {
             OpParams::Clip(_) => "clip",
             OpParams::Pool(_) => "pool",
             OpParams::InstanceNorm(_) => "instance_norm",
+            OpParams::Correlation(_) => "correlation",
         }
     }
 }
@@ -142,6 +144,8 @@ pub enum Activation {
         alpha: f32,
         beta: f32,
     },
+    /// `exp(x)`
+    Exp,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -307,4 +311,22 @@ pub struct InstanceNormParams {
     /// Per-channel scale and shift (f32 blobs of `channels` values), both or neither.
     pub gamma: Option<BlobRef>,
     pub beta: Option<BlobRef>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum CorrelationMode {
+    /// `out[i, y, x] = sum_c t[c, i] * s[c, y, x]`: one output channel per template pixel `i` (row major), the
+    /// output the size of the search input.
+    Pixelwise,
+    /// `out[c, y, x] = sum_{i, j} t[c, i, j] * s[c, y + i, x + j]`: the template is a depthwise kernel, "valid"
+    /// output (`search - template + 1`).
+    Depthwise,
+}
+
+/// Cross-correlation of two run-time tensors, inputs `[template, search]` of the same channel count (Siamese
+/// trackers: the template features are the kernel).
+#[derive(Serialize, Debug)]
+pub struct CorrelationParams {
+    pub mode: CorrelationMode,
 }

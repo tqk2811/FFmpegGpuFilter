@@ -80,11 +80,13 @@ parameters of its kind. Unknown ncnn layer types or parameters make the converte
 | `prelu` | `slope` (f32 blob) | `x >= 0 ? x : slope[c] * x`; `slope.count` is the channel count, or 1 for one shared slope |
 | `clip` | `min`, `max` | `clamp(x, min, max)` (ncnn Clip; a missing bound is the f32 limit) |
 | `pool` | `kind` (`max avg`), `global`, `kernel` [h,w], `stride` [h,w], `pad` [top,left,bottom,right], `count_include_pad` | `global`: the max or mean of each channel plane, output `C x 1 x 1` (kernel, stride and pad unused). Else a window: output size as a convolution of dilation 1, a window counts only the pixels inside the input (max ignores the padding; average divides by that count, or by `kh * kw` with `count_include_pad`); the padding is smaller than the kernel |
+| `correlation` | `mode` (`pixelwise depthwise`) | inputs `[template, search]`, both computed at run time, same channel count. `pixelwise`: `out[i][y][x] = sum_c t[c][i] * s[c][y][x]`, one output channel per template pixel `i` (row major), the size of the search. `depthwise`: `out[c][y][x] = sum_{i,j} t[c][i][j] * s[c][y+i][x+j]`, size `search - template + 1` (Siamese trackers) |
 | `instance_norm` | `channels`, `eps`, `gamma`, `beta` | per channel `(x - mean) / sqrt(var + eps)` over its plane (biased variance around the mean), then `* gamma[c] + beta[c]` when both f32 blobs are given (both or neither) |
 
 `activation` of a conv is `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}`, `{"type":"sigmoid"}`,
 `{"type":"clip","min":a,"max":b}`, `{"type":"hard_sigmoid","alpha":a,"beta":b}` or
-`{"type":"hard_swish","alpha":a,"beta":b}`, applied after the bias; an `activation` op takes the same types.
+`{"type":"hard_swish","alpha":a,"beta":b}` or `{"type":"exp"}`, applied after the bias; an `activation` op takes
+the same types.
 `leaky_relu(x) = x >= 0 ? x : s * x`, `hard_sigmoid(x) = clamp(a * x + b, 0, 1)`,
 `hard_swish(x) = x * hard_sigmoid(x)` (ncnn HardSigmoid / HardSwish, whose defaults are `a = 0.2`, `b = 0.5`).
 
@@ -96,7 +98,10 @@ The converter also maps ncnn layers that have no op of their own: `ConvolutionDe
 outputs becomes one `slice` op per output (`<layer>_<k>`); activation type 3 (clip) and 6 (hard swish) of a
 convolution or InnerProduct map to the types above; `4=-233` (SAME padding, as pnnx writes ONNX `auto_pad`) is
 taken for stride 1 and an odd kernel span only, where it is the symmetric `(span - 1) / 2`. `Pooling` needs
-`pad_mode` 1 (valid, explicit pads) or `global`, and is not adaptive.
+`pad_mode` 1 (valid, explicit pads) or `global`, and is not adaptive. An activation of a vector is a vector.
+`UnaryOp` type 7 is the `exp` activation. The pixelwise correlation as pnnx writes a `torch.matmul` of flattened
+features, `Reshape(t, w = h * w, h = c) -> Permute(1)` and `Reshape(s, w = H * W, h = c)` into `MatMul`, then a 3D
+`Reshape` of its output, is one `correlation` op (`pixelwise`); a flattened tensor read by anything else fails.
 
 ### Parameters
 
@@ -204,6 +209,32 @@ The `matting` models (`packages/gpufx_ai_matting/*/io.json`, run by `FrameMatte`
   size (r8unorm, r16float or r32float): the model size for the raw matte, the frame size to cut the frame out.
 
 The CPU reference of these steps is `gpufx-nnconv frames::matte` (and `frames::resize_matte`).
+
+### Tracking
+
+A tracker package (filter name `gpufx_ai_tracking`, run by `NanoTrack`) is not a single model: its root holds
+`tracker.json`, `LICENSE`, `README.md` and two directories with a normal package each (`model.json`,
+`weights.bin`, `io.json` of kind `tracking`), the backbone and the head of a Siamese tracker:
+
+```json
+{ "format": "gpufx-nn-tracker", "version": 1, "kind": "siamese", "backbone": "backbone", "head": "head",
+  "template_size": 127, "search_size": 255, "stride": 16, "channels": "bgr",
+  "context_amount": 0.5, "window_influence": 0.455, "penalty_k": 0.055, "size_rate": 0.37 }
+```
+
+- The backbone has one input and one output: a square crop, 3 channels in [0, 255] in the order `channels`, to
+  features. It runs at `template_size` (once, the first frame's box with `context_amount * (w + h)` around it, side
+  `sqrt((w + ctx) * (h + ctx))`) and at `search_size` (each next frame around the last box, that side times
+  `search_size / template_size`). A crop is resized bilinearly with half-pixel centres; pixels outside the frame
+  read the frame's mean colour.
+- The head takes the template features and the search features (its two inputs in that order) and gives a
+  2 channel class score map (softmax, channel 1 the object) and a 4 channel map of the distances from each cell
+  to the box's left, top, right and bottom side in search crop pixels; cell `(i, j)` sits at
+  `((j - n / 2) * stride + search_size / 2, (i - n / 2) * stride + search_size / 2)`.
+- The new box is the cell of the best `penalty * p * (1 - window_influence) + hann * window_influence`
+  (SiamBAN: `penalty = exp(-(r * s - 1) * penalty_k)` with `r`, `s` the change of aspect and of context size,
+  each at least 1); its centre moves the box and its size moves the box size by `size_rate * penalty * p`.
+- `scripts/convert-tracking-models.py` builds the package from `packages/gpufx_ai_tracking/*/source.json`.
 
 ## Bundles (several scales in one package)
 

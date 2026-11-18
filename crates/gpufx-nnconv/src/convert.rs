@@ -27,6 +27,12 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
     // blobs that are a `C x 1 x 1` vector (global pooling, InnerProduct): only these feed an InnerProduct or a
     // Reshape, which are then a 1x1 convolution and an alias
     let mut vectors: HashSet<String> = HashSet::new();
+    // The pixelwise correlation of Siamese trackers as pnnx writes `torch.matmul` of flattened features:
+    // `Reshape(t, w = h*w, h = c) -> Permute(0=1)` and `Reshape(s, w = H*W, h = c)` into `MatMul`, then
+    // `Reshape(w = W, h = H, c = h*w)`. `flat` holds each 2D view: the 3D tensor it flattens and whether it is
+    // transposed; `correlations` the MatMul outputs, whose 3D reshape is the correlation output as it is.
+    let mut flat: HashMap<String, (String, bool)> = HashMap::new();
+    let mut correlations: HashSet<String> = HashSet::new();
 
     for layer in &layers {
         let ty = layer.ty.as_str();
@@ -65,18 +71,65 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 let p = &layer.params;
                 p.expect_only(&[0, 1, 2, 6, 11, 12, 13]).map_err(|e| layer.err(e))?;
                 let expr = p.string(6).map(|s| s.trim_matches('"').to_string());
+                let int = |k: i32| p.int(k, -233).map_err(|e| layer.err(e));
                 let to_vector = match &expr {
                     Some(e) => e.starts_with("1,1,"),
-                    None => p.int(0, -233).map_err(|e| layer.err(e))? == 1 && p.int(1, -233).map_err(|e| layer.err(e))? == 1,
+                    None => int(0)? == 1 && int(1)? == 1,
                 };
-                if !to_vector || !vectors.contains(&src) {
-                    return Err(layer.err("only a reshape of a C x 1 x 1 vector to w = 1, h = 1 is supported"));
+                let out = &layer.outputs[0];
+                if !produced.insert(out.clone()) {
+                    return Err(layer.err(format!("blob '{out}' is produced twice")));
+                }
+                if expr.is_none() && !vectors.contains(&src) && !correlations.contains(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? == -233 {
+                    // a 3D tensor flattened to 2D (`w = h * w`, `h = c`): only a correlation may read it
+                    flat.insert(out.clone(), (src.clone(), false));
+                    continue;
+                }
+                let restores = expr.is_none() && correlations.contains(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? > 0;
+                if !restores && (!to_vector || !vectors.contains(&src)) {
+                    return Err(layer.err(
+                        "only a reshape of a C x 1 x 1 vector to w = 1, h = 1, or the flattening of a correlation, is supported",
+                    ));
+                }
+                aliases.insert(out.clone(), src.clone());
+                continue;
+            }
+            "Permute" => {
+                arity(layer, 1, 1)?;
+                layer.params.expect_only(&[0]).map_err(|e| layer.err(e))?;
+                let src = resolve(&aliases, &layer.inputs[0]);
+                let Some((base, false)) = flat.get(&src).cloned() else {
+                    return Err(layer.err("only the transpose of a flattened tensor (before a MatMul) is supported"));
+                };
+                if layer.params.int(0, 0).map_err(|e| layer.err(e))? != 1 {
+                    return Err(layer.err("only order_type 1 (swap w and h) is supported"));
                 }
                 let out = &layer.outputs[0];
                 if !produced.insert(out.clone()) {
                     return Err(layer.err(format!("blob '{out}' is produced twice")));
                 }
-                aliases.insert(out.clone(), src.clone());
+                flat.insert(out.clone(), (base, true));
+                continue;
+            }
+            "MatMul" => {
+                arity(layer, 2, 1)?;
+                layer.params.expect_only(&[0]).map_err(|e| layer.err(e))?;
+                let a = resolve(&aliases, &layer.inputs[0]);
+                let b = resolve(&aliases, &layer.inputs[1]);
+                let (Some((template, true)), Some((search, false))) = (flat.get(&a).cloned(), flat.get(&b).cloned()) else {
+                    return Err(layer.err(
+                        "only MatMul(transposed flattened template, flattened search), a pixelwise correlation, is supported",
+                    ));
+                };
+                let out = &layer.outputs[0];
+                if !produced.insert(out.clone()) {
+                    return Err(layer.err(format!("blob '{out}' is produced twice")));
+                }
+                consumed.insert(template.clone());
+                consumed.insert(search.clone());
+                correlations.insert(out.clone());
+                let params = OpParams::Correlation(CorrelationParams { mode: CorrelationMode::Pixelwise });
+                ops.push(Op::new(&layer.name, vec![template, search], out, params));
                 continue;
             }
             "Slice" => {
@@ -119,6 +172,9 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
         }
         let input_names: Vec<String> = layer.inputs.iter().map(|b| resolve(&aliases, b)).collect();
         for i in &input_names {
+            if flat.contains_key(i) {
+                return Err(layer.err(format!("blob '{i}' is a flattened tensor, which only a correlation MatMul may read")));
+            }
             if !produced.contains(i) {
                 return Err(layer.err(format!("input blob '{i}' is not produced by an earlier layer")));
             }
@@ -133,6 +189,14 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 arity(layer, 1, 1)?;
                 let slope = p.float(0, 0.0).map_err(|e| layer.err(e))?;
                 OpParams::Activation(if slope == 0.0 { Activation::Relu } else { Activation::LeakyRelu { slope } })
+            }
+            "UnaryOp" => {
+                p.expect_only(&[0]).map_err(|e| layer.err(e))?;
+                arity(layer, 1, 1)?;
+                match p.int(0, 0).map_err(|e| layer.err(e))? {
+                    7 => OpParams::Activation(Activation::Exp),
+                    v => return Err(layer.err(format!("unsupported unary op_type {v} (only 7, exp)"))),
+                }
             }
             "Sigmoid" => {
                 p.expect_only(&[]).map_err(|e| layer.err(e))?;
@@ -237,6 +301,10 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
         };
         if !produced.insert(output.clone()) {
             return Err(layer.err(format!("blob '{output}' is produced twice")));
+        }
+        // an activation keeps a vector a vector (the hard sigmoid of a squeeze-and-excitation block)
+        if matches!(params, OpParams::Activation(_) | OpParams::Clip(_)) && vectors.contains(&input_names[0]) {
+            vectors.insert(output.clone());
         }
         consumed.extend(input_names.iter().cloned());
         ops.push(Op::new(&layer.name, input_names, output, params));

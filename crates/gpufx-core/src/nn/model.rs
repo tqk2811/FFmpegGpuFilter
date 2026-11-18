@@ -63,6 +63,7 @@ pub enum Activation {
         alpha: f32,
         beta: f32,
     },
+    Exp,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +137,16 @@ pub enum ResizeMode {
     Bicubic,
 }
 
+/// How a [`OpKind::Correlation`] slides its template.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CorrelationMode {
+    /// `out[i, y, x] = sum_c t[c, i] * s[c, y, x]`: one channel per template pixel, the size of the search.
+    Pixelwise,
+    /// `out[c, y, x] = sum_{i, j} t[c, i, j] * s[c, y + i, x + j]`, "valid".
+    Depthwise,
+}
+
 #[derive(Debug, Clone)]
 pub enum OpKind {
     Conv2d(ConvParams),
@@ -162,6 +173,8 @@ pub enum OpKind {
     },
     PixelShuffle(u32),
     Warp,
+    /// Cross-correlation of inputs `[template, search]` (both computed at run time, same channel count).
+    Correlation(CorrelationMode),
     /// `x >= 0 ? x : slope[c] * x`, `slope.count` channels or 1 shared slope.
     Prelu {
         slope: BlobRef,
@@ -281,6 +294,7 @@ fn parse_op(raw: RawOp) -> Result<Op, Error> {
             }
             OpKind::Warp
         }
+        "correlation" => OpKind::Correlation(field(p, "mode")?),
         "prelu" => {
             let slope: BlobRef = field(p, "slope")?;
             if slope.count == 0 {

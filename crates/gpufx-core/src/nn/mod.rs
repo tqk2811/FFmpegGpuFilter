@@ -2,7 +2,8 @@
 //! shaders. Nothing in here knows a particular model: [`NnModel`] holds the graph and its weights on the GPU,
 //! [`NnPlan`] is that graph laid out for one set of input sizes (tensor buffers, one dispatch list), and
 //! [`FrameInterp`] drives a `frame_interp` package (RIFE) as its `io.json` describes, [`FrameUpscale`] a
-//! `super_resolution` package (Real-ESRGAN), in tiles, [`FrameMatte`] a `matting` package (MODNet, PP-HumanSeg).
+//! `super_resolution` package (Real-ESRGAN), in tiles, [`FrameMatte`] a `matting` package (MODNet, PP-HumanSeg),
+//! [`NanoTrack`] a tracker package (NanoTrack: two models, a backbone and a head).
 //!
 //! The CPU reference executor of `gpufx-nnconv` (`src/reference.rs`) pins the semantics of every op; the
 //! shaders follow it (same tap rules, same summation order where it matters).
@@ -14,6 +15,7 @@ mod matte;
 pub mod model;
 mod plan;
 mod rewrite;
+mod track;
 mod upscale;
 
 use std::collections::HashMap;
@@ -24,6 +26,7 @@ pub use frames::{auto_scale, InterpFrames, UpscaleFrames, AUTO_SCALE_MAX_PIXELS}
 pub use interp::FrameInterp;
 pub use matte::{FrameMatte, MatteIo, MatteSize, MatteType, MATTE_FORMATS};
 pub use plan::{NnPlan, Profile, TensorView};
+pub use track::{NanoTrack, TrackFound, TrackRect, TrackerConfig};
 pub use upscale::{FrameUpscale, TileLayout, UpscaleOptions, DEFAULT_TENSOR_BYTES};
 
 use crate::runtime::GpuContext;
@@ -446,6 +449,7 @@ impl NnModel {
                 }
                 OpKind::Resize { .. } => Kernel::Fixed(Fixed::Resize),
                 OpKind::Warp => Kernel::Fixed(Fixed::Warp),
+                OpKind::Correlation(_) => Kernel::Fixed(Fixed::Correlation),
                 OpKind::PixelShuffle(_) => Kernel::Fixed(Fixed::PixelShuffle),
                 OpKind::Pool { .. } => Kernel::Fixed(Fixed::Pool),
                 OpKind::InstanceNorm { channels, affine, .. } => {

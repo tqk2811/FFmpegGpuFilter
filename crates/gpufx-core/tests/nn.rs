@@ -1810,3 +1810,175 @@ fn matting_packages_match_the_cpu_reference() {
         }
     }
 }
+
+#[test]
+fn correlations_and_exp_match_the_reference() {
+    let Some(ctx) = gpu() else { return };
+    let (mut w, mut r) = (Weights::default(), Rng(11));
+    let ops = vec![
+        // template features from one input, search features from the other, as in a Siamese tracker head
+        conv(&mut w, &mut r, "conv2d", "zt", "z", 5, 6, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        conv(&mut w, &mut r, "conv2d", "xs", "x", 5, 6, [3, 3], [1, 1], [1, 1], [1, 1, 1, 1], [0, 0], "null"),
+        op("correlation", "pw", &["zt", "xs"], r#""mode":"pixelwise""#),
+        op("correlation", "dw", &["zt", "xs"], r#""mode":"depthwise""#),
+        // exp fused into a convolution epilogue, and on its own
+        conv(&mut w, &mut r, "conv2d", "e", "pw", 12, 4, [1, 1], [1, 1], [1, 1], [0, 0, 0, 0], [0, 0], "null"),
+        op("activation", "ex", &["e"], r#""type":"exp""#),
+        op("activation", "dx", &["dw"], r#""type":"exp""#),
+    ];
+    let json = model(&["z", "x"], &["pw", "ex", "dx"], &ops);
+    // a 3x4 template (12 channels pixelwise) on an 11x13 search
+    check(&ctx, &json, &w.0, &[("z", [5, 3, 4]), ("x", [5, 11, 13])], &mut r);
+}
+
+/// The NanoTrack V2 package and its onnxruntime outputs, written by `scripts/convert-tracking-models.py`
+/// (not in git): `None` skips.
+fn nanotrack() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let build = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build");
+    let zip = build.join("packages/gpufx_ai_tracking/nanotrack-v2.zip");
+    let golden = build.join("tracking-golden/nanotrack-v2");
+    if zip.is_file() && golden.join("shapes.json").is_file() {
+        Some((zip, golden))
+    } else {
+        eprintln!("skipping: run scripts/convert-tracking-models.py first");
+        None
+    }
+}
+
+fn zip_files(zip: &std::path::Path) -> HashMap<String, Vec<u8>> {
+    use std::io::Read;
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+    let mut files = HashMap::new();
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).unwrap();
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes).unwrap();
+        files.insert(f.name().unwrap().to_string(), bytes);
+    }
+    files
+}
+
+fn read_f32(path: &std::path::Path) -> Vec<f32> {
+    std::fs::read(path).unwrap().as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()
+}
+
+/// The largest difference relative to the largest magnitude of `want`.
+fn rel_error(got: &[f32], want: &[f32]) -> f32 {
+    assert_eq!(got.len(), want.len());
+    let scale = want.iter().fold(0f32, |m, v| m.max(v.abs())).max(1e-6);
+    got.iter().zip(want).fold(0f32, |m, (a, b)| m.max((a - b).abs())) / scale
+}
+
+#[test]
+fn nanotrack_models_match_onnxruntime() {
+    let Some(ctx) = gpu() else { return };
+    let Some((zip, golden)) = nanotrack() else { return };
+    let files = zip_files(&zip);
+    let part = |dir: &str| {
+        let get = |n: &str| files[&format!("{dir}/{n}")].as_slice();
+        NnModel::from_parts(ctx.clone(), get("model.json"), get("weights.bin"), Some(get("io.json"))).unwrap()
+    };
+    let (backbone, head) = (part("backbone"), part("head"));
+    let g = |n: &str| read_f32(&golden.join(format!("{n}.f32")));
+    let features = |side: u32, picture: &[f32]| {
+        let plan = backbone.plan(&[("in0", [3, side, side])]).unwrap();
+        plan.write_input("in0", picture).unwrap();
+        plan.run().unwrap();
+        plan.read("out0").unwrap()
+    };
+    let zf = features(127, &g("template"));
+    let xf = features(255, &g("search"));
+    assert!(rel_error(&zf, &g("zf")) < 1e-4, "template features: {}", rel_error(&zf, &g("zf")));
+    assert!(rel_error(&xf, &g("xf")) < 1e-4, "search features: {}", rel_error(&xf, &g("xf")));
+    let plan = head.plan(&[("in0", [48, 8, 8]), ("in1", [48, 16, 16])]).unwrap();
+    plan.write_input("in0", &g("zf")).unwrap();
+    plan.write_input("in1", &g("xf")).unwrap();
+    plan.run().unwrap();
+    let (cls, loc) = (plan.read("out0").unwrap(), plan.read("out1").unwrap());
+    assert!(rel_error(&cls, &g("cls")) < 1e-4, "class scores: {}", rel_error(&cls, &g("cls")));
+    assert!(rel_error(&loc, &g("loc")) < 1e-4, "box sides: {}", rel_error(&loc, &g("loc")));
+}
+
+/// A frame of `w` x `h` with a textured object of `ow` x `oh` centred at (`cx`, `cy`) on a quieter textured
+/// background, RGBA.
+fn tracking_frame(w: usize, h: usize, cx: f64, cy: f64, ow: f64, oh: f64) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f64, y as f64);
+            let (u, v) = (fx - cx, fy - cy);
+            let px = if u.abs() <= ow / 2.0 && v.abs() <= oh / 2.0 {
+                let t = (u * 0.35).sin() * (v * 0.5).cos();
+                [200.0 + 50.0 * t, 60.0 + 40.0 * (u * 0.2).cos(), 40.0 + 30.0 * t]
+            } else {
+                let t = 0.5 + 0.25 * (fx * 0.07 + fy * 0.05).sin() + 0.25 * (fx * 0.013 - fy * 0.021).cos();
+                [70.0 + 60.0 * t, 110.0 + 50.0 * t, 90.0 + 40.0 * t]
+            };
+            rgba.extend([px[0] as u8, px[1] as u8, px[2] as u8, 255]);
+        }
+    }
+    rgba
+}
+
+#[test]
+fn nanotrack_crops_like_the_cpu() {
+    let Some(ctx) = gpu() else { return };
+    let Some((zip, _)) = nanotrack() else { return };
+    let mut tracker = gpufx_core::nn::NanoTrack::open(ctx, &zip).unwrap();
+    let (w, h) = (160usize, 90usize);
+    let rgba = tracking_frame(w, h, 20.0, 30.0, 30.0, 20.0);
+    let img = view(&rgba, w as u32, h as u32);
+    // a box near the corner, so the crop reaches out of the frame
+    let rect = gpufx_core::nn::TrackRect { cx: 20.0, cy: 30.0, w: 30.0, h: 20.0 };
+    let crop = tracker.template_crop(&img, rect).unwrap();
+    let mean: Vec<f64> = (0..3).map(|c| rgba.as_chunks::<4>().0.iter().map(|p| f64::from(p[c])).sum::<f64>() / (w * h) as f64).collect();
+    let span = ((30.0f64 + 25.0) * (20.0 + 25.0)).sqrt().round();
+    let c = ((span + 1.0) / 2.0).floor();
+    let (x0, y0) = ((20.0 - c + 0.5).floor(), (30.0 - c + 0.5).floor());
+    let texel = |x: i64, y: i64, ch: usize| {
+        if x < 0 || y < 0 || x >= w as i64 || y >= h as i64 {
+            mean[ch]
+        } else {
+            f64::from(rgba[(y as usize * w + x as usize) * 4 + ch])
+        }
+    };
+    let size = 127usize;
+    let mut worst = 0f64;
+    for oy in 0..size {
+        for ox in 0..size {
+            let sx = x0 + (ox as f64 + 0.5) * span / size as f64 - 0.5;
+            let sy = y0 + (oy as f64 + 0.5) * span / size as f64 - 0.5;
+            let (fx, fy) = (sx.floor(), sy.floor());
+            let (ax, ay) = (sx - fx, sy - fy);
+            let (ix, iy) = (fx as i64, fy as i64);
+            for (plane, ch) in [2usize, 1, 0].into_iter().enumerate() {
+                let top = texel(ix, iy, ch) * (1.0 - ax) + texel(ix + 1, iy, ch) * ax;
+                let bottom = texel(ix, iy + 1, ch) * (1.0 - ax) + texel(ix + 1, iy + 1, ch) * ax;
+                let want = top * (1.0 - ay) + bottom * ay;
+                worst = worst.max((f64::from(crop[(plane * size + oy) * size + ox]) - want).abs());
+            }
+        }
+    }
+    assert!(worst < 0.05, "crop differs from the CPU by {worst}");
+}
+
+#[test]
+fn nanotrack_follows_a_moving_object() {
+    let Some(ctx) = gpu() else { return };
+    let Some((zip, _)) = nanotrack() else { return };
+    let mut tracker = gpufx_core::nn::NanoTrack::open(ctx, &zip).unwrap();
+    let (w, h) = (320usize, 180usize);
+    let at = |i: usize| (60.0 + 4.0 * i as f64, 90.0 + 25.0 * (i as f64 * 0.15).sin());
+    let (cx, cy) = at(0);
+    let first = tracking_frame(w, h, cx, cy, 40.0, 30.0);
+    tracker.init(&view(&first, w as u32, h as u32), gpufx_core::nn::TrackRect { cx: cx as f32, cy: cy as f32, w: 40.0, h: 30.0 }).unwrap();
+    for i in 1..40 {
+        let (cx, cy) = at(i);
+        let frame = tracking_frame(w, h, cx, cy, 40.0, 30.0);
+        let found = tracker.update(&view(&frame, w as u32, h as u32)).unwrap();
+        let err = ((f64::from(found.rect.cx) - cx).powi(2) + (f64::from(found.rect.cy) - cy).powi(2)).sqrt();
+        assert!(err < 4.0, "frame {i}: box at ({}, {}), object at ({cx}, {cy})", found.rect.cx, found.rect.cy);
+        assert!((found.rect.w - 40.0).abs() < 12.0 && (found.rect.h - 30.0).abs() < 10.0, "frame {i}: size {:?}", found.rect);
+        assert!(found.score > 0.5, "frame {i}: score {}", found.score);
+    }
+}

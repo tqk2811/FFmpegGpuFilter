@@ -82,6 +82,7 @@ enum Act {
     /// alpha, beta
     HardSigmoid(f32, f32),
     HardSwish(f32, f32),
+    Exp,
 }
 
 impl Act {
@@ -99,6 +100,7 @@ impl Act {
             Act::Clip(lo, hi) => x.clamp(lo, hi),
             Act::HardSigmoid(a, b) => (a * x + b).clamp(0.0, 1.0),
             Act::HardSwish(a, b) => x * (a * x + b).clamp(0.0, 1.0),
+            Act::Exp => x.exp(),
         }
     }
 }
@@ -150,6 +152,8 @@ struct ConvOp {
 
 #[derive(Clone)]
 enum Kind {
+    /// `[template, search]`; `true` pixelwise, `false` depthwise (see [`correlation`])
+    Correlation(bool),
     Conv(ConvOp),
     Deconv(ConvOp),
     Activation(Act),
@@ -356,6 +360,7 @@ fn parse_act_value(v: &Value) -> Result<Option<Act>> {
         "clip" => Act::Clip(f32_of(v, "min")?, f32_of(v, "max")?),
         "hard_sigmoid" => Act::HardSigmoid(f32_of(v, "alpha")?, f32_of(v, "beta")?),
         "hard_swish" => Act::HardSwish(f32_of(v, "alpha")?, f32_of(v, "beta")?),
+        "exp" => Act::Exp,
         _ => return fail(format!("unknown activation \"{ty}\"")),
     }))
 }
@@ -489,6 +494,11 @@ fn parse_op(o: &Value, weights: &[u8]) -> Result<RefOp> {
             Kind::Resize { mode, scale, size, align_corners }
         }
         "pixel_shuffle" => Kind::PixelShuffle(usize_of(o, "factor")?),
+        "correlation" => match get(o, "mode")?.as_str().unwrap_or("") {
+            "pixelwise" => Kind::Correlation(true),
+            "depthwise" => Kind::Correlation(false),
+            m => return fail(format!("unknown correlation mode \"{m}\"")),
+        },
         "warp" => Kind::Warp,
         "prelu" => Kind::Prelu { slope: blob(get(o, "slope")?, weights)? },
         "clip" => Kind::Clip {
@@ -720,6 +730,10 @@ fn one<'a>(args: &[&'a Tensor]) -> Result<&'a Tensor> {
 
 fn exec(kind: &Kind, args: &[&Tensor]) -> Result<Tensor> {
     match kind {
+        Kind::Correlation(pixelwise) => match args {
+            [t, s] => correlation(t, s, *pixelwise),
+            _ => fail("correlation needs [template, search]"),
+        },
         Kind::Conv(c) => conv2d(one(args)?, c),
         Kind::Deconv(c) => deconv2d(one(args)?, c),
         Kind::Activation(a) => {
@@ -764,6 +778,45 @@ fn exec(kind: &Kind, args: &[&Tensor]) -> Result<Tensor> {
             Ok(Tensor::new(x.c, x.h, x.w, x.data.iter().map(|&v| v.clamp(*min, *max)).collect()))
         }
     }
+}
+
+/// Cross-correlation of a run-time template `t` with `s`, same channel count, sums in f64. Pixelwise:
+/// `out[i, y, x] = sum_c t[c, i] * s[c, y, x]`, `i` a template pixel (row major), the size of `s`. Depthwise:
+/// `out[c, y, x] = sum_{i, j} t[c, i, j] * s[c, y + i, x + j]`, "valid" (`s - t + 1`).
+fn correlation(t: &Tensor, s: &Tensor, pixelwise: bool) -> Result<Tensor> {
+    if t.c != s.c {
+        return fail(format!("correlation of {} and {}: channel counts differ", t.shape(), s.shape()));
+    }
+    let (tp, sp) = (t.plane_len(), s.plane_len());
+    if pixelwise {
+        let mut out = Tensor::zeros(tp, s.h, s.w);
+        for i in 0..tp {
+            for p in 0..sp {
+                let sum: f64 = (0..t.c).map(|c| t.data[c * tp + i] as f64 * s.data[c * sp + p] as f64).sum();
+                out.data[i * sp + p] = sum as f32;
+            }
+        }
+        return Ok(out);
+    }
+    if t.h > s.h || t.w > s.w {
+        return fail(format!("depthwise correlation: template {} is larger than search {}", t.shape(), s.shape()));
+    }
+    let (oh, ow) = (s.h - t.h + 1, s.w - t.w + 1);
+    let mut out = Tensor::zeros(t.c, oh, ow);
+    for c in 0..t.c {
+        for y in 0..oh {
+            for x in 0..ow {
+                let mut sum = 0f64;
+                for i in 0..t.h {
+                    for j in 0..t.w {
+                        sum += t.data[c * tp + i * t.w + j] as f64 * s.data[c * sp + (y + i) * s.w + x + j] as f64;
+                    }
+                }
+                out.data[(c * oh + y) * ow + x] = sum as f32;
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Max or average pooling (ncnn Pooling, pad_mode valid). A window only counts the pixels inside the input;
@@ -1414,6 +1467,21 @@ mod tests {
         assert!(r.run_with([("x".to_string(), t(1, 1, 1, &[3.]))].into(), &[("s", 0.25)]).is_ok());
         let e = Reference::from_parts(json(r#","params":{"s":{"default":0.4,"values":[0.25,0.5]}}"#).as_bytes(), &[], None).err().unwrap();
         assert!(e.to_string().contains("is not one of"), "{e}");
+    }
+
+    #[test]
+    fn correlation_pixelwise_and_depthwise() {
+        // template 2 x 1 x 2, search 2 x 2 x 2
+        let tpl = t(2, 1, 2, &[1., 2., 3., 4.]);
+        let s = t(2, 2, 2, &[1., 0., 0., 1., 2., 2., 2., 2.]);
+        let p = correlation(&tpl, &s, true).unwrap();
+        assert_eq!((p.c, p.h, p.w), (2, 2, 2));
+        // i = 0: 1 * s0 + 3 * s1; i = 1: 2 * s0 + 4 * s1
+        assert_eq!(p.data, vec![7., 6., 6., 7., 10., 8., 8., 10.]);
+        let d = correlation(&tpl, &s, false).unwrap();
+        assert_eq!((d.c, d.h, d.w), (2, 2, 1));
+        assert_eq!(d.data, vec![1., 2., 14., 14.]);
+        assert!(correlation(&t(1, 1, 1, &[1.]), &s, true).is_err());
     }
 
     #[test]

@@ -78,6 +78,7 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u, @
         // hard sigmoid / hard swish: alpha ca, beta cb
         case 17u: { v = clamp(p.ca * a + p.cb, 0.0, 1.0); }
         case 18u: { v = a * clamp(p.ca * a + p.cb, 0.0, 1.0); }
+        case 19u: { v = exp(a); }
         default: { }
     }
     dst[p.out_off + i] = v;

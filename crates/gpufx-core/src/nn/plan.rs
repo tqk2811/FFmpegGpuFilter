@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::kernels::{self, ConvConfig, CoopConfig, Fixed, Kernel, PARAM_SLOT};
-use super::model::{Activation, BinaryKind, EltwiseKind, Op, OpKind, PoolKind, ResizeMode};
+use super::model::{Activation, BinaryKind, CorrelationMode, EltwiseKind, Op, OpKind, PoolKind, ResizeMode};
 use super::{conv_shape, rewrite, NnModel};
 use crate::Error;
 
@@ -97,6 +97,7 @@ fn act_code(a: Option<Activation>) -> ActCode {
         Some(Activation::Clip { min, max }) => (5, min, max, 0, 0),
         Some(Activation::HardSigmoid { alpha, beta }) => (6, alpha, beta, 0, 0),
         Some(Activation::HardSwish { alpha, beta }) => (7, alpha, beta, 0, 0),
+        Some(Activation::Exp) => (8, 0.0, 0.0, 0, 0),
     }
 }
 
@@ -234,6 +235,14 @@ fn infer(kind: &OpKind, ins: &[[u32; 3]]) -> Result<[u32; 3], String> {
             };
             [c, oh, ow]
         }
+        OpKind::Correlation(mode) => match ins {
+            [t, s] if t[0] == s[0] => match mode {
+                CorrelationMode::Pixelwise => [t[1] * t[2], s[1], s[2]],
+                CorrelationMode::Depthwise if t[1] <= s[1] && t[2] <= s[2] => [t[0], s[1] - t[1] + 1, s[2] - t[2] + 1],
+                CorrelationMode::Depthwise => return Err(format!("template {t:?} is larger than the search {s:?}")),
+            },
+            _ => return Err("correlation needs [template, search] of the same channel count".into()),
+        },
         OpKind::Warp => match ins {
             [img, flow] if flow[0] >= 2 && flow[1] == img[1] && flow[2] == img[2] => *img,
             _ => return Err("warp needs [image, flow] of the same size, flow with 2 channels".into()),
@@ -622,6 +631,7 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f
                     Activation::Clip { min, max } => (16, 0.0, min, max),
                     Activation::HardSigmoid { alpha, beta } => (17, 0.0, alpha, beta),
                     Activation::HardSwish { alpha, beta } => (18, 0.0, alpha, beta),
+                    Activation::Exp => (19, 0.0, 1.0, 1.0),
                 };
                 pend.push(ew("activation", ew_words(mode, true, x, x, slope, ca, cb), x, x, out.len()));
             }
@@ -781,6 +791,32 @@ pub(crate) fn build(m: &NnModel, inputs: &[(&str, [u32; 3])], params: &[(&str, f
                     words,
                     src0: x.slot,
                     src1: x.slot,
+                    dst: out.slot,
+                    groups: (gx, gy, 1),
+                });
+            }
+            OpKind::Correlation(mode) => {
+                let (t, s) = (&ins[0], &ins[1]);
+                let words = Words::default()
+                    .u(matches!(mode, CorrelationMode::Depthwise) as u32)
+                    .u(out.len())
+                    .u(out.offset)
+                    .u(t.offset)
+                    .u(s.offset)
+                    .u(t.c)
+                    .u(t.h)
+                    .u(t.w)
+                    .u(s.h)
+                    .u(s.w)
+                    .u(out.h)
+                    .u(out.w);
+                let (gx, gy) = groups_1d(out.len(), 256);
+                pend.push(Pending {
+                    label: "correlation",
+                    kernel: Kernel::Fixed(Fixed::Correlation),
+                    words,
+                    src0: t.slot,
+                    src1: s.slot,
                     dst: out.slot,
                     groups: (gx, gy, 1),
                 });

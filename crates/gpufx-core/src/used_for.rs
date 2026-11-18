@@ -13,11 +13,13 @@ pub const AI_UPSCALE: &str = "gpufx_ai_upscale";
 pub const AI_FRAMERATE: &str = "gpufx_ai_framerate";
 /// Background removal: gpufx-nn `matting` models ([`crate::nn::FrameMatte`]).
 pub const AI_MATTING: &str = "gpufx_ai_matting";
+/// Object tracking: the two gpufx-nn `tracking` models of a tracker package ([`crate::nn::NanoTrack`]).
+pub const AI_TRACKING: &str = "gpufx_ai_tracking";
 /// The io.json `kind` each AI filter runs. Same table as `gpufx-nnconv` (`package::FILTERS`), which does not
 /// depend on this crate.
-const KINDS: &[(&str, &str)] = &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp"), (AI_MATTING, "matting")];
+const KINDS: &[(&str, &str)] = &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp"), (AI_MATTING, "matting"), (AI_TRACKING, "tracking")];
 /// Every filter name `used_for` may list.
-pub const FILTERS: &[&str] = &[GPUFX, AI_UPSCALE, AI_FRAMERATE, AI_MATTING];
+pub const FILTERS: &[&str] = &[GPUFX, AI_UPSCALE, AI_FRAMERATE, AI_MATTING, AI_TRACKING];
 
 /// Checks a `used_for` list: not empty, known filter names, no duplicates.
 pub(crate) fn validate(list: &[String]) -> Result<(), String> {

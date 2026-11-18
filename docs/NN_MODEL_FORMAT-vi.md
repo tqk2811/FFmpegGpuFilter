@@ -80,11 +80,13 @@ Layer hoặc tham số ncnn lạ thì converter báo lỗi, không bỏ qua.
 | `prelu` | `slope` (blob f32) | `x >= 0 ? x : slope[c] * x`; `slope.count` là số channel, hoặc 1 khi mọi channel dùng chung một slope |
 | `clip` | `min`, `max` | `clamp(x, min, max)` (Clip của ncnn; thiếu cận nào thì lấy giới hạn của f32) |
 | `pool` | `kind` (`max avg`), `global`, `kernel` [h,w], `stride` [h,w], `pad` [top,left,bottom,right], `count_include_pad` | `global`: max hoặc trung bình của từng mặt channel, ra `C x 1 x 1` (bỏ qua kernel, stride, pad). Còn lại là cửa sổ: kích thước ra như convolution dilation 1, cửa sổ chỉ tính các pixel nằm trong input (max bỏ qua phần pad; trung bình chia cho số pixel đó, hoặc cho `kh * kw` khi có `count_include_pad`); pad nhỏ hơn kernel |
+| `correlation` | `mode` (`pixelwise depthwise`) | input `[template, search]`, cả hai tính lúc chạy, cùng số channel. `pixelwise`: `out[i][y][x] = sum_c t[c][i] * s[c][y][x]`, mỗi pixel `i` của template (theo hàng) một channel ra, cỡ bằng search. `depthwise`: `out[c][y][x] = sum_{i,j} t[c][i][j] * s[c][y+i][x+j]`, cỡ `search - template + 1` (tracker Siamese) |
 | `instance_norm` | `channels`, `eps`, `gamma`, `beta` | mỗi channel `(x - mean) / sqrt(var + eps)` trên mặt của nó (phương sai lệch quanh mean), rồi `* gamma[c] + beta[c]` khi có cả hai blob f32 (có cả hai hoặc không có cái nào) |
 
 `activation` của conv là `null`, `{"type":"relu"}`, `{"type":"leaky_relu","slope":s}`, `{"type":"sigmoid"}`,
 `{"type":"clip","min":a,"max":b}`, `{"type":"hard_sigmoid","alpha":a,"beta":b}` hoặc
-`{"type":"hard_swish","alpha":a,"beta":b}`, áp sau khi cộng bias; op `activation` nhận cùng các type đó.
+`{"type":"hard_swish","alpha":a,"beta":b}` hoặc `{"type":"exp"}`, áp sau khi cộng bias; op `activation` nhận cùng
+các type đó.
 `leaky_relu(x) = x >= 0 ? x : s * x`, `hard_sigmoid(x) = clamp(a * x + b, 0, 1)`,
 `hard_swish(x) = x * hard_sigmoid(x)` (HardSigmoid / HardSwish của ncnn, mặc định `a = 0.2`, `b = 0.5`).
 
@@ -95,7 +97,10 @@ tính bằng f64); `InnerProduct` trên vector `C x 1 x 1` (output của `Poolin
 channel nhiều output thành mỗi output một op `slice` (`<layer>_<k>`); activation type 3 (clip) và 6 (hard swish)
 của convolution hoặc InnerProduct đổi sang các type trên; `4=-233` (padding SAME, pnnx ghi từ `auto_pad` của ONNX)
 chỉ nhận khi stride 1 và độ rộng kernel lẻ, lúc đó là pad đối xứng `(span - 1) / 2`. `Pooling` cần `pad_mode` 1
-(valid, pad tường minh) hoặc `global`, và không adaptive.
+(valid, pad tường minh) hoặc `global`, và không adaptive. Activation của một vector vẫn là vector. `UnaryOp`
+type 7 là activation `exp`. Correlation pixelwise theo cách pnnx ghi `torch.matmul` của feature đã làm phẳng,
+`Reshape(t, w = h * w, h = c) -> Permute(1)` và `Reshape(s, w = H * W, h = c)` vào `MatMul`, rồi `Reshape` 3D output
+của nó, thành một op `correlation` (`pixelwise`); tensor đã làm phẳng mà layer khác đọc thì lỗi.
 
 ### Tham số
 
@@ -202,6 +207,31 @@ Model `matting` (`packages/gpufx_ai_matting/*/io.json`, chạy bằng `FrameMatt
   (r8unorm, r16float hoặc r32float): kích thước model cho matte gốc, kích thước khung để tách nền khung.
 
 Tham chiếu CPU của các bước này là `frames::matte` (và `frames::resize_matte`) của gpufx-nnconv.
+
+### Tracking
+
+Package tracker (tên filter `gpufx_ai_tracking`, `NanoTrack` chạy) không phải một model: thư mục gốc có
+`tracker.json`, `LICENSE`, `README.md` và hai thư mục, mỗi thư mục một package thường (`model.json`,
+`weights.bin`, `io.json` kind `tracking`), là backbone và head của một tracker Siamese:
+
+```json
+{ "format": "gpufx-nn-tracker", "version": 1, "kind": "siamese", "backbone": "backbone", "head": "head",
+  "template_size": 127, "search_size": 255, "stride": 16, "channels": "bgr",
+  "context_amount": 0.5, "window_influence": 0.455, "penalty_k": 0.055, "size_rate": 0.37 }
+```
+
+- Backbone có một input và một output: ảnh cắt vuông, 3 channel trong [0, 255] theo thứ tự `channels`, ra
+  feature. Chạy ở `template_size` (một lần, khung của frame đầu thêm `context_amount * (w + h)` xung quanh, cạnh
+  `sqrt((w + ctx) * (h + ctx))`) và ở `search_size` (mỗi frame sau quanh khung trước, cạnh đó nhân
+  `search_size / template_size`). Ảnh cắt resize bilinear tâm half-pixel; pixel ngoài khung đọc màu trung bình
+  của khung.
+- Head nhận feature template và feature search (hai input theo thứ tự đó), ra map điểm lớp 2 channel (softmax,
+  channel 1 là vật) và map 4 channel khoảng cách từ mỗi ô tới cạnh trái, trên, phải, dưới của khung, tính bằng
+  pixel ảnh search; ô `(i, j)` nằm ở `((j - n / 2) * stride + search_size / 2, (i - n / 2) * stride + search_size / 2)`.
+- Khung mới là ô có `penalty * p * (1 - window_influence) + hann * window_influence` lớn nhất (SiamBAN:
+  `penalty = exp(-(r * s - 1) * penalty_k)`, `r`, `s` là độ đổi tỉ lệ và đổi cỡ có context, mỗi cái ít nhất 1);
+  tâm ô dời khung, cỡ ô kéo cỡ khung theo `size_rate * penalty * p`.
+- `scripts/convert-tracking-models.py` dựng package từ `packages/gpufx_ai_tracking/*/source.json`.
 
 ## Bundle (nhiều scale trong một package)
 
