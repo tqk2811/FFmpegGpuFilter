@@ -253,19 +253,32 @@ impl FaceDetector {
         let input = resize_input(img, scale, iw, ih, self.config.channels == "bgr");
         let maps = self.run_raw(&input, iw, ih)?;
         let boxes = self.decode_raw(&maps, iw, ih, score_threshold);
+        let (sx, sy) = frame_scale(w, h, scale, iw, ih);
         Ok(nms(boxes, nms_threshold)
             .into_iter()
-            .map(|b| FaceBox { x: b.x / scale, y: b.y / scale, w: b.w / scale, h: b.h / scale, score: b.score })
+            .map(|b| FaceBox { x: b.x * sx, y: b.y * sy, w: b.w * sx, h: b.h * sy, score: b.score })
             .collect())
     }
+}
+
+/// The size of a `w` x `h` frame scaled by `scale` inside an `iw` x `ih` input, as [`resize_input`] draws it.
+fn resized_size(w: u32, h: u32, scale: f32, iw: u32, ih: u32) -> (usize, usize) {
+    (((w as f32 * scale).round() as usize).clamp(1, iw as usize), ((h as f32 * scale).round() as usize).clamp(1, ih as usize))
+}
+
+/// Input pixels to frame pixels per axis: the frame fills the rounded size of [`resized_size`], not exactly
+/// `w * scale` by `h * scale`.
+fn frame_scale(w: u32, h: u32, scale: f32, iw: u32, ih: u32) -> (f32, f32) {
+    let (rw, rh) = resized_size(w, h, scale, iw, ih);
+    (w as f32 / rw as f32, h as f32 / rh as f32)
 }
 
 /// The model input of `img`: scaled by `scale` bilinearly (half-pixel centres, clamped to the frame), padded
 /// with zeros to `iw` x `ih`, planes in BGR (or RGB) order, values in [0, 255].
 fn resize_input(img: &Image, scale: f32, iw: u32, ih: u32, bgr: bool) -> Vec<f32> {
     let (w, h) = (img.width as usize, img.height as usize);
+    let (rw, rh) = resized_size(img.width, img.height, scale, iw, ih);
     let (iw, ih) = (iw as usize, ih as usize);
-    let (rw, rh) = (((w as f32 * scale).round() as usize).clamp(1, iw), ((h as f32 * scale).round() as usize).clamp(1, ih));
     let mut out = vec![0f32; 3 * iw * ih];
     let order: [usize; 3] = if bgr { [2, 1, 0] } else { [0, 1, 2] };
     let px = |x: usize, y: usize, c: usize| f32::from(img.data[y * img.stride as usize + x * 4 + c]);
@@ -302,6 +315,15 @@ mod tests {
         FaceConfig::parse(&serde_json::json!({"kind":"tracking","role":"face_detector","inputs":{"image":"in0"},"channels":"bgr",
             "input_size":640,"multiple":32,"heads":[{"stride":8,"cls":"a","obj":"b","bbox":"c"}],"score_threshold":0.6,"nms_threshold":0.3}))
         .unwrap()
+    }
+
+    #[test]
+    fn boxes_scale_back_per_axis_to_the_frame() {
+        // 1000 x 333 at 640: 640 x 213.12 rounds to 640 x 213, so the input's bottom edge is the frame's
+        let (scale, iw, ih) = input_layout(&config(), 1000, 333);
+        let (sx, sy) = frame_scale(1000, 333, scale, iw, ih);
+        assert!((640.0 * sx - 1000.0).abs() < 1e-3);
+        assert!((213.0 * sy - 333.0).abs() < 1e-3, "{sy} vs 1 / scale {}", 1.0 / scale);
     }
 
     #[test]
