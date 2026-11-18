@@ -30,9 +30,11 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
     // The pixelwise correlation of Siamese trackers as pnnx writes `torch.matmul` of flattened features:
     // `Reshape(t, w = h*w, h = c) -> Permute(0=1)` and `Reshape(s, w = H*W, h = c)` into `MatMul`, then
     // `Reshape(w = W, h = H, c = h*w)`. `flat` holds each 2D view: the 3D tensor it flattens and whether it is
-    // transposed; `correlations` the MatMul outputs, whose 3D reshape is the correlation output as it is.
-    let mut flat: HashMap<String, (String, bool)> = HashMap::new();
-    let mut correlations: HashSet<String> = HashSet::new();
+    // transposed, with its `w` and `h`; `correlations` the MatMul outputs with the flattened `w` of the template and
+    // of the search, whose 3D reshape is the correlation output as it is. The sizes must agree (same channels, the
+    // restore's `w * h` the search's `h * w` and its `c` the template's): anything else is refused.
+    let mut flat: HashMap<String, (String, bool, i64, i64)> = HashMap::new();
+    let mut correlations: HashMap<String, (i64, i64)> = HashMap::new();
 
     for layer in &layers {
         let ty = layer.ty.as_str();
@@ -80,12 +82,23 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 if !produced.insert(out.clone()) {
                     return Err(layer.err(format!("blob '{out}' is produced twice")));
                 }
-                if expr.is_none() && !vectors.contains(&src) && !correlations.contains(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? == -233 {
+                if expr.is_none() && !vectors.contains(&src) && !correlations.contains_key(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? == -233 {
                     // a 3D tensor flattened to 2D (`w = h * w`, `h = c`): only a correlation may read it
-                    flat.insert(out.clone(), (src.clone(), false));
+                    flat.insert(out.clone(), (src.clone(), false, int(0)?, int(1)?));
                     continue;
                 }
-                let restores = expr.is_none() && correlations.contains(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? > 0;
+                let restores = expr.is_none() && correlations.contains_key(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? > 0;
+                if restores {
+                    let (template_w, search_w) = correlations[&src];
+                    if int(0)? * int(1)? != search_w || int(2)? != template_w {
+                        return Err(layer.err(format!(
+                            "the correlation output {search_w} x {template_w} cannot be reshaped to w = {}, h = {}, c = {}",
+                            int(0)?,
+                            int(1)?,
+                            int(2)?
+                        )));
+                    }
+                }
                 if !restores && (!to_vector || !vectors.contains(&src)) {
                     return Err(layer.err(
                         "only a reshape of a C x 1 x 1 vector to w = 1, h = 1, or the flattening of a correlation, is supported",
@@ -98,7 +111,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 arity(layer, 1, 1)?;
                 layer.params.expect_only(&[0]).map_err(|e| layer.err(e))?;
                 let src = resolve(&aliases, &layer.inputs[0]);
-                let Some((base, false)) = flat.get(&src).cloned() else {
+                let Some((base, false, w, h)) = flat.get(&src).cloned() else {
                     return Err(layer.err("only the transpose of a flattened tensor (before a MatMul) is supported"));
                 };
                 if layer.params.int(0, 0).map_err(|e| layer.err(e))? != 1 {
@@ -108,7 +121,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 if !produced.insert(out.clone()) {
                     return Err(layer.err(format!("blob '{out}' is produced twice")));
                 }
-                flat.insert(out.clone(), (base, true));
+                flat.insert(out.clone(), (base, true, w, h));
                 continue;
             }
             "MatMul" => {
@@ -116,7 +129,7 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 layer.params.expect_only(&[0]).map_err(|e| layer.err(e))?;
                 let a = resolve(&aliases, &layer.inputs[0]);
                 let b = resolve(&aliases, &layer.inputs[1]);
-                let (Some((template, true)), Some((search, false))) = (flat.get(&a).cloned(), flat.get(&b).cloned()) else {
+                let (Some((template, true, template_w, template_c)), Some((search, false, search_w, search_c))) = (flat.get(&a).cloned(), flat.get(&b).cloned()) else {
                     return Err(layer.err(
                         "only MatMul(transposed flattened template, flattened search), a pixelwise correlation, is supported",
                     ));
@@ -127,7 +140,10 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 }
                 consumed.insert(template.clone());
                 consumed.insert(search.clone());
-                correlations.insert(out.clone());
+                if template_c != search_c {
+                    return Err(layer.err(format!("the template has {template_c} channels and the search {search_c}")));
+                }
+                correlations.insert(out.clone(), (template_w, search_w));
                 let params = OpParams::Correlation(CorrelationParams { mode: CorrelationMode::Pixelwise });
                 ops.push(Op::new(&layer.name, vec![template, search], out, params));
                 continue;
@@ -993,5 +1009,31 @@ Pooling ap 1 1 z out0 0=1 1=2 11=3 2=2 12=1 5=1
         // an unknown PReLU parameter still fails
         let bad = "7767517\n2 2\nInput in0 0 1 in0\nPReLU p 1 1 in0 out0 0=2 9=1\n";
         assert!(convert_ncnn(bad, &bin, "t").unwrap_err().0.contains("unsupported parameter"));
+    }
+
+    /// The correlation rewrite of a Siamese tracker head, and its size checks.
+    #[test]
+    fn rewrites_the_correlation_only_when_the_sizes_agree() {
+        let model = |search_c: i32, restore: &str| {
+            format!(
+                "7767517
+7 7
+Input t 0 1 t
+Input s 0 1 s
+Reshape rt 1 1 t tf 0=16 1=8
+Permute pt 1 1 tf tt 0=1
+                 Reshape rs 1 1 s sf 0=256 1={search_c}
+MatMul mm 2 1 tt sf m
+Reshape ro 1 1 m out0 {restore}
+"
+            )
+        };
+        let c = convert_ncnn(&model(8, "0=16 1=16 2=16"), &[], "t").unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&c.model).unwrap()).unwrap();
+        assert_eq!(v["ops"].as_array().unwrap().len(), 1);
+        assert_eq!(v["ops"][0]["op"], "correlation");
+        assert!(convert_ncnn(&model(4, "0=16 1=16 2=16"), &[], "t").unwrap_err().0.contains("channels"));
+        assert!(convert_ncnn(&model(8, "0=16 1=8 2=16"), &[], "t").unwrap_err().0.contains("cannot be reshaped"));
+        assert!(convert_ncnn(&model(8, "0=16 1=16 2=8"), &[], "t").unwrap_err().0.contains("cannot be reshaped"));
     }
 }

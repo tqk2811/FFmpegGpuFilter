@@ -293,6 +293,15 @@ impl NanoTrack {
         self.state
     }
 
+    /// Puts the tracker's box back to `rect` (kept from [`NanoTrack::rect`]), keeping the template: a caller that
+    /// deems a step of [`NanoTrack::update`] lost uses it so the next search starts where the object was last seen.
+    /// Does nothing before [`NanoTrack::init`].
+    pub fn set_rect(&mut self, rect: TrackRect) {
+        if self.state.is_some() {
+            self.state = Some(rect);
+        }
+    }
+
     /// Uploads `img` and returns its mean colour (the pad of the crops).
     fn upload(&mut self, img: &Image) -> Result<[f32; 3], Error> {
         let (w, h) = (img.width as usize, img.height as usize);
@@ -500,10 +509,11 @@ fn choose(cells: &[f32], rect: TrackRect, scale: f32, cfg: &TrackerConfig, fw: f
     let w = (x2 - x1) / scale * lr + rect.w * (1.0 - lr);
     let h = (y2 - y1) / scale * lr + rect.h * (1.0 - lr);
     let rect = TrackRect {
-        cx: (rect.cx + dx).clamp(0.0, fw - 1.0),
-        cy: (rect.cy + dy).clamp(0.0, fh - 1.0),
-        w: w.clamp(MIN_SIDE, fw),
-        h: h.clamp(MIN_SIDE, fh),
+        cx: (rect.cx + dx).clamp(0.0, (fw - 1.0).max(0.0)),
+        cy: (rect.cy + dy).clamp(0.0, (fh - 1.0).max(0.0)),
+        // a frame narrower than MIN_SIDE: the side is MIN_SIDE (`clamp` panics when min > max)
+        w: w.clamp(MIN_SIDE, fw.max(MIN_SIDE)),
+        h: h.clamp(MIN_SIDE, fh.max(MIN_SIDE)),
     };
     TrackFound { rect, score: c[2] }
 }
@@ -545,5 +555,8 @@ mod tests {
         assert!((f.rect.w - 40.0).abs() < 1e-4 && (f.rect.h - 20.0).abs() < 1e-4);
         let nan = vec![f32::NAN; 8];
         assert_eq!(choose(&nan, rect, scale, &c, 640.0, 360.0).score, 0.0, "no finite cell: the box stays");
+        // a frame smaller than MIN_SIDE does not panic
+        let tiny = choose(&cells, rect, scale, &c, 2.0, 0.5);
+        assert!(tiny.rect.w == MIN_SIDE && tiny.rect.h == MIN_SIDE && tiny.rect.cx <= 1.0 && tiny.rect.cy == 0.0, "{:?}", tiny.rect);
     }
 }
