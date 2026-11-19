@@ -25,7 +25,8 @@
 #   FFMPEG_FILTERS   all (default): every filter libavfilter builds without avcodec, avformat
 #                    and external libraries; keep: only gpufx and docker/keep-filters.txt.
 #   AVUTIL_IMAGE     image libavutil is rebuilt in with ffmpeg/patches (scripts/build-avutil.sh);
-#                    default ghcr.io/ffmpeg-builds/ffmpeg-builds/<target>-lgpl pinned by digest
+#                    default ghcr.io/tqk2811/ffmpeg-builds-<target>-lgpl pinned by digest, a copy of
+#                    the FFmpeg-Builds image (.github/workflows/mirror-avutil-image.yml)
 #                    (lgpl, N-128691-gcc583787bb only). Empty: the prebuilt libavutil is kept.
 #   AVUTIL_LIB       a libavutil built elsewhere by scripts/build-avutil.sh, used instead.
 #   REQUIRE_D3D      win64: 1 makes building without D3D12/D3D11 frames an error (CI).
@@ -123,14 +124,14 @@ cp -R "$WORK/$NAME/." "$OUT/"
 # prebuilt libavutil links (scripts/build-avutil.sh).
 if [ "$TARGET" = win64 ]; then
     AV_OLD=$(ls "$OUT"/bin/avutil-*.dll | head -n1)
-    AV_DIGEST=sha256:c810b6bd886c5a2c99e75b8f3c3aa769542f5363fb28558e18ba58f325e71230
+    AV_DIGEST=sha256:d19d8ab047f712ea434ea9d199635c971617ab6edae3016e07756d888e68eb31
 else
     AV_OLD=$(ls "$OUT"/lib/libavutil.so.*.*.* | head -n1)
-    AV_DIGEST=sha256:37398377102d11045ebddcac564b24426401476ff83423fbac33d751a4f37d98
+    AV_DIGEST=sha256:c78c9a74dc9e21189d8dc390eaeb1f64fb24dcd562bad3f23d391b1bd3f3acac
 fi
 AV_DEFAULT=
 [ "$LICENSE" = lgpl ] && [ "$VERSION" = N-128691-gcc583787bb ] &&
-    AV_DEFAULT=ghcr.io/ffmpeg-builds/ffmpeg-builds/$TARGET-lgpl@$AV_DIGEST
+    AV_DEFAULT=ghcr.io/tqk2811/ffmpeg-builds-$TARGET-lgpl@$AV_DIGEST
 AVUTIL_IMAGE=${AVUTIL_IMAGE-$AV_DEFAULT}
 [ -f "$AV_OLD" ] || { echo "no libavutil in the prebuilt $OUT" >&2; exit 1; }
 if [ -n "${AVUTIL_LIB:-}" ]; then
