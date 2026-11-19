@@ -214,12 +214,12 @@ impl ParamBlock {
     pub fn bytes(&self) -> Vec<u8> {
         let mut out = vec![0u8; self.size];
         for ((d, off), v) in self.defs.iter().zip(&self.offsets).zip(&self.values) {
-            for c in 0..d.kind.components() {
+            for (c, &x) in v.0.iter().enumerate().take(d.kind.components()) {
                 let at = off + c * 4;
                 let raw: [u8; 4] = match d.kind {
-                    ParamType::Int | ParamType::Enum => (v.0[c].round() as i32).to_le_bytes(),
-                    ParamType::Bool => ((v.0[c] != 0.0) as u32).to_le_bytes(),
-                    _ => (v.0[c] as f32).to_le_bytes(),
+                    ParamType::Int | ParamType::Enum => (x.round() as i32).to_le_bytes(),
+                    ParamType::Bool => ((x != 0.0) as u32).to_le_bytes(),
+                    _ => (x as f32).to_le_bytes(),
                 };
                 out[at..at + 4].copy_from_slice(&raw);
             }
