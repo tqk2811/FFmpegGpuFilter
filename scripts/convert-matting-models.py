@@ -28,7 +28,7 @@ source.json of a matting model:
                  after it; PP-HumanSeg's is fixed)
   "sha256_param", "sha256_bin"   the ncnn files this script made with the tool versions above; another
                  version may write other bytes (a warning, an error with --strict)
-  "sha256_zip"   the package zip of the published release (models-matting-v1); the editor checks
+  "sha256_zip"   the package zip of the published release (models-matting-v0.1.0); the editor checks
                  downloads against it. Update it with the release when the zip is rebuilt
 """
 import argparse

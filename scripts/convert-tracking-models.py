@@ -32,7 +32,7 @@ source.json of a tracker:
   "upstream"     [{"file", "url", "sha256"}]: the ONNX files
   "parts"        {"backbone": {"onnx", "inputshape"}, "head": {...}}: the pnnx input shapes of each part
   "sha256_param", "sha256_bin"   per part, the ncnn files this script made with the tool versions above
-  "sha256_zip"   the package zip of the published release (models-tracking-v1); the editor checks downloads
+  "sha256_zip"   the package zip of the published release (models-tracking-v0.1.0); the editor checks downloads
                  against it. Empty until the release exists
 
 source.json of a face detector (convert "yunet"): "upstream" (one ONNX), "cut" {"outputs"} (the ONNX tensors kept as
