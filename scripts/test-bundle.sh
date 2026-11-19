@@ -62,6 +62,10 @@ if [ ! -f "$CLIPS/straight.png" ]; then
 fi
 # Frame interpolation clips (gpufx_ai_framerate), made apart so older clip dirs get them too:
 # 12 fps testsrc2, and a cut from yellow to blue (both 12 fps, 0.5 s each).
+# Hald CLUT picture of level 8 (512x512), the second input of haldclut.
+if [ ! -f "$CLIPS/clut.png" ]; then
+    "${REF_FFMPEG:-ffmpeg}" -v error -y -f lavfi -i haldclutsrc=8 -frames:v 1 "$CLIPS/clut.png"
+fi
 if [ ! -f "$CLIPS/ai12.mkv" ] || [ ! -f "$CLIPS/aicut.mkv" ]; then
     REF=${REF_FFMPEG:-ffmpeg}
     "$REF" -v error -y -f lavfi -i testsrc2=s=160x96:r=12:d=1 -c:v ffv1 "$CLIPS/ai12.mkv"
@@ -70,12 +74,12 @@ if [ ! -f "$CLIPS/ai12.mkv" ] || [ ! -f "$CLIPS/aicut.mkv" ]; then
 fi
 [ "${TEST_CLIPS_ONLY:-0}" = 1 ] && exit 0
 A=$CLIPS/a.mkv B=$CLIPS/b.mkv C=$CLIPS/c.mkv D=$CLIPS/d.nut E=$CLIPS/e.mkv R=$CLIPS/resize.txt
-X=$CLIPS/premul.exr P=$CLIPS/straight.png
+X=$CLIPS/premul.exr P=$CLIPS/straight.png CLUT=$CLIPS/clut.png
 AI=$CLIPS/ai12.mkv AICUT=$CLIPS/aicut.mkv
 if command -v cygpath >/dev/null; then   # Git Bash on Windows: give ffmpeg.exe C:/ paths
     A=$(cygpath -m "$A") B=$(cygpath -m "$B") C=$(cygpath -m "$C") D=$(cygpath -m "$D")
     E=$(cygpath -m "$E") R=$(cygpath -m "$R") X=$(cygpath -m "$X") P=$(cygpath -m "$P")
-    AI=$(cygpath -m "$AI") AICUT=$(cygpath -m "$AICUT")
+    AI=$(cygpath -m "$AI") AICUT=$(cygpath -m "$AICUT") CLUT=$(cygpath -m "$CLUT")
 fi
 # No packages dir given: pack packages/gpufx and the models now, so the zips match the source.
 [ -n "${GPUFX_PACKAGES:-}" ] || "$ROOT/scripts/pack-packages.sh" --models -o "$ROOT/dist/packages/gpufx"
@@ -287,15 +291,17 @@ fi
 
 # Software inputs (uploaded by gpufx) and Vulkan frames; runs only with a Vulkan device.
 vulkan_tests() {
-# Two input transitions driven by `progress`.
-TRANSITIONS="wipe-transition crossfade slide-transition circle-reveal clock-wipe collapse expand dip-to-color dissolve pixelize-transition zoom-transition fade-grays blinds checkerboard push-box push-film photo-collection box-in sliding-bars spin-transition"
-# Every capcut effect is a two input transition too.
-for e in "$FX"/capcut/*.zip; do TRANSITIONS="$TRANSITIONS $(basename "$e" .zip)"; done
+# Two input transitions: every package with a `progress` parameter but fade (one input).
+TRANSITIONS=
+for e in $(find "$FX" -name '*.zip' | sort); do
+    [ "$(basename "$e" .zip)" = fade ] && continue
+    unzip -p "$e" manifest.json | grep -q '"name": *"progress"' && TRANSITIONS="$TRANSITIONS $(basename "$e" .zip)"
+done
 echo "single input effects (audio stream kept, GPU frames into the null muxer):"
 # Other effects with several inputs, name:number of inputs (every input the same clip).
-MULTI="blend:2 displace:3 masked-merge:3 masked-minmax:3 maskedclamp:3 maskedthreshold:2 threshold:4 varblur:2 xfade:2 xstack:4 zoom-canvas:2"
+MULTI="blend:2 displace:3 masked-merge:3 masked-minmax:3 maskedclamp:3 maskedthreshold:2 morpho:2 remap:3 threshold:4 varblur:2 xfade:2 xstack:4 zoom-canvas:2"
 for e in $(find "$FX" -name '*.zip' | sort); do
-    case " $TRANSITIONS $MULTI overlay fit hstack vstack luma-matte " in *" $(basename "$e" .zip) "* | *" $(basename "$e" .zip):"*) continue ;; esac
+    case " $TRANSITIONS $MULTI overlay fit hstack vstack luma-matte haldclut " in *" $(basename "$e" .zip) "* | *" $(basename "$e" .zip):"*) continue ;; esac
     # shellcheck disable=SC2086
     ok "$(basename "$e" .zip)" -i "$A" -vf "gpufx=graph=$e" $NULL
 done
@@ -306,6 +312,8 @@ for m in $MULTI; do
     # shellcheck disable=SC2086
     ok "${m%:*} ($n inputs)" $args -filter_complex "${pads}gpufx=graph='$pads$(fx "${m%:*}")'" -an $NULL
 done
+# shellcheck disable=SC2086
+ok "haldclut (2 inputs)" -i "$A" -i "$CLUT" -filter_complex "[0][1]gpufx=graph='$(fx haldclut)'" -an $NULL
 echo "two input effects:"
 for e in $TRANSITIONS; do
     # shellcheck disable=SC2086
