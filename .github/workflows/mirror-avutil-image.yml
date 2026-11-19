@@ -1,0 +1,43 @@
+name: Mirror avutil image
+
+# Copies the FFmpeg-Builds images that scripts/build-avutil.sh runs in
+# (ghcr.io/ffmpeg-builds/ffmpeg-builds/<target>-lgpl) to this repository's ghcr, because
+# upstream deletes old images and the digest pinned in scripts/build-prebuilt.sh then stops
+# resolving. Pin the digests this run prints.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: upstream tag to copy
+        default: latest
+  push:
+    branches-ignore: [main, master]
+    paths: ['.github/workflows/mirror-avutil-image.yml']
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copy images
+        env:
+          TAG: ${{ inputs.tag || 'latest' }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -eu
+          owner=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          day=$(date -u +%Y%m%d)
+          for target in linux64 win64; do
+            src=ghcr.io/ffmpeg-builds/ffmpeg-builds/$target-lgpl:$TAG
+            dst=ghcr.io/$owner/ffmpeg-builds-$target-lgpl
+            docker buildx imagetools create --tag "$dst:$day" --tag "$dst:latest" "$src"
+            digest=$(docker buildx imagetools inspect "$dst:$day" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            echo "$target: $dst@$digest" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
