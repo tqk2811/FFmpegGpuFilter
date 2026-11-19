@@ -157,17 +157,39 @@ enum Kind {
     Conv(ConvOp),
     Deconv(ConvOp),
     Activation(Act),
-    Binary { kind: BinKind, scalar: Option<f32> },
-    Eltwise { kind: EltKind, coeffs: Option<Vec<f32>> },
+    Binary {
+        kind: BinKind,
+        scalar: Option<f32>,
+    },
+    Eltwise {
+        kind: EltKind,
+        coeffs: Option<Vec<f32>>,
+    },
     Concat,
-    Slice { start: usize, end: Option<usize> },
-    Resize { mode: Mode, scale: Option<[f32; 2]>, size: Option<[usize; 2]>, align_corners: bool },
+    Slice {
+        start: usize,
+        end: Option<usize>,
+    },
+    Resize {
+        mode: Mode,
+        scale: Option<[f32; 2]>,
+        size: Option<[usize; 2]>,
+        align_corners: bool,
+    },
     PixelShuffle(usize),
     Warp,
-    Prelu { slope: Vec<f32> },
-    Clip { min: f32, max: f32 },
+    Prelu {
+        slope: Vec<f32>,
+    },
+    Clip {
+        min: f32,
+        max: f32,
+    },
     Pool(PoolOp),
-    InstanceNorm { eps: f32, affine: Option<(Vec<f32>, Vec<f32>)> },
+    InstanceNorm {
+        eps: f32,
+        affine: Option<(Vec<f32>, Vec<f32>)>,
+    },
 }
 
 #[derive(Clone, Debug)]

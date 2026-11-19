@@ -327,8 +327,8 @@ impl GpuContext {
         let mut ctx = Self::from_parts(device, queue, adapter.get_info(), cache_dir);
         let c = Arc::get_mut(&mut ctx).expect("new");
         // Only what the application enabled on its device can be used.
-        c.coop_f16 = coop_f16(adapter)
-            && c.device.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX | wgpu::Features::SHADER_F16);
+        c.coop_f16 =
+            coop_f16(adapter) && c.device.features().contains(wgpu::Features::EXPERIMENTAL_COOPERATIVE_MATRIX | wgpu::Features::SHADER_F16);
         c.plane_f16 = plane_f16(adapter, &c.device);
         #[cfg(windows)]
         if c.info.backend == wgpu::Backend::Dx12 {

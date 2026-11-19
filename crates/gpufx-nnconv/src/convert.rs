@@ -82,7 +82,13 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 if !produced.insert(out.clone()) {
                     return Err(layer.err(format!("blob '{out}' is produced twice")));
                 }
-                if expr.is_none() && !vectors.contains(&src) && !correlations.contains_key(&src) && int(0)? > 0 && int(1)? > 0 && int(2)? == -233 {
+                if expr.is_none()
+                    && !vectors.contains(&src)
+                    && !correlations.contains_key(&src)
+                    && int(0)? > 0
+                    && int(1)? > 0
+                    && int(2)? == -233
+                {
                     // a 3D tensor flattened to 2D (`w = h * w`, `h = c`): only a correlation may read it
                     flat.insert(out.clone(), (src.clone(), false, int(0)?, int(1)?));
                     continue;
@@ -100,9 +106,9 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                     }
                 }
                 if !restores && (!to_vector || !vectors.contains(&src)) {
-                    return Err(layer.err(
-                        "only a reshape of a C x 1 x 1 vector to w = 1, h = 1, or the flattening of a correlation, is supported",
-                    ));
+                    return Err(
+                        layer.err("only a reshape of a C x 1 x 1 vector to w = 1, h = 1, or the flattening of a correlation, is supported")
+                    );
                 }
                 aliases.insert(out.clone(), src.clone());
                 continue;
@@ -129,10 +135,12 @@ pub fn convert_ncnn(param: &str, bin: &[u8], name: &str) -> Result<Converted> {
                 layer.params.expect_only(&[0]).map_err(|e| layer.err(e))?;
                 let a = resolve(&aliases, &layer.inputs[0]);
                 let b = resolve(&aliases, &layer.inputs[1]);
-                let (Some((template, true, template_w, template_c)), Some((search, false, search_w, search_c))) = (flat.get(&a).cloned(), flat.get(&b).cloned()) else {
-                    return Err(layer.err(
-                        "only MatMul(transposed flattened template, flattened search), a pixelwise correlation, is supported",
-                    ));
+                let (Some((template, true, template_w, template_c)), Some((search, false, search_w, search_c))) =
+                    (flat.get(&a).cloned(), flat.get(&b).cloned())
+                else {
+                    return Err(
+                        layer.err("only MatMul(transposed flattened template, flattened search), a pixelwise correlation, is supported")
+                    );
                 };
                 let out = &layer.outputs[0];
                 if !produced.insert(out.clone()) {

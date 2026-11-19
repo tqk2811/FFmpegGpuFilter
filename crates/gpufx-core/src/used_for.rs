@@ -17,7 +17,8 @@ pub const AI_MATTING: &str = "gpufx_ai_matting";
 pub const AI_TRACKING: &str = "gpufx_ai_tracking";
 /// The io.json `kind` each AI filter runs. Same table as `gpufx-nnconv` (`package::FILTERS`), which does not
 /// depend on this crate.
-const KINDS: &[(&str, &str)] = &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp"), (AI_MATTING, "matting"), (AI_TRACKING, "tracking")];
+const KINDS: &[(&str, &str)] =
+    &[(AI_UPSCALE, "super_resolution"), (AI_FRAMERATE, "frame_interp"), (AI_MATTING, "matting"), (AI_TRACKING, "tracking")];
 /// Every filter name `used_for` may list.
 pub const FILTERS: &[&str] = &[GPUFX, AI_UPSCALE, AI_FRAMERATE, AI_MATTING, AI_TRACKING];
 

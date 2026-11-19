@@ -570,7 +570,8 @@ fn rgb_to_xyz(primaries: [[f64; 2]; 3]) -> [[f64; 3]; 3] {
 }
 
 fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
-    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
     let c = |r0: usize, c0: usize, r1: usize, c1: usize| m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0];
     [
         [c(1, 1, 2, 2) / det, -c(0, 1, 2, 2) / det, c(0, 1, 1, 2) / det],
@@ -591,7 +592,8 @@ fn the_bt2020_to_bt709_matrix_matches_the_primaries() {
     let bt2020 = rgb_to_xyz([[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]]);
     let bt709 = rgb_to_xyz([[0.640, 0.330], [0.300, 0.600], [0.150, 0.060]]);
     let to_709 = invert(bt709);
-    for (column, published) in [[1.6605, -0.1246, -0.0182], [-0.5876, 1.1329, -0.1006], [-0.0728, -0.0083, 1.1187]].into_iter().enumerate() {
+    for (column, published) in [[1.6605, -0.1246, -0.0182], [-0.5876, 1.1329, -0.1006], [-0.0728, -0.0083, 1.1187]].into_iter().enumerate()
+    {
         let mut primary = [0.0; 3];
         primary[column] = 1.0;
         let derived = mul_vec(to_709, mul_vec(bt2020, primary));
@@ -610,7 +612,8 @@ fn saturated_pq_highlights_keep_their_hue() {
     use gpufx_core::{hdr, Primaries, Transfer};
     let Some(ctx) = gpu() else { return };
     let mut fx = identity(&ctx, "highlight");
-    let color = ColorInfo { matrix: Matrix::Bt2020, transfer: Transfer::Pq, primaries: Primaries::Bt2020, peak_nits: 1000, ..Default::default() };
+    let color =
+        ColorInfo { matrix: Matrix::Bt2020, transfer: Transfer::Pq, primaries: Primaries::Bt2020, peak_nits: 1000, ..Default::default() };
     // BT.709 red and blue in BT.2020 linear light, scaled so the strongest channel is 1000 cd/m2.
     for (name, linear, strongest) in [("red", [0.6274, 0.0691, 0.0164], 0), ("blue", [0.0433, 0.0113, 0.8956], 2)] {
         let top = linear.iter().copied().fold(0.0, f64::max);
