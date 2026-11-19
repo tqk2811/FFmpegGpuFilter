@@ -10,13 +10,16 @@
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
 # filters the model is for) is passed to gpufx-nnconv --used-for. A flat source.json may name a
 # "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite. A source.json with "convert" (the
-# gpufx_ai_matting models, which have no ncnn release) is skipped: scripts/convert-matting-models.py builds it.
+# gpufx_ai_matting and gpufx_ai_tracking models, which have no ncnn release) is built by
+# scripts/convert-*-models.py; here its published zip is downloaded from the release
+# models-<filter without gpufx_ai_>-$modelsRelease and checked against "sha256_zip".
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Bin = '',
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Names
 )
 $ErrorActionPreference = 'Stop'
+$modelsRelease = 'v0.1.0'
 $ProgressPreference = 'SilentlyContinue'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $root 'packages/gpufx_ai_upscale'))) {
@@ -60,11 +63,14 @@ foreach ($name in $Names) {
     $mdir = $modelDirs[$name]
     if (-not $mdir) { throw "$name`: no packages/gpufx_ai_*/$name/source.json" }
     $srcFile = Join-Path $mdir 'source.json'
-    $out = Join-Path $root "build/packages/$(Split-Path -Leaf (Split-Path -Parent $mdir))"
+    $filter = Split-Path -Leaf (Split-Path -Parent $mdir)
+    $out = Join-Path $root "build/packages/$filter"
     $src = Get-Content -Raw $srcFile | ConvertFrom-Json
     if ($src.convert) {
-        # no ncnn release: exported from the upstream files by a Python script (torch, paddle, pnnx)
-        Write-Host "skip $name`: built by scripts/convert-matting-models.py"
+        # no ncnn release: exported by a Python script (torch, paddle, pnnx); take the published zip
+        New-Item -ItemType Directory -Force $out | Out-Null
+        $tag = "models-$($filter -replace '^gpufx_ai_', '')-$modelsRelease"
+        Get-Model "https://github.com/tqk2811/FFmpegGpuFilter/releases/download/$tag/$name.zip" $src.sha256_zip (Join-Path $out "$name.zip")
         continue
     }
     $dir = Join-Path $out $name

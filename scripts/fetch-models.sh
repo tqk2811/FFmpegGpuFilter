@@ -11,9 +11,12 @@
 # A flat source.json (url_param/url_bin/io.json) stays a single-model package. "used_for" (the FFmpeg
 # filters the model is for) is passed to gpufx-nnconv --used-for. A flat source.json may name a
 # "rewrite" (e.g. rife-v4-scale) passed to gpufx-nnconv --rewrite. A source.json with "convert" (the
-# gpufx_ai_matting models, which have no ncnn release) is skipped: scripts/convert-matting-models.py builds it.
+# gpufx_ai_matting and gpufx_ai_tracking models, which have no ncnn release) is built by
+# scripts/convert-*-models.py; here its published zip is downloaded from the release
+# models-<filter without gpufx_ai_>-$MODELS_RELEASE and checked against "sha256_zip".
 
 set -eu
+MODELS_RELEASE=v0.1.0
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 [ -d "$ROOT/packages/gpufx_ai_upscale" ] || git -C "$ROOT" submodule update --init packages
 BIN=
@@ -108,12 +111,14 @@ for name in "$@"; do
     mdir=$(model_dir "$name")
     [ -n "$mdir" ] || { echo "$name: no packages/gpufx_ai_*/$name/source.json" >&2; exit 1; }
     src=$mdir/source.json
+    filter=$(basename "$(dirname "$mdir")")
+    out=$ROOT/build/packages/$filter
     if [ -n "$(json_get "$src" convert)" ]; then
-        # no ncnn release: exported from the upstream files by a Python script (torch, paddle, pnnx)
-        echo "skip $name: built by scripts/convert-matting-models.py"
+        # no ncnn release: exported by a Python script (torch, paddle, pnnx); take the published zip
+        mkdir -p "$out"
+        fetch "https://github.com/tqk2811/FFmpegGpuFilter/releases/download/models-${filter#gpufx_ai_}-$MODELS_RELEASE/$name.zip"             "$(json_get "$src" sha256_zip)" "$out/$name.zip"
         continue
     fi
-    out=$ROOT/build/packages/$(basename "$(dirname "$mdir")")
     dir=$out/$name
     mkdir -p "$dir"
     used_for=$(json_list "$src" used_for)
